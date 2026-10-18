@@ -33,7 +33,7 @@ const state={
   precise:Object.create(null),
   effective:{low:20,high:16000},raf:0,lastStats:null,mathCore:null,wasmPromise:null,rebuildTimer:null,sine:null,loadToken:0,transportEpoch:0
 };
-const lab={mode:"live",speed:1,semitones:0,fftSize:2048,referenceWindows:8,processed:null,worker:null,job:0};
+const lab={mode:"live",speed:1,semitones:0,fftSize:2048,shortFftSize:512,referenceWindows:8,processed:null,worker:null,job:0};
 const labReady=()=>lab.mode!=="live"&&lab.processed?.model===lab.mode&&lab.processed?.speed===lab.speed&&lab.processed?.semitones===lab.semitones;
 
 // Continuous log bands around 20 Hz: 0..200 resolves 0.001..20 Hz,
@@ -1542,17 +1542,29 @@ document.documentElement.dataset.fwBoot="ready";
  * on demand, never claimed to be real-time or physically identifiable.
  */
 const labModel=$("#lab-model"),labSpeed=$("#lab-speed"),labPitch=$("#lab-pitch");
-const labFft=$("#lab-fft"),labWindows=$("#lab-windows"),labStatus=$("#lab-status");
+const labFft=$("#lab-fft"),labShortFft=$("#lab-short-fft"),labWindows=$("#lab-windows"),labStatus=$("#lab-status");
+const labDescriptions={
+  live:"音を細かな高さの成分に分けて、再生中に音程を補正します。長窓の設定のみ対応します。",
+  pv:"波形を短い区間で周波数に分け、つながりを保ちながら伸縮します。長く伸ばすとアタックがぼやけることがあります。",
+  wsola:"似た形の波形を探してつなぎ、再生時間を変えます。音の立ち上がりを残しやすい一方、つなぎ目が聞こえる場合があります。",
+  dual:"短窓で急な変化を、長窓で細かな音程を調べ、出力を組み合わせます。現在は音ごとの厳密な分離ではありません。",
+  am:"音量の揺れを一度分けて波形を伸縮し、後から揺れを戻します。音量のうねりを保つ狙いの実験方式です。"
+};
 function labStatusText(text){labStatus.textContent=text;}
 function labRefresh(){
   $("#lab-speed-output").textContent=lab.speed.toFixed(2)+"×";
   $("#lab-pitch-output").textContent=(lab.semitones>0?"+":"")+lab.semitones+" 半音";
   $("#lab-fft-output").textContent=String(lab.fftSize)+" samples";
+  $("#lab-short-fft-output").textContent=String(lab.shortFftSize)+" samples";
+  $("#lab-short-fft").disabled=lab.mode!=="dual";
+  $("#lab-model-description").textContent=labDescriptions[lab.mode];
   $("#lab-windows-output").textContent=String(lab.referenceWindows)+" 窓";
   $("#lab-windows").disabled=lab.mode==="live";
   $("#lab-window-note").textContent=lab.mode==="live"
-    ?"Rust方式は窓長のみ対応。参照窓数は他の4モデル用です。"
-    :"前後の波形を参照する窓数。増やすと初期処理の負荷が高まります。";
+    ?"長窓を調整できます。短窓と参照窓数はこの方式では利用しません。"
+    :lab.mode==="dual"
+      ?"短窓は音の立ち上がり、長窓は持続音を調べます。参照窓数は各区間の前後に含める音声量です。"
+      :"この方式は長窓で解析します。短窓は複合窓モデル専用です。参照窓数は前後に読み取る音声量です。";
   if(!state.player?.labStream)labStatusText(lab.mode==="live"
     ?"Rust/WASMの部分音処理 · 音源を選んで再生"
     :lab.mode.toUpperCase()+" · 自動先読み処理。計算ボタン不要・再生位置から開始");
@@ -1561,11 +1573,11 @@ function labInvalidate(){lab.job++;lab.worker?.terminate();lab.worker=null;lab.p
 async function labSettingsChanged(){
   const previous=lab.mode,currentTime=playPosition();
   const nextMode=labModel.value,nextSpeed=Number(labSpeed.value),nextSemi=Number(labPitch.value);
-  const nextFft=2**Number(labFft.value),nextWindows=Number(labWindows.value);
-  if(nextMode===lab.mode&&nextSpeed===lab.speed&&nextSemi===lab.semitones&&nextFft===lab.fftSize&&nextWindows===lab.referenceWindows)return;
+  const nextFft=2**Number(labFft.value),nextShortFft=2**Number(labShortFft.value),nextWindows=Number(labWindows.value);
+  if(nextMode===lab.mode&&nextSpeed===lab.speed&&nextSemi===lab.semitones&&nextFft===lab.fftSize&&nextShortFft===lab.shortFftSize&&nextWindows===lab.referenceWindows)return;
   liveFactors(nextSpeed,nextSemi);
   lab.mode=nextMode;lab.speed=nextSpeed;lab.semitones=nextSemi;
-  lab.fftSize=nextFft;lab.referenceWindows=nextWindows;
+  lab.fftSize=nextFft;lab.shortFftSize=nextShortFft;lab.referenceWindows=nextWindows;
   // Borrow the original Rust quality control, never silently pretend that
   // +/- context windows are part of Rust's existing DSP API.
   $("#quality").value=nextFft===1024?"eco":nextFft===2048?"standard":"high";
@@ -1586,14 +1598,15 @@ async function labSettingsChanged(){
   labRefresh();
   if(state.dry&&lab.mode==="live"&&!state.player)updateParams("lab");
 }
-[labModel,labSpeed,labPitch,labFft,labWindows].forEach(node=>node.addEventListener("change",()=>void labSettingsChanged()));
+[labModel,labSpeed,labPitch,labFft,labShortFft,labWindows].forEach(node=>node.addEventListener("change",()=>void labSettingsChanged()));
 function liveSliderValue(){
   $("#lab-speed-output").textContent=Number(labSpeed.value).toFixed(2)+"×";
   $("#lab-pitch-output").textContent=labPitch.value+" 半音";
   $("#lab-fft-output").textContent=String(2**Number(labFft.value))+" samples";
   $("#lab-windows-output").textContent=labWindows.value+" 窓";
+  $("#lab-short-fft-output").textContent=String(2**Number(labShortFft.value))+" samples";
 }
-[labSpeed,labPitch,labFft,labWindows].forEach(node=>node.addEventListener("input",liveSliderValue));
+[labSpeed,labPitch,labFft,labShortFft,labWindows].forEach(node=>node.addEventListener("input",liveSliderValue));
 async function startModelPlayback(offset=null){
   const where=clamp(offset??(state.player?playPosition():state.seek),0,Math.max(0,duration()-.001));
   if(state.player)await stop();
@@ -1609,7 +1622,7 @@ async function startModelPlayback(offset=null){
     const stream=createModelStream({
       ctx,sourceChannels:state.dry,sampleRate:state.decoded.sampleRate,
       speed:lab.speed,semitones:lab.semitones,model:lab.mode,
-      fftSize:lab.fftSize,referenceWindows:lab.referenceWindows,startSeconds:where,
+      fftSize:lab.fftSize,shortFftSize:lab.shortFftSize,referenceWindows:lab.referenceWindows,startSeconds:where,
       onStatus:text=>{if(state.player===player)labStatusText(text);},
       onStarted:at=>{
         if(state.player!==player)return;
