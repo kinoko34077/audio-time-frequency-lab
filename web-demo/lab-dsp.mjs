@@ -110,47 +110,70 @@ export function phaseVocoder(channels,stretch,outLen,fftSize=2048){
 // WSOLA: find each next waveform grain at sample precision around its
 // expected source-time position, then overlap-add. Both stereo channels share
 // one candidate offset to avoid relative-phase changes.
-export function wsola(channels,stretch,outLen,fftSize=1024){
+// Short-grain WSOLA with longer matching evidence and bounded trajectory.
+// IMPORTANT: `fftSize` remains the *actual synthesis window* (including 256).
+// The extra reference is evidence for finding a splice, not a silent clamp
+// of the user's window size. All channels use the same source offset.
+export function wsola(channels,stretch,outLen,fftSize=1024,sampleRate=48000){
  if(Math.abs(stretch-1)<1e-8)return channels.map(x=>fit(x,outLen));
  const L=channels[0].length,N=Math.min(fftSize,Math.max(256,Math.floor(L/2)));
  const hop=Math.max(32,N/4),overlap=N-hop,w=hann(N);
+ const analysisHop=hop/stretch;
  const search=Math.max(64,Math.min(Math.floor(N/2),384));
+ const reference=Math.max(overlap,Math.min(Math.round(sampleRate*.028),Math.max(N*3,overlap)));
  const output=channels.map(()=>new Float64Array(outLen+N));
  const weight=new Float64Array(outLen+N);
  let prev=-1;
- // Normalized stereo overlap score from the actual previous source grain.
- // Coarse-to-fine search avoids phase quantisation by a 4-sample candidate grid.
- function scoreAt(candidate,expected){
-  let dot=0,aa=0,bb=0;
-  for(let j=0;j<overlap;j+=4){
+ function comparison(candidate,expected,predicted,limit,step){
+  const refFrom=prev+hop;
+  if(refFrom>=L||candidate>=L)return -Infinity;
+  const available=Math.min(limit,L-refFrom,L-candidate);
+  if(available<overlap/2)return -Infinity;
+  let overlapDot=0,overlapA=0,overlapB=0,refDot=0,refA=0,refB=0;
+  for(let j=0;j<available;j+=step){
    for(let c=0;c<channels.length;c++){
-    const ch=channels[c],a=ch[prev+hop+j]||0,b=ch[candidate+j]||0;
-    dot+=a*b;aa+=a*a;bb+=b*b;
+    const ch=channels[c],x=ch[refFrom+j],y=ch[candidate+j];
+    if(j<overlap){
+      overlapDot+=x*y;overlapA+=x*x;overlapB+=y*y;
+    }
+    refDot+=x*y;refA+=x*x;refB+=y*y;
    }
   }
-  // Favour time geometry for equal/near-equal periodic candidates;
-  // otherwise WSOLA can repeatedly jump across whole wave cycles.
-  if(aa<1e-12||bb<1e-12)return -Math.abs(candidate-expected)*.03/search;
-  return dot/(Math.sqrt(aa*bb)+1e-12)-.05*Math.abs(candidate-expected)/search;
+  const overlapPower=Math.sqrt(overlapA*overlapB),refPower=Math.sqrt(refA*refB);
+  if(overlapPower<1e-11||refPower<1e-11){
+    return -.15*Math.abs(candidate-predicted)/Math.max(1,analysisHop);
+  }
+  // Both local splice similarity and a longer low-frequency reference must
+  // agree, but nearby repeated cycles must not cause large time-map jumps.
+  const overlapScore=overlapDot/(overlapPower+1e-12);
+  const longScore=refDot/(refPower+1e-12);
+  const deviation=Math.abs(candidate-predicted)/Math.max(1,analysisHop);
+  const expectedError=Math.abs(candidate-expected)/Math.max(1,search);
+  return .58*overlapScore+.42*longScore-.22*deviation-.045*expectedError;
  }
  for(let pos=0;pos<outLen;pos+=hop){
-  const expected=Math.min(Math.max(0,L-N),Math.max(0,Math.round(pos/stretch)));
-  let src=expected;
-  if(prev>=0&&expected<L-N){
-   const lo=Math.max(0,expected-search),hi=Math.min(L-N,expected+search);
-   let best=-Infinity,bestSrc=expected;
-   // Include the expected position and the interval endpoints.
-   const coarse=4;
-   for(let candidate=lo;candidate<=hi;candidate+=coarse){
-    const score=scoreAt(candidate,expected);
-    if(score>best){best=score;bestSrc=candidate;}
-   }
-   const exactLo=Math.max(lo,bestSrc-coarse),exactHi=Math.min(hi,bestSrc+coarse);
-   for(let candidate=exactLo;candidate<=exactHi;candidate++){
-    const score=scoreAt(candidate,expected);
-    if(score>best){best=score;bestSrc=candidate;}
-   }
-   src=bestSrc;
+  const ideal=Math.max(0,Math.min(L-N,Math.round(pos/stretch)));
+  let src=ideal;
+  if(prev>=0&&ideal<L-N){
+   const predicted=Math.max(0,Math.min(L-N,Math.round(prev+analysisHop)));
+   // Prevent repeated waveform periods from moving backwards / jumping
+   // unpredictably. The time-map advance, not spectral peak matching,
+   // defines the requested playback rate.
+   const radius=Math.max(4,Math.min(Math.floor(hop*.38),Math.round(Math.sqrt(N))));
+   const lo=Math.max(0,prev+1,ideal-search,predicted-radius);
+   const hi=Math.min(L-N,ideal+search,predicted+radius);
+   if(lo<=hi){
+    let best=-Infinity,bestSrc=predicted;
+    for(let candidate=lo;candidate<=hi;candidate+=4){
+     const score=comparison(candidate,ideal,predicted,reference,8);
+     if(score>best){best=score;bestSrc=candidate;}
+    }
+    for(let candidate=Math.max(lo,bestSrc-4);candidate<=Math.min(hi,bestSrc+4);candidate++){
+     const score=comparison(candidate,ideal,predicted,reference,2);
+     if(score>best){best=score;bestSrc=candidate;}
+    }
+    src=bestSrc;
+   }else src=Math.max(prev+1,ideal);
   }
   for(let j=0;j<N&&pos+j<weight.length;j++){
    const wi=w[j],index=pos+j;
@@ -160,7 +183,7 @@ export function wsola(channels,stretch,outLen,fftSize=1024){
   prev=src;
  }
  return output.map(ch=>Float32Array.from({length:outLen},(_,i)=>
-  weight[i]>1e-5?ch[i]/weight[i]:0));
+   weight[i]>1e-5?ch[i]/weight[i]:0));
 }
 // Dual-resolution onset processing. Long window stabilizes sustained
 // partials; short window anchors transient timing. The signals are locally
@@ -246,5 +269,5 @@ export function amVocoder(channels,stretch,len,sr,fftSize=2048){
  }
  return corrected;
 }
-export function renderPCM({channels,sampleRate,speed=1,semitones=0,model='pv',fftSize=2048,shortFftSize=512,longFftSize=fftSize}){if(!Array.isArray(channels)||!channels.length||channels.length>2||!channels[0]?.length)throw Error('有効なモノラル／ステレオ音声が必要です');if(!channels.every(x=>x.length===channels[0].length))throw Error('チャンネル長が一致しません');if(!Number.isFinite(sampleRate)||sampleRate<8000||sampleRate>192000)throw Error('非対応サンプリング周波数です');if(!Number.isFinite(speed)||speed<.5||speed>2||!Number.isFinite(semitones)||semitones<-12||semitones>12)throw Error('範囲外パラメータです');if(!MODELS.some(m=>m.id===model))throw Error('未知の解析モデルです');if(![1024,2048,4096,8192].includes(longFftSize)||![256,512,1024,2048].includes(shortFftSize)||(model==='dual'&&shortFftSize>=longFftSize))throw Error('短窓・長窓の設定が不正です');if(![1024,2048,4096].includes(fftSize))throw Error('窓長は1024/2048/4096サンプルにしてください');let len=Math.max(1,Math.round(channels[0].length/speed));if(len*channels.length>14000000)throw Error('処理結果が安全なメモリ上限を超えます');if(speed===1&&semitones===0)return {channels:channels.map(ch=>Float32Array.from(ch)),sampleRate};let p=Math.pow(2,semitones/12),stretch=p/speed,pitched=channels.map(ch=>resampleBandlimited(ch,p)),processed=model==='pv'?phaseVocoder(pitched,stretch,len,longFftSize):model==='wsola'?wsola(pitched,stretch,len,shortFftSize):model==='dual'?dualWindowVocoder(pitched,stretch,len,sampleRate,longFftSize,shortFftSize):amVocoder(pitched,stretch,len,sampleRate,longFftSize);for(let ch of processed)for(let i=0;i<ch.length;i++)if(!Number.isFinite(ch[i]))ch[i]=0;return {channels:processed,sampleRate};}
+export function renderPCM({channels,sampleRate,speed=1,semitones=0,model='pv',fftSize=2048,shortFftSize=512,longFftSize=fftSize}){if(!Array.isArray(channels)||!channels.length||channels.length>2||!channels[0]?.length)throw Error('有効なモノラル／ステレオ音声が必要です');if(!channels.every(x=>x.length===channels[0].length))throw Error('チャンネル長が一致しません');if(!Number.isFinite(sampleRate)||sampleRate<8000||sampleRate>192000)throw Error('非対応サンプリング周波数です');if(!Number.isFinite(speed)||speed<.5||speed>2||!Number.isFinite(semitones)||semitones<-12||semitones>12)throw Error('範囲外パラメータです');if(!MODELS.some(m=>m.id===model))throw Error('未知の解析モデルです');if(![1024,2048,4096,8192].includes(longFftSize)||![256,512,1024,2048].includes(shortFftSize)||(model==='dual'&&shortFftSize>=longFftSize))throw Error('短窓・長窓の設定が不正です');if(![1024,2048,4096].includes(fftSize))throw Error('窓長は1024/2048/4096サンプルにしてください');let len=Math.max(1,Math.round(channels[0].length/speed));if(len*channels.length>14000000)throw Error('処理結果が安全なメモリ上限を超えます');if(speed===1&&semitones===0)return {channels:channels.map(ch=>Float32Array.from(ch)),sampleRate};let p=Math.pow(2,semitones/12),stretch=p/speed,pitched=channels.map(ch=>resampleBandlimited(ch,p)),processed=model==='pv'?phaseVocoder(pitched,stretch,len,longFftSize):model==='wsola'?wsola(pitched,stretch,len,shortFftSize,sampleRate/p):model==='dual'?dualWindowVocoder(pitched,stretch,len,sampleRate,longFftSize,shortFftSize):amVocoder(pitched,stretch,len,sampleRate,longFftSize);for(let ch of processed)for(let i=0;i<ch.length;i++)if(!Number.isFinite(ch[i]))ch[i]=0;return {channels:processed,sampleRate};}
 export function wav16({channels,sampleRate}){let count=channels[0].length,nc=channels.length,total=count*nc;if(total>14000000)throw Error('書出しメモリ上限');let buf=new ArrayBuffer(44+total*2),v=new DataView(buf),tag=(p,s)=>{for(let i=0;i<s.length;i++)v.setUint8(p+i,s.charCodeAt(i));};tag(0,'RIFF');v.setUint32(4,36+total*2,true);tag(8,'WAVE');tag(12,'fmt ');v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,nc,true);v.setUint32(24,sampleRate,true);v.setUint32(28,sampleRate*nc*2,true);v.setUint16(32,nc*2,true);v.setUint16(34,16,true);tag(36,'data');v.setUint32(40,total*2,true);let offset=44;for(let i=0;i<count;i++)for(let c=0;c<nc;c++){let s=clamp(channels[c][i],-1,1);v.setInt16(offset,s<0?Math.round(s*32768):Math.round(s*32767),true);offset+=2;}return buf;}
