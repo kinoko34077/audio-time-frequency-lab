@@ -59,3 +59,32 @@ test('time stretch and independent pitch preserve close tones at adjacent previe
  assert.ok(a.raw.length===Math.round((a.plan.to-a.plan.from)/speed));
  assert.ok(p>1);
 });
+
+test('0.25Hz-spaced 440/440.25Hz hypotheses keep distinct continuous estimates with sufficient support',()=>{
+ const x=tone([[440,.2,.25],[440.25,.18,.9]],2.4);
+ const fit=detectClosePair({channels:[x],sampleRate:Fs,peakFrequency:440.12,maxSpan:1.25});
+ assert.ok(fit,'two tones .25Hz apart were lost');
+ assert.ok(Math.abs(fit.frequencies[0]-440)<.12,JSON.stringify(fit.frequencies));
+ assert.ok(Math.abs(fit.frequencies[1]-440.25)<.12,JSON.stringify(fit.frequencies));
+});
+test('end-to-end preview joint output follows absolute-time reference rather than shifting 440/441 beat',()=>{
+ const speed=.8,semi=3,p=2**(semi/12);
+ const partials=[[440,.18,.1],[441,.18,.7]],source=tone(partials,4);
+ for(const seconds of [0,1.5]){
+  const plan=planChunk({totalFrames:source.length,sampleRate:Fs,speed,startSeconds:seconds,
+   model:'period-joint',fftSize:2048,shortFftSize:512,longFftSize:2048,referenceWindows:8});
+  const raw=renderPCM({channels:[source.slice(plan.from,plan.to)],sampleRate:Fs,speed,semitones:semi,
+   model:'period-joint',sourceStartSeconds:plan.from/Fs}).channels[0];
+  const actual=raw.subarray(plan.outputStart,plan.outputStart+plan.coreFrames);
+  let err=0,energy=0;
+  const trim=Math.round(.04*Fs);
+  for(let i=trim;i<actual.length-trim;i++){
+   const t=plan.start/(Fs*speed)+i/Fs;
+   const ideal=partials.reduce((v,[f,amp,phase])=>v+amp*Math.cos(2*Math.PI*(f*p)*t+phase),0);
+   err+=(actual[i]-ideal)**2;energy+=ideal**2;
+  }
+  const relativeRmse=Math.sqrt(err/(energy+1e-10));
+  console.log('JOINT_CLOSE_PHASE_FIDELITY',JSON.stringify({startSeconds:seconds,relativeRmse}));
+  assert.ok(relativeRmse<.26,'output time/beat drift at '+seconds+'s: '+relativeRmse);
+ }
+});
