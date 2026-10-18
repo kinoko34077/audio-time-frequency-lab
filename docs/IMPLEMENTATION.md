@@ -13,7 +13,7 @@ Import any browser-supported WAV/MP3/etc. File size <=75 MiB and duration <=600 
 ## Models actually present
 - Phase Vocoder: STFT analysis and bin-phase accumulation with overlap-add. Frequency smearing/metallic artifacts can occur at transients.
 - WSOLA: wave similarity grain selection, shared grain positions for stereo. Time-domain clicks or wavering can occur at extreme changes.
-- AM Envelope × Phase Vocoder: experimental RMS-envelope separation, PV on normalized carrier, reapplication of stretched envelope. This is NOT general partial tracking, perfect AM inference or unique physical source identification. A full onset-aware, per-partial short/long-window model remains unimplemented in this slice.
+- Dual-window onset blend: short (512) / long (2048) STFT phase vocoder outputs, switching weight from short-term RMS onset detection; experimental, not per-partial uniquely identified short/long inversion.\n- AM Envelope × Phase Vocoder: experimental RMS-envelope separation, PV on normalized carrier, reapplication of stretched envelope. This is NOT general partial tracking, perfect AM inference or unique physical source identification. A full jointly optimized, per-partial short/long-window identification model remains unimplemented in this slice.
 - A bypass: always original file, independent of speed/pitch settings.
 
 Independent settings: pitch ratio p=2^(semitones/12); first resample to length approximately original/p, then stretch by p/s where s is requested playback speed. Target length approximately original/s. DSP model selector changes real implemented algorithm, not merely a label.
