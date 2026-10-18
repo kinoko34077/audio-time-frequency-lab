@@ -1,0 +1,14 @@
+[package]
+name = "fwengine-demo"
+version = "0.1.0"
+edition = "2021"
+description = "Small S1 contract fixture: independently replaceable Identity/Gain .fwengine WASM"
+[lib]
+crate-type = ["cdylib", "rlib"]
+[features]
+gain-half = []
+legacy-no-generic-mask = []
+[profile.release]
+opt-level = "s"
+lto = true
+panic = "abort"

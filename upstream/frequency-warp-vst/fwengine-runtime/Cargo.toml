@@ -1,0 +1,20 @@
+[package]
+name = "fwengine-runtime"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["rlib", "staticlib"]
+
+[dependencies]
+anyhow = "1.0"
+wasmi = "=2.0.0"
+fwengine-package = { path = "../fwengine-package" }
+sha2 = "0.10"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+wat = "1.228.0"
+frequency-warp-core = { path = "../core" }

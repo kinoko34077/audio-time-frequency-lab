@@ -1,0 +1,94 @@
+name: Windows VST3 S2 fixed shell and Steinberg Validator
+on:
+  pull_request:
+    paths: ['vst3/**','fwengine-runtime/**','fwengine-package/**','web-demo/stage-pages.mjs','.github/workflows/vst3-s2-windows.yml']
+  push:
+    branches: [main]
+    paths: ['vst3/**','web-demo/stage-pages.mjs','.github/workflows/vst3-s2-windows.yml']
+permissions:
+  contents: read
+jobs:
+  windows-x64:
+    runs-on: windows-2022
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch official Steinberg SDK with all recursive submodules
+        shell: bash
+        run: |
+          git clone --depth 1 --recurse-submodules --shallow-submodules https://github.com/steinbergmedia/vst3sdk.git _sdk/vst3sdk
+          git -C _sdk/vst3sdk rev-parse HEAD
+          test -f _sdk/vst3sdk/LICENSE.txt
+      - name: Restore pinned Microsoft WebView2 C++ SDK for optional native editor
+        shell: pwsh
+        run: |
+          nuget install Microsoft.Web.WebView2 -Version 1.0.4258.31 -OutputDirectory _deps -NonInteractive -ExcludeVersion
+          if (-not (Test-Path "_deps/Microsoft.Web.WebView2/build/native/include/WebView2.h")) { throw "WebView2 C++ header missing" }
+          if (-not (Test-Path "_deps/Microsoft.Web.WebView2/build/native/x64/WebView2LoaderStatic.lib")) { throw "WebView2 static loader missing" }
+      - name: Build native Rust Wasmi staticlib for real Windows plugin
+        shell: bash
+        run: |
+          cargo build --release --lib --manifest-path fwengine-runtime/Cargo.toml
+          test -f fwengine-runtime/target/release/fwengine_runtime.lib
+      - name: Build shared canonical Rust core WASM and validate full website graph
+        shell: bash
+        run: |
+          rustup target add wasm32-unknown-unknown
+          cargo build --manifest-path core/Cargo.toml --release --target wasm32-unknown-unknown
+          test -s core/target/wasm32-unknown-unknown/release/frequency_warp_core.wasm
+          node web-demo/stage-pages.mjs core/target/wasm32-unknown-unknown/release/frequency_warp_core.wasm
+          test -s _site/index.html
+          test -s _site/dsp_core.wasm
+          test -s _site/app.mjs
+          test -s _site/realtime.worklet.js
+      - name: Configure genuine VST3 Windows x64
+        shell: bash
+        run: |
+          cmake -S vst3 -B _build/vst3 -G "Visual Studio 17 2022" -A x64 \
+            -DFW_VST3_SDK_DIR="$GITHUB_WORKSPACE/_sdk/vst3sdk" \
+            -DFW_NATIVE_ARCHIVE="$GITHUB_WORKSPACE/fwengine-runtime/target/release/fwengine_runtime.lib" \
+            -DFW_WEBVIEW2_SDK_DIR="$GITHUB_WORKSPACE/_deps/Microsoft.Web.WebView2" \
+            -DFW_WEB_UI_ASSET_DIR="$GITHUB_WORKSPACE/_site" \
+            -DSMTG_CREATE_PLUGIN_LINK=OFF \
+            -DSMTG_RUN_VST_VALIDATOR=ON
+      - name: Build VST3 plugin with Steinberg Validator post-build
+        shell: bash
+        run: cmake --build _build/vst3 --config Release --target FrequencyWarpShell --parallel 2
+      - name: Run delay regression
+        shell: bash
+        run: |
+          cmake --build _build/vst3 --config Release --target fw_shell_delay_test --parallel 2
+          cmake --build _build/vst3 --config Release --target fw_shell_automation_test --parallel 2
+          cmake --build _build/vst3 --config Release --target fw_swap_mailbox_test --parallel 2
+          cmake --build _build/vst3 --config Release --target fw_swap_concurrency_test --parallel 2
+          cmake --build _build/vst3 --config Release --target fw_async_pcm_test --parallel 2
+          cmake --build _build/vst3 --config Release --target fw_verified_engine_history_test --parallel 2
+          cmake --build _build/vst3 --config Release --target fw_stream_host_events_test --parallel 2
+          cmake --build _build/vst3 --config Release --target fw_web_ui_message_test --parallel 2
+          cmake --build _build/vst3 --config Release --target fw_slot_binding_identity_test --parallel 2
+          ctest --test-dir _build/vst3 -C Release --output-on-failure
+      - name: Confirm native VST3 bundle exists without publishing
+        shell: pwsh
+        run: |
+          $files = @(Get-ChildItem "_build/vst3" -Recurse -Filter "FrequencyWarpShell.vst3")
+          if ($files.Count -lt 1) { throw "Built VST3 bundle not found" }
+          $files | Select-Object FullName
+          $ui = @(Get-ChildItem "_build/vst3" -Recurse -Filter "index.html" | Where-Object { $_.FullName -match "Resources" })
+          if ($ui.Count -lt 1) { throw "Replaceable Web UI index.html was not bundled" }
+          $bridge = @(Get-ChildItem "_build/vst3" -Recurse -Filter "host-bridge.mjs")
+          if ($bridge.Count -lt 1) { throw "VST3 host bridge module not bundled" }
+          $wasm = @(Get-ChildItem "_build/vst3" -Recurse -Filter "dsp_core.wasm" | Where-Object { $_.FullName -match "Resources" })
+          if ($wasm.Count -lt 1) { throw "Canonical Rust WASM missing from embedded VST3 UI" }
+          $coreHash = (Get-FileHash "core/target/wasm32-unknown-unknown/release/frequency_warp_core.wasm" -Algorithm SHA256).Hash
+          $bundledHash = (Get-FileHash $wasm[0].FullName -Algorithm SHA256).Hash
+          if ($coreHash -ne $bundledHash) { throw "Bundled UI wasm differs from built Rust core" }
+          # UI asset replacement must never modify the compiled VST3 executable.
+          $nativeDll = @(Get-ChildItem "_build/vst3" -Recurse -File | Where-Object { $_.Name -eq "FrequencyWarpShell.vst3" })
+          if ($nativeDll.Count -lt 1) { throw "Native shell binary unavailable for hash test" }
+          $originalShellHash = (Get-FileHash $nativeDll[0].FullName -Algorithm SHA256).Hash
+          $css = @(Get-ChildItem "_build/vst3" -Recurse -Filter "style.css" | Where-Object { $_.FullName -match "Resources" })
+          if ($css.Count -lt 1) { throw "Replaceable CSS asset missing" }
+          Add-Content -Path $css[0].FullName -Value "/* R0 independent UI update smoke */"
+          if ((Get-FileHash $nativeDll[0].FullName -Algorithm SHA256).Hash -ne $originalShellHash) {
+            throw "Native shell changed during CSS-only asset update"
+          }
