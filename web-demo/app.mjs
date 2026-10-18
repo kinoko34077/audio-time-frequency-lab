@@ -1,5 +1,5 @@
 import {QUALITY,mixWet} from "./dsp.mjs";
-import {liveFactors} from "./lab-contract.mjs";
+import {liveFactors,fullBandPartialOptions} from "./lab-contract.mjs";
 import {createModelStream} from "./lab-stream.mjs";
 import {frequencyFromSlider,sliderFromFrequency,holdFromFrequency,drawCrusherPreview} from "./crusher-visual.mjs";
 import {drawFrequencyGraph} from "./graph.mjs";
@@ -213,7 +213,7 @@ function settings(){
   if(lab.mode==="live"){
     const ratio=liveFactors(lab.speed,lab.semitones);
     Object.assign(value,{engine:3,rationalEnabled:true,pitchRatio:ratio.spectralRatio,shiftHz:0,
-      low:20,high:Math.min(20000,runtimeSampleRate*.45),
+      ...fullBandPartialOptions(runtimeSampleRate),
       curvature:1,invert:0,mode:"blend",outside:"pass",axisShift:0,axisReference:350,
       axisPivot:350,axisSlope:1,ringEnabled:false,wet:1});
     return value;
