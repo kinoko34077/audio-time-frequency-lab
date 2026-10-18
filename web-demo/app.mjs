@@ -513,12 +513,16 @@ async function context(){
   await state.ctx.resume();return state.ctx;
 }
 async function prepareCore(){
+  indicator("AudioContextを初期化中…");
   const ctx=await context();
+  indicator("AudioContext稼働中 · AudioWorkletの登録中…");
   if(!state.workletLoaded){
     await ctx.audioWorklet.addModule("./realtime.worklet.js");
     state.workletLoaded=true;
   }
+  indicator("AudioWorklet登録済み · Rust/WASMの準備中…");
   if(!state.module)await ensureSharedCore();
+  indicator("Rust/WASM準備完了 · DSP起動中…");
   return {ctx,module:state.module};
 }
 function makeBuffer(useLab=false){
