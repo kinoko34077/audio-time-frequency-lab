@@ -1,0 +1,74 @@
+name: Import full pinned Frequency Warp source snapshot
+on:
+  push:
+    branches: [feat/full-upstream-overlay]
+    paths:
+      - '.github/workflows/import-frequency-warp.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  import-exact-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout target development branch
+        uses: actions/checkout@v4
+        with:
+          path: target
+          ref: feat/full-upstream-overlay
+          fetch-depth: 1
+      - name: Checkout pinned complete upstream source
+        uses: actions/checkout@v4
+        with:
+          repository: kinoko34077/frequency-warp-vst
+          ref: e215a4c85e9ff88a856aba3fac25dc9de569febf
+          path: source
+          persist-credentials: false
+      - name: Copy and byte-verify EVERY tracked upstream file
+        env:
+          SOURCE_SHA: e215a4c85e9ff88a856aba3fac25dc9de569febf
+        run: |
+          set -euo pipefail
+          test "$(git -C source rev-parse HEAD)" = "$SOURCE_SHA"
+          mkdir -p target/upstream/frequency-warp-vst
+          git -C source ls-files -z | tar -C source --null -T - -cf - | tar -C target/upstream/frequency-warp-vst -xf -
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess
+          source=Path('source')
+          copied=Path('target/upstream/frequency-warp-vst')
+          tracked=subprocess.check_output(['git','-C','source','ls-files','-z']).split(b'\0')
+          names=[n.decode() for n in tracked if n]
+          assert names and len(names)>=190, len(names)
+          for name in names:
+              assert (source/name).read_bytes()==(copied/name).read_bytes(), name
+          present=sorted(str(p.relative_to(copied)) for p in copied.rglob('*') if p.is_file() or p.is_symlink())
+          assert present==sorted(names), (len(present),len(names))
+          print(f'PASS exact whole upstream tracked snapshot: {len(names)} files, bytes verified')
+          PY
+          cat >target/upstream/FREQUENCY_WARP_IMPORT.md <<'EOF'
+          # Exact source import
+          Source: https://github.com/kinoko34077/frequency-warp-vst
+          Pinned source commit: e215a4c85e9ff88a856aba3fac25dc9de569febf
+          Exact tracked source files are under `upstream/frequency-warp-vst/` with their original relative paths and unmodified bytes.
+          Repository Git history, PRs, issues, secrets and credentials are not copied. This is an immutable source snapshot, not a fork with GitHub history.
+          Original `.github/workflows` files are inert here because they remain within the prefixed source snapshot.
+          Lab-specific models/time/pitch and the working public site are retained outside the snapshot; actual realtime overlay integration is a separate implementation/validation stage.
+          EOF
+      - name: Commit imported snapshot to target feature branch
+        working-directory: target
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A upstream/
+          git diff --cached --stat | tail -12
+          if git diff --cached --quiet; then
+            echo 'No change: exact source snapshot already committed'
+          else
+            git commit -m 'chore: copy all pinned frequency-warp-vst tracked source files'
+            git push origin HEAD:refs/heads/feat/full-upstream-overlay
+          fi

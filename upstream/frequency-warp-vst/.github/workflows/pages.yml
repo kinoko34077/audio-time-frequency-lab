@@ -1,0 +1,81 @@
+name: Publish shared-DSP audio preview to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'core/**'
+      - 'web-demo/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: frequency-warp-preview-pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust WASM target
+        run: rustup target add wasm32-unknown-unknown
+      - name: Compile the same native DSP core to WASM
+        run: cargo build --manifest-path core/Cargo.toml --release --target wasm32-unknown-unknown
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Stage and validate the complete browser dependency graph
+        run: |
+          node --test web-demo/stage-pages.test.mjs
+          node web-demo/stage-pages.mjs core/target/wasm32-unknown-unknown/release/frequency_warp_core.wasm
+          test -s _site/dsp_core.wasm
+          test -s _site/engine-policy.mjs
+          test -s _site/export-policy.mjs
+          test -s _site/entry-controls.js
+          test -s _site/visual-editor-platform/ui.mjs
+          test -s _site/visual-editor-platform/export.mjs
+      - name: Configure GitHub Pages (requires existing Pages enablement)
+        uses: actions/configure-pages@v5
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    outputs:
+      page_url: ${{ steps.deployment.outputs.page_url }}
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy site
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+  verify-public-entry:
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install Chrome automation client
+        run: npm install --no-save --no-package-lock puppeteer-core@24
+      - name: Verify the actual published mobile settings and file chooser
+        env:
+          WARP_ENTRY_URL: ${{ needs.deploy.outputs.page_url }}
+        run: |
+          node --test web-demo/entry-smoke.test.mjs
+          test -n "$WARP_ENTRY_URL"
+          site="${WARP_ENTRY_URL%/}"
+          curl --fail --silent --show-error --location --max-time 25 "$site/visual-editor-platform/ui.mjs" -o /tmp/warp-live-editor.mjs
+          grep -q 'mountVisualEditor' /tmp/warp-live-editor.mjs

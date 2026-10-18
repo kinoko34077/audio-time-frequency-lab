@@ -1,0 +1,297 @@
+import {deriveHarmonics} from "./harmonics.mjs";
+import {defineParameter} from "./parameter-binding.mjs";
+import {mountFrequencyUnitField,mountParameterUnitField} from "./frequency-unit-field.mjs";
+import {prepareStreamSettings} from "./stream-parameter-contract.mjs";
+
+// The entire panel is a UI adapter. Spectral mapping and Fold frequency
+// resolve through core/src/lib.rs compiled to the shared Rust/WASM artifact.
+const $=id=>document.querySelector(id);
+const precision=()=>Number($("#decimal-digits")?.value||3);
+const fmt=value=>Number.isFinite(value)?Number(value.toFixed(precision())).toString():"—";
+const IDS=["fundamental","denominator","numerator","harmonic-index","pitch-ratio","carrier"];
+const integerFields=new Set(["denominator","numerator","harmonic-index"]);
+const preciseFields=new Map();
+let fundamentalUnitControl=null,carrierUnitControl=null,ratioUnitControl=null;
+const round3=v=>Math.round((v+Number.EPSILON)*1000)/1000;
+const read=id=>id==="fundamental"&&fundamentalUnitControl?fundamentalUnitControl.value:
+  id==="carrier"&&carrierUnitControl?carrierUnitControl.value:
+  id==="pitch-ratio"&&ratioUnitControl?ratioUnitControl.value:
+  preciseFields.has(id)?preciseFields.get(id):Number($("#"+id).value);
+const clamp=(v,min,max)=>Math.min(max,Math.max(min,v));
+const carrierHzFromSlider=step=>step<=0?0:Math.exp(Math.log(20000)*(step-1)/999);
+const sliderFromCarrierHz=hz=>hz<=0?0:1+999*Math.log(clamp(hz,1,20000))/Math.log(20000);
+// Match the existing pivot's piecewise octave rail, including the 0Hz
+// endpoint. A linked F maps its virtual H=rF/m onto that SAME rail.
+const harmonicRailFactors=()=>({
+  m:clamp(Math.round(Number($("#denominator")?.value)||4),1,64),
+  r:clamp(ratioUnitControl?.value||Number($("#pitch-ratio")?.value)||1,.25,4)
+});
+const commonHzToRail=hz=>hz<=0?0:hz<=20?
+  (1+199*Math.log(Math.max(.001,hz)/.001)/Math.log(20000))/1000:
+  Math.min(1,(200+800*Math.log(Math.min(20000,hz)/20)/Math.log(1000))/1000);
+const commonRailToHz=t=>t<=0?0:t<=.2?
+  .001*Math.exp(Math.log(20000)*(Math.max(.001,t*1000)-1)/199):
+  20*Math.exp(Math.log(1000)*(t*1000-200)/800);
+// Unlinked F's draggable rail ends at the actual audio range, rather than
+// sweeping 5.12 MHz and suggesting non-existent oversampling. High precise
+// values remain theoretical input only and receive explicit DSP feedback.
+const F_MIN_HZ=.001,F_MAX_HZ=5_120_000,F_AUDIO_RAIL_MAX=20_000;
+const fToUnlinkedRail=F=>Math.log(clamp(F,F_MIN_HZ,F_AUDIO_RAIL_MAX)/F_MIN_HZ)/
+  Math.log(F_AUDIO_RAIL_MAX/F_MIN_HZ);
+const fFromUnlinkedRail=t=>F_MIN_HZ*Math.exp(clamp(t,0,1)*Math.log(F_AUDIO_RAIL_MAX/F_MIN_HZ));
+
+// Global effect reset must restore ALL harmonic binding owners and their
+// integer companions. Otherwise the settings dialog says "reset" while the
+// engine still sees old F/c values and old OFF snap preferences.
+export function resetHarmonicControls(){
+  fundamentalUnitControl?.reset();
+  carrierUnitControl?.reset();
+  ratioUnitControl?.reset();
+  for(const [id,value] of Object.entries({
+    denominator:4,numerator:-3,"harmonic-index":1
+  })){
+    preciseFields.delete(id);
+    $("#"+id).value=String(value);
+    $("#"+id+"-range").value=String(value);
+  }
+}
+// Kept as a compatibility export for standalone ratio reset consumers.
+export function resetRatioUnit(){ratioUnitControl?.reset();}
+export function linkedCarrierRequested(){
+  return $("#carrier-link").checked;
+}
+export function harmonicParameters(){
+  const F=clamp(read("fundamental")||350,.001,5_120_000);
+  const m=clamp(Math.round(Number($("#denominator").value)||4),1,64);
+  const n=clamp(Math.round(Number($("#numerator").value)||0),-128,128);
+  const q=clamp(Math.round(Number($("#harmonic-index").value)||1),1,32);
+  const r=clamp(read("pitch-ratio")||1,.25,4);
+  const manualCarrier=clamp(read("carrier")||0,0,20000);
+  const foldMode=["fold-l","fold-h"].includes($("#mode").value);
+  return {F,m,n,q,r,c:linkedCarrierRequested()&&foldMode?-1:manualCarrier,
+    manualCarrier,linked:linkedCarrierRequested()&&foldMode};
+}
+function syncPair(id){
+  const number=$("#"+id),range=$("#"+id+"-range");
+  if(!number||!range)return;
+  const parsed=read(id);
+  if(Number.isFinite(parsed)){
+    const bounded=clamp(parsed,Number(number.min),Number(number.max));
+    range.value=String(id==="carrier"?Math.round(sliderFromCarrierHz(bounded)):bounded);
+  }
+}
+/** Solve the selected pivot invariant: direct P=F or harmonic P=H=rF/m.
+ * Silent DOM update: app.mjs owns the single render/parameter notification. */
+export function setFundamentalFromPivot(pivot,target="H"){
+  const {m,r}=harmonicParameters();
+  if(!Number.isFinite(pivot)||!["F","H"].includes(target))return null;
+  const desired=target==="F"?pivot:pivot*m/r;
+  const F=clamp(fundamentalUnitControl?desired:round3(desired),.001,5_120_000);
+  if(fundamentalUnitControl)fundamentalUnitControl.setCanonical(F);
+  else {preciseFields.set("fundamental",F);$("#fundamental").value=String(F);syncPair("fundamental");}
+  const H=r*F/m;
+  return {F,H,pivot:target==="F"?F:H,clamped:Math.abs((target==="F"?F:H)-pivot)>.001};
+}
+export function resolvedCarrierHz(foldPoint){
+  const p=harmonicParameters();
+  if(p.linked){
+    const v=foldPoint?.();
+    if(Number.isFinite(v))return v;
+  }
+  return p.manualCarrier;
+}
+export function renderHarmonicPanel(foldPoint,axisMarker,resolveSettings){
+  fundamentalUnitControl?.refresh();
+  carrierUnitControl?.refresh();
+  ratioUnitControl?.refresh();
+  const {F,m,n,q,r,manualCarrier,linked}=harmonicParameters();
+  const count=Number($("#harmonic-count").value)||5;
+  const z=deriveHarmonics(F,m,n,q,r,count);
+  const c=resolvedCarrierHz(foldPoint);
+  const movedH=axisMarker?.(z.H);
+  const moving=Number.isFinite(movedH)?fmt(movedH)+" Hz":"未算出";
+  const actual=resolveSettings?.();
+  const axis=actual?.curvature??Number($("#curvature").value);
+  const shift=actual?.axisShift??Number($("#axis-shift").value);
+  const axisName=axis===0?"対数／倍率":axis===1?"線形／一定Hz":"中間座標";
+  $("#math-axis-note").textContent="仮想基音： "+fmt(z.H)+" Hz → "+moving;
+  const variables=[
+    ["F · 元基音",fmt(F)+" Hz"],["r · ピッチ比",fmt(r)],
+    ["F′ · 基音",fmt(r*F)+" Hz"],["m · 間隔",String(m)],
+    ["n · 番号ずれ",String(n)],["q · 折返す倍音",String(q)],
+    ["H · 仮想基音",fmt(z.H)+" Hz"],["Δ · 番号移動",fmt(z.delta)+" Hz"],
+    ["S · 折返し量",fmt(z.foldShift)+" Hz"],["c · リング搬送波",fmt(c)+" Hz"]
+  ];
+  const populate=(id,rows)=>{
+    const node=$(id),fragment=document.createDocumentFragment();
+    for(const [name,value] of rows){
+      const dt=document.createElement("dt"),dd=document.createElement("dd");
+      dt.textContent=name;dd.textContent=value;
+      fragment.append(dt,dd);
+    }
+    node.replaceChildren(fragment);
+  };
+  populate("#math-variables",variables);
+  const pivot=actual?.axisPivot??(Number($("#axis-pivot-value").value)||0);
+  populate("#coordinate-details",[
+    ["起点",fmt(pivot)+" Hz"],
+    ["傾き",fmt(actual?.axisSlope??Number($("#axis-slope").value))+" 倍"],
+    ["対数移動倍率",fmt(Math.exp(shift))+" 倍"],
+    ["線形移動量",fmt(shift*r*F)+" Hz"],
+    ["反転率",fmt(100*(actual?.invert??Number($("#invert").value)))+" %"],
+    ["移動の尺度",axisName],
+    ["備考","移動0なら起点が固定。上下移動を指定すると起点も移動します。"]
+  ]);
+  const frag=document.createDocumentFragment();
+  for(const row of z.rows){
+    const tr=document.createElement("tr");
+    for(const value of [row.k,row.input,row.translated,row.reflected,row.number]){
+      const td=document.createElement("td");
+      td.textContent=fmt(value);tr.appendChild(td);
+    }
+    frag.appendChild(tr);
+  }
+  $("#harmonics-body").replaceChildren(frag);
+  const pivotHz=Number.isFinite(actual?.axisPivot)?actual.axisPivot:NaN;
+  $("#mini-fundamental").textContent="F "+fmt(F)+" / H "+fmt(z.H)+
+    " → "+moving+" / P "+fmt(pivotHz)+" Hz";
+  const audioNode=$("#harmonic-audio-status");
+  if(audioNode){
+    const checked=actual?prepareStreamSettings(actual):null;
+    const mode=actual?.rationalEnabled;
+    const text=!mode?"有理数シフトOFF：m・n・F・rの倍音配列は理論表示のみ。音声適用はH↔P＋音声適用をON":
+      checked&&!checked.ok?"音声へ未反映："+checked.message:
+      "有理数シフトON：Δ="+fmt(z.delta)+" HzをDSPへ要求（再生時のACKで反映確認）";
+    if(audioNode.textContent!==text)audioNode.textContent=text;
+    audioNode.dataset.applied=mode&&checked?.ok?"requested":mode?"invalid":"off";
+  }
+  $("#mini-harmonics").replaceChildren(...z.rows.slice(0,3).map(row=>{
+    const div=document.createElement("div");
+    const shifted=axisMarker?.(row.translated);
+    div.textContent=row.k+"： "+fmt(row.input)+" → "+fmt(Number.isFinite(shifted)?shifted:row.translated)+" Hz";
+    return div;
+  }));
+  $("#harmonic-table-title").textContent="第1〜"+count+"倍音の数値表を見る";
+  const checkbox=$("#carrier-link"),readout=$("#carrier-linked-value");
+  const valid=["fold-l","fold-h"].includes($("#mode").value);
+  // The visible unit icons replace the hidden select; lock the entire
+  // carrier editor as one logical control when Fold provides its frequency.
+  carrierUnitControl?.setDisabled(checkbox.checked&&valid);
+  if(!checkbox.checked){
+    readout.textContent="";
+  }else if(!valid){
+    readout.textContent="連動対象なし · 手動 "+fmt(manualCarrier)+" Hz";
+  }else{
+    const fold=foldPoint?.();
+    readout.textContent=Number.isFinite(fold)?
+      "連動 "+fmt(fold)+" Hz":
+      "連動先を確認中…";
+  }
+  return z;
+}
+export function attachHarmonicPanel(onChange,foldPoint,axisMarker,resolveSettings){
+  const respond=id=>{onChange(id);}; // single owner render/parameters; avoids double refresh and feedback loops
+  // F is now the one exact canonical number; the old independent
+  // preciseFields and number/range listeners must not also own it.
+  fundamentalUnitControl=mountFrequencyUnitField({
+    descriptor:defineParameter({
+      id:"fundamental",min:.001,max:5_120_000,defaultValue:350,
+      units:["hz","note","percent"],
+      rail:{
+        toPosition:value=>{
+          const {m,r}=harmonicRailFactors();
+          if(!$("#harmonic-pivot-link")?.checked)return fToUnlinkedRail(value);
+          // The displayed F slider and its percent unit must use the SAME
+          // selected physical P invariant as app.mjs: direct F or derived H.
+          return commonHzToRail($("#pivot-link-target")?.value==="F"?value:value*r/m);
+        },
+        fromPosition:t=>{
+          const {m,r}=harmonicRailFactors();
+          if(!$("#harmonic-pivot-link")?.checked)return fFromUnlinkedRail(t);
+          const pivotHz=commonRailToHz(t);
+          return $("#pivot-link-target")?.value==="F"?pivotHz:pivotHz*m/r;
+        }
+      },
+      digits:3,
+      snap:{unit:"note",mode:"step",step:1,thresholdPx:6,during:["slider"]}
+    }),
+    field:$("#fundamental"),select:$("#fundamental-unit"),
+    slider:$("#fundamental-range"),railRoot:$("#fundamental-range"),
+    getDigits:precision,initialValue:350,
+    onValueChange:()=>respond("fundamental")
+  });
+  $("#fundamental-range").addEventListener("input",()=>fundamentalUnitControl.fromSlider());
+  // Carrier has a distinct ZERO position; the positive legacy rail begins
+  // at 1Hz, and manual value is retained while Fold-link is active.
+  const carrierToRail=hz=>hz<=0?0:hz<=1?hz/1000:(1+999*Math.log(hz)/Math.log(20000))/1000;
+  const carrierFromRail=t=>t<=0?0:t<=.001?1000*t:Math.exp(Math.log(20000)*(t*1000-1)/999);
+  carrierUnitControl=mountFrequencyUnitField({
+    descriptor:defineParameter({
+      id:"carrier",min:0,max:20000,defaultValue:350,
+      units:["hz","note","percent"],
+      rail:{toPosition:carrierToRail,fromPosition:carrierFromRail},
+      digits:3,
+      snap:{unit:"note",mode:"step",step:1,thresholdPx:6,during:["slider"]}
+    }),
+    field:$("#carrier"),select:$("#carrier-unit"),
+    slider:$("#carrier-range"),railRoot:$("#carrier-range"),
+    getDigits:precision,initialValue:350,
+    onValueChange:()=>respond("carrier")
+  });
+  $("#carrier-range").addEventListener("input",()=>carrierUnitControl.fromSlider());
+  // Pitch ratio r is positive and dimensionless. Half-step/cent interval
+  // notation is meaningful here, unlike for the signed slope parameter.
+  ratioUnitControl=mountParameterUnitField({
+    descriptor:defineParameter({
+      id:"pitch-ratio",min:.25,max:4,defaultValue:1,
+      units:["ratio","semitones","cents","percent"],
+      rail:{toPosition:r=>(r-.25)/3.75,fromPosition:t=>.25+3.75*t},
+      digits:3,
+      snap:{unit:"semitones",mode:"step",step:1,thresholdPx:6,during:["slider"]}
+    }),
+    field:$("#pitch-ratio"),select:$("#pitch-ratio-unit"),
+    slider:$("#pitch-ratio-range"),
+    railRoot:$("#pitch-ratio-range"),getDigits:precision,initialValue:1,
+    onValueChange:()=>respond("pitch-ratio")
+  });
+  $("#pitch-ratio-range").addEventListener("input",()=>ratioUnitControl.fromSlider());
+  for(const id of IDS){
+    if(id==="fundamental"||id==="carrier"||id==="pitch-ratio")continue;
+    const number=$("#"+id),range=$("#"+id+"-range");
+    // Preserve direct typing for exact values while making typical changes
+    // a one-finger drag; invalid numbers are clamped on change.
+    range.addEventListener("input",()=>{
+      preciseFields.delete(id);
+      number.value=id==="carrier"?String(Math.round(carrierHzFromSlider(Number(range.value)))):range.value;
+      respond(id);
+    });
+    number.addEventListener("focus",()=>{
+      if(preciseFields.has(id))number.value=String(preciseFields.get(id));
+      number.select();
+    });
+    number.addEventListener("input",()=>{
+      if(number.value===""||!Number.isFinite(Number(number.value)))return;
+      const value=clamp(Number(number.value),Number(number.min),Number(number.max));
+      preciseFields.set(id,integerFields.has(id)?Math.round(value):round3(value));
+      syncPair(id);respond(id);
+    });
+    number.addEventListener("change",()=>{
+      const min=Number(number.min),max=Number(number.max);
+      const raw=Number(number.value);
+      const v=Number.isFinite(raw)&&number.value!==""?clamp(raw,min,max):Number(number.defaultValue);
+      const stored=integerFields.has(id)?Math.round(v):round3(v);
+      preciseFields.set(id,stored);
+      // A range is approximate; retain the exact typed 3-decimal value.
+      syncPair(id);respond(id);
+    });
+    number.addEventListener("blur",()=>{
+      const value=read(id);
+      if(Number.isFinite(value))number.value=integerFields.has(id)?
+        String(value):String(Number(value.toFixed(precision())));
+    });
+    syncPair(id);
+  }
+  $("#carrier-link").addEventListener("change",()=>respond("carrier-link"));
+  $("#harmonic-count").addEventListener("change",()=>renderHarmonicPanel(foldPoint,axisMarker,resolveSettings));
+  renderHarmonicPanel(foldPoint,axisMarker,resolveSettings);
+}

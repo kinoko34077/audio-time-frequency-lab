@@ -1,0 +1,22 @@
+[package]
+name = "fwengine-stream"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Single-file WASM v1 adapter over canonical frequency-warp-core::Stream"
+
+[lib]
+crate-type = ["cdylib"]
+
+[features]
+legacy-no-mask = [] # Regression fixture: pre-capability Stream archives
+legacy-fourteen-mask = [] # Regression fixture: previous 14-ID Stream archives
+
+[dependencies]
+frequency-warp-core = { path = "../core" }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
