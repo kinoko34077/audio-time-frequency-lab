@@ -35,7 +35,8 @@ try:
         page.get_by_text('読み込み完了。再生できます。',exact=False).wait_for(timeout=25000)
         page.locator('#lab-speed').evaluate("(e)=>{e.value='0.5';e.dispatchEvent(new Event('change',{bubbles:true}));}")
         page.locator('#lab-pitch').evaluate("(e)=>{e.value='3';e.dispatchEvent(new Event('change',{bubbles:true}));}")
-        page.locator('#lab-fft').evaluate("(e)=>{e.value='10';e.dispatchEvent(new Event('change',{bubbles:true}));}")
+        page.locator('#lab-short').evaluate("(e)=>{e.value='8';e.dispatchEvent(new Event('change',{bubbles:true}));}")
+        page.locator('#lab-long').evaluate("(e)=>{e.value='10';e.dispatchEvent(new Event('change',{bubbles:true}));}")
         page.locator('#lab-windows').evaluate("(e)=>{e.value='2';e.dispatchEvent(new Event('change',{bubbles:true}));}")
         for model in ('pv','wsola','dual','am'):
             page.locator('#lab-model').select_option(model)

@@ -44,12 +44,20 @@ try:
       assert not page.locator(".workspace-right").is_visible()
       assert not page.locator("#settings-open").is_visible()
       assert page.locator("#lab-render").count()==0
-      page.locator("#lab-fft").evaluate("(e)=>{e.value='10';e.dispatchEvent(new Event('change',{bubbles:true}));}")
+      page.locator("#lab-short").evaluate("(e)=>{e.value='8';e.dispatchEvent(new Event('change',{bubbles:true}));}")
+      page.locator("#lab-long").evaluate("(e)=>{e.value='10';e.dispatchEvent(new Event('change',{bubbles:true}));}")
       page.locator("#lab-windows").evaluate("(e)=>{e.value='2';e.dispatchEvent(new Event('change',{bubbles:true}));}")
       page.locator("#lab-model").select_option("wsola")
       page.locator("#play-wet").click()
       page.locator("#rt-indicator").get_by_text("モデル再生中",exact=False).wait_for(timeout=25000)
-      assert page.locator("#lab-fft-output").inner_text()=="1024 samples"
+      assert page.locator("#lab-short-output").inner_text()=="256 samples"
+      assert page.locator("#lab-long-output").inner_text()=="1024 samples"
+      assert '似た形の波形' in page.locator('#lab-model-description').inner_text()
+      page.locator('#lab-model').select_option('dual')
+      assert page.locator('#lab-short').is_enabled()
+      assert page.locator('#lab-long').is_enabled()
+      assert '短窓で音の始まり' in page.locator('#lab-model-description').inner_text()
+      page.locator('#lab-model').select_option('wsola')
       assert page.locator("#lab-windows-output").inner_text()=="2 窓"
       page.locator("#stop").click()
       page.locator("#play-dry").click()
