@@ -31,7 +31,7 @@ try:
       assert page.locator("#lab-model").input_value()=="live"
       page.locator("#play-wet").click()
       try:
-        page.get_by_text("リアルタイム音声処理中",exact=False).wait_for(timeout=16000)
+        page.locator("#rt-indicator").get_by_text("稼働中 · Rust/WASM AudioWorklet",exact=False).wait_for(timeout=16000)
       except Exception:
         print("REALTIME DEBUG:",page.evaluate("""() => ({
           status:document.querySelector('#status')?.textContent,
