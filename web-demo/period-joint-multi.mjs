@@ -3,6 +3,7 @@
 // All observation windows fit the SAME oscillator unknowns for each candidate;
 // no waveforms synthesized by different windows are mixed.
 import {PERIOD_K,WINDOW_COUNT,theoreticalWindow,sampleInterval} from './period-joint.mjs';
+import {detectClosePair,transportSourcePhase} from './period-joint-close.mjs';
 const TAU=2*Math.PI;
 const MAX_PARTIALS=6;
 function fft(re,im){
@@ -142,6 +143,15 @@ export function estimateSharedPartials({channels,sampleRate,K=PERIOD_K,maxPartia
  const partials=[];
  let baseEnergy=0;for(const ch of channels)for(let i=0;i<L;i+=4)baseEnergy+=ch[i]*ch[i];
  if(baseEnergy<1e-10)return {partials:[],residual,explained:1,windows:WINDOW_COUNT,candidates:0};
+ // Resolve a bounded close-frequency hypothesis BEFORE greedy residual
+ // peeling. FFT-bin peak de-dup can hide 440Hz + 441Hz as one source.
+ // Do not force frequency fractions or align samples at disparate times.
+ if(candidates.length){
+  const close=detectClosePair({channels,sampleRate,peakFrequency:candidates[0].frequency});
+  if(close){
+   for(const p of close.partials){partials.push(p);addComponent(residual,p,sampleRate,-1);}
+  }
+ }
  for(const c of candidates){
   if(partials.length>=maxPartials)break;
   const guide=residual.reduce((best,ch)=>{
@@ -194,7 +204,7 @@ export function renderJointAudio({channels,sampleRate,speed=1,semitones=0,source
    const {a,b}=partial.coefficients[c],amp=Math.hypot(a,b);
    if(amp<1e-8)continue;
    const localPhase=Math.atan2(-b,a);
-   const globalPhase=localPhase-TAU*partial.frequency*sourceStartSeconds;
+   const globalPhase=transportSourcePhase(localPhase,partial.frequency,sourceStartSeconds,0);
    for(let i=0;i<frames;i++){
     out[c][i]+=amp*Math.cos(globalPhase+TAU*outF*(absoluteOutputStart+i/sampleRate));
    }
