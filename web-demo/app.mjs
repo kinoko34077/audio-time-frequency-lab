@@ -1573,7 +1573,11 @@ function labInvalidate(){lab.job++;lab.worker?.terminate();lab.worker=null;lab.p
 async function labSettingsChanged(){
   const previous=lab.mode,currentTime=playPosition();
   const nextMode=labModel.value,nextSpeed=Number(labSpeed.value),nextSemi=Number(labPitch.value);
-  const nextFft=2**Number(labFft.value),nextShortFft=2**Number(labShortFft.value),nextWindows=Number(labWindows.value);
+  const nextFft=2**Number(labFft.value),nextWindows=Number(labWindows.value);
+  let nextShortFft=2**Number(labShortFft.value);
+  // A "short" window must remain strictly shorter than the long one.
+  // Clamp the UI rather than leaving a configuration that causes DSP errors.
+  if(nextShortFft>=nextFft){nextShortFft=nextFft/2;labShortFft.value=String(Math.log2(nextShortFft));}
   if(nextMode===lab.mode&&nextSpeed===lab.speed&&nextSemi===lab.semitones&&nextFft===lab.fftSize&&nextShortFft===lab.shortFftSize&&nextWindows===lab.referenceWindows)return;
   liveFactors(nextSpeed,nextSemi);
   lab.mode=nextMode;lab.speed=nextSpeed;lab.semitones=nextSemi;
