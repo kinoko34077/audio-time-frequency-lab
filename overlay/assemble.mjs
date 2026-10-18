@@ -53,7 +53,7 @@ await writeFile(join(scratch,"index.html"),html);
 let app=await readFile(join(scratch,"app.mjs"),"utf8");
 app=replaceExactly(app,'function playPosition(){','function playPosition(){\n  if(window.__audioLabSourceTime)return window.__audioLabSourceTime();',"live source position");
 app=replaceExactly(app,'function seek(seconds){','function seek(seconds){\n  if(window.__audioLabSeek?.(seconds)){state.seek=seconds;refreshStatusSeek();return;}',"host seek");
-app=replaceExactly(app,'    state.seek=frac*duration();\n    if(state.player){','    state.seek=frac*duration();\n    if(window.__audioLabSeek?.(state.seek)){refreshStatusSeek();return;}\n    if(state.player){',"waveform seek");
+app=replaceExactly(app,'  state.seek=frac*duration();\n  if(state.player){','    state.seek=frac*duration();\n    if(window.__audioLabSeek?.(state.seek)){refreshStatusSeek();return;}\n    if(state.player){',"waveform seek");
 app=replaceExactly(app,'async function play(mode="wet",offset=null){','async function play(mode="wet",offset=null){\n  if(window.__audioLabSourceTime && offset===null)state.seek=window.__audioLabSourceTime();\n  window.__audioLabStopOverlay?.();',"upstream player takeover");
 app=replaceExactly(app,'function stop(){','function stop(){\n  window.__audioLabStopOverlay?.();',"upstream stop takeover");
 app=replaceExactly(app,'    message("読み込み完了。再生できます。");','    message("読み込み完了。再生できます。");\n    window.dispatchEvent(new Event("audio-lab-source-change"));',"reused input lifecycle");
