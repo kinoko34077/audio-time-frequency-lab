@@ -57,7 +57,7 @@ try:
       page.locator("#rt-indicator").get_by_text("モデル再生中",exact=False).wait_for(timeout=25000)
       assert page.locator("#lab-short-output").inner_text()=="2048 samples"
       assert page.locator("#lab-long-output").inner_text()=="1024 samples"
-      assert '似た形の波形' in page.locator('#lab-model-description').inner_text()
+      assert '波形が自然につながる位置' in page.locator('#lab-model-description').inner_text()
       page.locator('#lab-model').select_option('dual')
       assert page.locator('#lab-short').is_enabled()
       assert page.locator('#lab-long').is_enabled()
