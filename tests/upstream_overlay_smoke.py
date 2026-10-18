@@ -48,9 +48,14 @@ try:
       page.locator("#lab-long").evaluate("(e)=>{e.value='10';e.dispatchEvent(new Event('change',{bubbles:true}));}")
       page.locator("#lab-windows").evaluate("(e)=>{e.value='2';e.dispatchEvent(new Event('change',{bubbles:true}));}")
       page.locator("#lab-model").select_option("wsola")
+      # Long window is disabled in WSOLA and must not silently constrain short.
+      assert page.locator("#lab-long").is_disabled()
+      page.locator("#lab-short").evaluate("(e)=>{e.value='11';e.dispatchEvent(new Event('change',{bubbles:true}));}")
+      assert page.locator("#lab-short-output").inner_text()=="2048 samples"
+      assert page.locator("#lab-long-output").inner_text()=="1024 samples"
       page.locator("#play-wet").click()
       page.locator("#rt-indicator").get_by_text("モデル再生中",exact=False).wait_for(timeout=25000)
-      assert page.locator("#lab-short-output").inner_text()=="256 samples"
+      assert page.locator("#lab-short-output").inner_text()=="2048 samples"
       assert page.locator("#lab-long-output").inner_text()=="1024 samples"
       assert '似た形の波形' in page.locator('#lab-model-description').inner_text()
       page.locator('#lab-model').select_option('dual')
