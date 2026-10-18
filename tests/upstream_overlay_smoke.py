@@ -30,7 +30,17 @@ try:
       page.locator("#lab-pitch").evaluate("(e)=>{e.value='5';e.dispatchEvent(new Event('change',{bubbles:true}));}")
       assert page.locator("#lab-model").input_value()=="live"
       page.locator("#play-wet").click()
-      page.get_by_text("リアルタイム音声処理中",exact=False).wait_for(timeout=26000)
+      try:
+        page.get_by_text("リアルタイム音声処理中",exact=False).wait_for(timeout=16000)
+      except Exception:
+        print("REALTIME DEBUG:",page.evaluate("""() => ({
+          status:document.querySelector('#status')?.textContent,
+          indicator:document.querySelector('#rt-indicator')?.textContent,
+          lab:document.querySelector('#lab-status')?.textContent,
+          audioReady:!document.querySelector('#play-wet')?.disabled,
+          fileMeta:document.querySelector('#file-meta')?.textContent
+        })"""),"JSERRORS:",failures,flush=True)
+        raise
       page.locator("#stop").click()
       page.locator("#lab-model").select_option("wsola")
       page.locator("#lab-render").click()
