@@ -68,3 +68,15 @@ test('processor dispatch forwards absolute source origin only for opt-in model',
  const b=renderPeriodJointTone({channels:[signal],sampleRate:sr,sourceStartSeconds:1});
  assert.ok(a.channels[0].every((v,i)=>Math.abs(v-b.channels[0][i])<1e-8));
 });
+
+test('strong transient outside seven observation supports is rejected by full-waveform verification',()=>{
+ const duration=sr,carrier=tone(440.4);
+ const altered=Float32Array.from(carrier,(v,i)=>{
+  const t=i/sr;
+  return t>.265&&t<.305?v+.85:v;
+ });
+ const result=estimateJointTone({channels:[altered],sampleRate:sr});
+ assert.ok(result.explained>.97,'window-only view should miss this transient');
+ assert.ok(result.fullExplained<.90,'whole waveform should reveal excluded transient');
+ assert.throws(()=>renderPeriodJointTone({channels:[altered],sampleRate:sr,speed:.8}),/未対応/);
+});

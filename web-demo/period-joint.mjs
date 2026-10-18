@@ -76,8 +76,22 @@ export function estimateJointTone({channels,sampleRate,K=PERIOD_K}){
  const fine=search(guide,sampleRate,centers,K,Math.max(80,medium.frequency-1),Math.min(high,medium.frequency+1),.1);
  const exact=search(guide,sampleRate,centers,K,Math.max(80,fine.frequency-.12),Math.min(high,fine.frequency+.12),.01);
  const coefficients=channels.map(ch=>weightedFit(ch,sampleRate,exact.frequency,centers,K));
+ // Held-out-in-time verification: the seven short observations are NOT the
+ // whole waveform. A strong attack/noise between observation centers must
+ // not be silently erased by an apparently excellent window-only fit.
+ let fullExplained=0;
+ for(let c=0;c<channels.length;c++){
+  const ch=channels[c],{a,b}=coefficients[c];let energy=0,error=0;
+  for(let i=0;i<ch.length;i++){
+   const t=i/sampleRate,y=ch[i],phase=TAU*exact.frequency*t;
+   const residual=y-a*Math.cos(phase)-b*Math.sin(phase);
+   energy+=y*y;error+=residual*residual;
+  }
+  fullExplained+=energy>1e-12?Math.max(0,1-error/energy):1;
+ }
+ fullExplained/=channels.length;
  return {frequency:exact.frequency,referenceHz:integerReferenceHz(exact.frequency),
-  explained:coefficients.reduce((sum,c)=>sum+c.explained,0)/coefficients.length,
+  explained:coefficients.reduce((sum,c)=>sum+c.explained,0)/coefficients.length,fullExplained,
   coefficients,windows:WINDOW_COUNT,periods:K,silent:false};
 }
 export function renderPeriodJointTone({channels,sampleRate,speed=1,semitones=0,sourceStartSeconds=0}){
@@ -86,7 +100,7 @@ export function renderPeriodJointTone({channels,sampleRate,speed=1,semitones=0,s
  const estimate=estimateJointTone({channels,sampleRate});
  const frames=Math.max(1,Math.round(channels[0].length/speed));
  if(frames*channels.length>14_000_000)throw RangeError('memory bound');
- if(!estimate.silent&&estimate.explained<.90)throw Error('個別周期・共同推定の試験版は単一定常純音のみ対応（複音・変調・打音は未対応）');
+ if(!estimate.silent&&(estimate.explained<.90||estimate.fullExplained<.90))throw Error('個別周期・共同推定の試験版は単一定常純音のみ対応（複音・変調・打音は未対応）');
  const f=estimate.frequency*2**(semitones/12);
  // Project chunk-local fitted phase onto a common absolute source timeline.
  // This ensures the *stationary-tone* model does not restart phase at each

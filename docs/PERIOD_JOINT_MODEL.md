@@ -27,3 +27,7 @@ Status: RESEARCH PROTOTYPE. Not production quality, source separation, joint AM/
 ### P1 phase-origin corrective proof (pending new PR-head CI)
 
 `sourceStartSeconds` is passed from Worker chunk plan to the experimental estimator, keeping the stationary-tone phase referenced to absolute source time even when render chunks begin at different offsets. Tests compare adjoining synthetic chunks at s=1 and s=.75. This is not a guarantee for evolving spectra, long recordings or noisy frequency estimates; those remain P2/P3 gates.
+
+### Whole-waveform admission guard (research refinement)
+
+Window-only explained energy does not test samples between sparse observation windows. Evaluate full-chunk time-domain resynthesis residual using the *same* fitted oscillator, and require both joint-window and full-waveform explained-energy scores >= .90 for the limited stationary-tone admission. This detects omitted transients that would otherwise be erased. It is a guard, not an added independent source of information. The prescribed transient-between-window synthetic regression must pass before accepting this slice.
