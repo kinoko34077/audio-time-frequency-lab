@@ -26,7 +26,7 @@ jobs:
           node-version: '22'
       - name: Regression for legacy models, live independent factors and asset graph
         run: |
-          node --test tests/*.test.mjs web-demo/lab-contract.test.mjs web-demo/lab-stream.test.mjs web-demo/lab-phase.test.mjs web-demo/lab-quality-regression.test.mjs web-demo/lab-wsola-short.test.mjs web-demo/period-joint.test.mjs web-demo/period-joint-integration.test.mjs web-demo/period-joint-multi.test.mjs web-demo/period-joint-close.test.mjs web-demo/stage-pages.test.mjs
+          node --test tests/*.test.mjs web-demo/lab-contract.test.mjs web-demo/lab-stream.test.mjs web-demo/lab-phase.test.mjs web-demo/lab-quality-regression.test.mjs web-demo/lab-wsola-short.test.mjs web-demo/period-joint.test.mjs web-demo/period-joint-integration.test.mjs web-demo/period-joint-multi.test.mjs web-demo/period-joint-close.test.mjs web-demo/period-joint-onset.test.mjs web-demo/stage-pages.test.mjs
       - name: Compile imported upstream Rust DSP to WASM
         run: |
           rustup target add wasm32-unknown-unknown
