@@ -118,13 +118,16 @@ export function wsola(channels,stretch,outLen,fftSize=1024,sampleRate=48000){
  if(Math.abs(stretch-1)<1e-8)return channels.map(x=>fit(x,outLen));
  const L=channels[0].length,N=Math.min(fftSize,Math.max(256,Math.floor(L/2)));
  const hop=Math.max(32,N/4),overlap=N-hop,w=hann(N);
- const analysisHop=hop/stretch;
- const search=Math.max(64,Math.min(Math.floor(N/2),384));
+ // WSOLA must preserve each grain's native phase/frequency: the *natural*
+ // next source position is prev+hop, NOT prev+hop/stretch. Time scaling
+ // emerges through phase-coherent repeats/skips when the absolute desired
+ // source position diverges. Short windows need >=1 low-bass period search.
+ const search=Math.max(256,Math.min(2048,Math.round(sampleRate*.022)));
  const reference=Math.max(overlap,Math.min(Math.round(sampleRate*.028),Math.max(N*3,overlap)));
  const output=channels.map(()=>new Float64Array(outLen+N));
  const weight=new Float64Array(outLen+N);
  let prev=-1;
- function comparison(candidate,expected,predicted,limit,step){
+ function comparison(candidate,expected,natural,limit,step){
   const refFrom=prev+hop;
   if(refFrom>=L||candidate>=L)return -Infinity;
   const available=Math.min(limit,L-refFrom,L-candidate);
@@ -141,39 +144,41 @@ export function wsola(channels,stretch,outLen,fftSize=1024,sampleRate=48000){
   }
   const overlapPower=Math.sqrt(overlapA*overlapB),refPower=Math.sqrt(refA*refB);
   if(overlapPower<1e-11||refPower<1e-11){
-    return -.15*Math.abs(candidate-predicted)/Math.max(1,analysisHop);
+    return -.15*Math.abs(candidate-expected)/search;
   }
   // Both local splice similarity and a longer low-frequency reference must
   // agree, but nearby repeated cycles must not cause large time-map jumps.
   const overlapScore=overlapDot/(overlapPower+1e-12);
   const longScore=refDot/(refPower+1e-12);
-  const deviation=Math.abs(candidate-predicted)/Math.max(1,analysisHop);
-  const expectedError=Math.abs(candidate-expected)/Math.max(1,search);
-  return .58*overlapScore+.42*longScore-.22*deviation-.045*expectedError;
+  const expectedError=Math.abs(candidate-expected)/search;
+  const branchJump=Math.abs(candidate-natural)/search;
+  // Select the strongest phase-compatible candidate NEAR the time map;
+  // natural evolution or a whole-period jump both maintain acoustic pitch.
+  return .58*overlapScore+.42*longScore-.34*expectedError-.025*branchJump;
  }
  for(let pos=0;pos<outLen;pos+=hop){
   const ideal=Math.max(0,Math.min(L-N,Math.round(pos/stretch)));
   let src=ideal;
   if(prev>=0&&ideal<L-N){
-   const predicted=Math.max(0,Math.min(L-N,Math.round(prev+analysisHop)));
-   // Prevent repeated waveform periods from moving backwards / jumping
-   // unpredictably. The time-map advance, not spectral peak matching,
-   // defines the requested playback rate.
-   const radius=Math.max(4,Math.min(Math.floor(hop*.38),Math.round(Math.sqrt(N))));
-   const lo=Math.max(0,prev+1,ideal-search,ideal-Math.max(hop,Math.floor(N/2)),predicted-radius);
-   const hi=Math.min(L-N,ideal+search,ideal+Math.max(hop,Math.floor(N/2)),predicted+radius);
-   if(lo<=hi){
-    let best=-Infinity,bestSrc=predicted;
-    for(let candidate=lo;candidate<=hi;candidate+=4){
-     const score=comparison(candidate,ideal,predicted,reference,8);
-     if(score>best){best=score;bestSrc=candidate;}
-    }
-    for(let candidate=Math.max(lo,bestSrc-4);candidate<=Math.min(hi,bestSrc+4);candidate++){
-     const score=comparison(candidate,ideal,predicted,reference,2);
-     if(score>best){best=score;bestSrc=candidate;}
-    }
-    src=bestSrc;
-   }else src=Math.min(L-N,Math.max(prev+1,ideal));
+   const natural=Math.max(0,Math.min(L-N,prev+hop));
+   const lo=Math.max(0,ideal-search),hi=Math.min(L-N,ideal+search);
+   let best=-Infinity,bestSrc=ideal;
+   // Seed both the ideal timeline and unmodified audio progression.
+   for(const candidate of [ideal,natural]){
+    if(candidate<lo||candidate>hi)continue;
+    const score=comparison(candidate,ideal,natural,reference,8);
+    if(score>best){best=score;bestSrc=candidate;}
+   }
+   for(let candidate=lo;candidate<=hi;candidate+=16){
+    const score=comparison(candidate,ideal,natural,reference,16);
+    if(score>best){best=score;bestSrc=candidate;}
+   }
+   const bestCoarse=bestSrc;
+   for(let candidate=Math.max(lo,bestCoarse-16);candidate<=Math.min(hi,bestCoarse+16);candidate++){
+    const score=comparison(candidate,ideal,natural,reference,4);
+    if(score>best){best=score;bestSrc=candidate;}
+   }
+   src=bestSrc;
   }
   for(let j=0;j<N&&pos+j<weight.length;j++){
    const wi=w[j],index=pos+j;
