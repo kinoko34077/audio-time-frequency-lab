@@ -699,3 +699,17 @@ dialog[open]{display:flex;flex-direction:column;height:min(92dvh,850px);max-heig
   font-size:10px}
 #pivot-link-target:focus-visible{outline:2px solid #8ce6cb}
 @media(max-width:450px){#pivot-link-target{max-width:100%;font-size:9px}}
+
+/* Audio-lab overlay: inherited Frequency Warp layout is otherwise unchanged. */
+.audio-lab-panel{margin:0 0 14px;padding:16px 18px}
+.audio-lab-panel .section-header{margin-bottom:12px}
+.lab-grid{display:grid;grid-template-columns:minmax(215px,1.3fr) minmax(145px,1fr) minmax(145px,1fr);gap:14px;align-items:end}
+.lab-field{display:flex;flex-direction:column;gap:7px;font-size:12px;color:var(--text,#d9eaf0);min-width:0}
+.lab-field select{width:100%;max-width:100%;min-height:42px;font:inherit;color:inherit;background:#142d33;border:1px solid #436168;border-radius:7px;padding:6px 9px}
+.lab-field input[type=range]{width:100%;accent-color:#77e9cb;min-height:28px;touch-action:pan-y}
+.lab-field output{font-variant-numeric:tabular-nums;color:#77e9cb}
+.lab-bottom{display:flex;align-items:center;gap:12px;min-height:38px;margin-top:10px}
+.lab-bottom button{flex:none}
+.lab-bottom p{margin:0;font-size:12px;color:#b9d1da;overflow-wrap:anywhere}
+.lab-note{margin:9px 0 0;font-size:11px;color:#9cbac3;line-height:1.5}
+@media(max-width:720px){.lab-grid{grid-template-columns:1fr;gap:12px}.audio-lab-panel{padding:15px}.lab-bottom{align-items:flex-start;flex-direction:column}}
