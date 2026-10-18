@@ -2,10 +2,10 @@ import {renderPCM} from './lab-dsp.mjs';
 // Only a context-padded, bounded segment is transferred and rendered.
 // Entire recordings are NEVER sent to this worker.
 self.onmessage=({data})=>{
-  const {job,channels,sampleRate,speed,semitones,model,fftSize,plan}=data;
+  const {job,channels,sampleRate,speed,semitones,model,fftSize,shortFftSize,plan}=data;
   try {
     if(!plan||channels.some(ch=>ch.length!==plan.to-plan.from))throw Error('区間情報が不正です');
-    const rendered=renderPCM({channels,sampleRate,speed,semitones,model,fftSize});
+    const rendered=renderPCM({channels,sampleRate,speed,semitones,model,fftSize,shortFftSize});
     const result=rendered.channels.map(ch=>{
       const out=new Float32Array(plan.outputFrames);
       const part=ch.subarray(plan.outputStart,plan.outputStart+out.length);
