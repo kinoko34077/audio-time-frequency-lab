@@ -62,11 +62,14 @@ test('adjacent segments anchor phase to absolute source time for stationary tone
   assert.ok(Math.abs(first[first.length-1]-next[0])<.075,'stationary tone phase jump at speed '+speed);
  }
 });
-test('processor dispatch forwards absolute source origin only for opt-in model',()=>{
+test('real model dispatch carries absolute source origin into non-neutral multi-partial phase',()=>{
  const signal=Float32Array.from({length:sr},(_,i)=>.3*Math.cos(2*Math.PI*437.3*(1+i/sr)+.2));
- const a=renderPCM({channels:[signal],sampleRate:sr,model:'period-joint',sourceStartSeconds:1});
- const b=renderPeriodJointTone({channels:[signal],sampleRate:sr,sourceStartSeconds:1});
- assert.ok(a.channels[0].every((v,i)=>Math.abs(v-b.channels[0][i])<1e-8));
+ const params={channels:[signal],sampleRate:sr,model:'period-joint',speed:.8,semitones:3};
+ const actual=renderPCM({...params,sourceStartSeconds:1});
+ const shifted=renderPCM({...params,sourceStartSeconds:0});
+ assert.equal(actual.channels[0].length,Math.round(sr/.8));
+ assert.ok(actual.channels[0].every(Number.isFinite));
+ assert.ok(actual.channels[0].some((v,i)=>Math.abs(v-shifted.channels[0][i])>1e-3));
 });
 
 test('strong transient outside seven observation supports is rejected by full-waveform verification',()=>{
