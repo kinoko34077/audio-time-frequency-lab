@@ -33,18 +33,26 @@ jobs:
         run: |
           python3 -m http.server 8123 --bind 127.0.0.1 > /tmp/audio-lab-server.log 2>&1 &
           python3 tests/browser_smoke.py
-      - name: Stage only deployable browser files
-        if: github.event_name != 'pull_request'
+      - name: Build original shared Rust streaming DSP
         run: |
-          mkdir -p public
-          cp index.html style.css app.mjs dsp.mjs timeline.mjs processor.worker.mjs public/
-          touch public/.nojekyll
-          test -s public/index.html
-          test -s public/processor.worker.mjs
+          rustup target add wasm32-unknown-unknown
+          cargo build --manifest-path upstream/frequency-warp-vst/core/Cargo.toml --release --target wasm32-unknown-unknown
+      - name: Verify upstream dependency stage and build overlaid site
+        run: |
+          node --test upstream/frequency-warp-vst/web-demo/stage-pages.test.mjs
+          node overlay/assemble.mjs upstream/frequency-warp-vst/core/target/wasm32-unknown-unknown/release/frequency_warp_core.wasm
+          test -s _site/dsp_core.wasm
+          test -s _site/realtime.worklet.js
+          test -s _site/live-pitch.worklet.js
+          test -s _site/lab-model.worker.mjs
+      - name: Real-browser inherited audio host and model overlay
+        run: |
+          python3 -m http.server 8124 --bind 127.0.0.1 --directory _site >/tmp/audio-lab-overlay-server.log 2>&1 &
+          LAB_TEST_ORIGIN=http://127.0.0.1:8124/ python3 tests/source_overlay_smoke.py
       - uses: actions/upload-pages-artifact@v3
         if: github.event_name != 'pull_request'
         with:
-          path: public
+          path: _site
 
   deploy:
     name: Publish GitHub Pages
@@ -69,7 +77,7 @@ jobs:
         run: |
           set -eu
           base="${PAGE_URL%/}"
-          for asset in index.html style.css app.mjs dsp.mjs timeline.mjs processor.worker.mjs; do
+          for asset in index.html style.css app.mjs dsp_core.wasm realtime.worklet.js lab-overlay.mjs lab-dsp.mjs lab-model.worker.mjs live-pitch.worklet.js legacy/index.html; do
             echo "Checking $asset"
             curl --fail --silent --show-error --location \
               --retry 10 --retry-delay 4 --retry-all-errors \
@@ -80,5 +88,5 @@ jobs:
             --retry 10 --retry-delay 4 --retry-all-errors \
             "$base/" -o /tmp/audio-lab-live-index.html
           grep -q 'Audio Time' /tmp/audio-lab-live-index.html
-          grep -q 'renderPCM' /tmp/processor.worker.mjs
+          grep -q 'registerProcessor' /tmp/live-pitch.worklet.js
           echo 'PASS: deployed GitHub Pages HTML and all runtime assets are publicly reachable.'
