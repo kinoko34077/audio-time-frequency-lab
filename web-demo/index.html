@@ -4,14 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="dark">
-<title>Audio Time–Frequency Lab — Realtime Warp + Models</title>
+<title>Audio Time–Frequency Lab | 音声モデル比較</title>
 <link rel="stylesheet" href="./style.css">
 </head>
-<body>
+<body class="model-lab">
 <main class="studio">
   <header class="header">
     <div class="brand"><span class="logo" aria-hidden="true">∿</span><div>
-      <h1>Frequency Warp</h1><p>音を聴きながら変換</p>
+      <h1>Audio Time–Frequency Lab</h1><p>再生速度と音程を独立に比較</p>
     </div></div>
     <button id="settings-open" type="button" class="gear" aria-label="設定を開く" aria-haspopup="dialog" aria-controls="settings-dialog">
       <span aria-hidden="true">⚙</span><span>設定</span>
@@ -19,15 +19,15 @@
   </header>
 
   <section id="audio-lab" class="panel audio-lab-panel" aria-label="再生速度と解析モデルの比較">
-    <div class="section-header"><div><p class="eyebrow">TIME / PITCH / MODEL LAB</p><h2>再生速度・音程・解析モデル</h2></div><span class="micro-hint">既存のリアルタイムプレイヤーと共用</span></div>
+    <div class="section-header"><div><p class="eyebrow">TIME / PITCH / MODEL LAB</p><h2>モデル別の音声比較</h2></div><span class="micro-hint">処理は再生操作で自動開始</span></div>
     <div class="lab-grid">
       <label class="lab-field">処理モデル
         <select id="lab-model" aria-label="再生モデル">
-          <option value="live">LIVE · Rust/WASM 部分音リアルタイム</option>
-          <option value="pv">OFFLINE · Phase Vocoder</option>
-          <option value="wsola">OFFLINE · WSOLA</option>
-          <option value="dual">OFFLINE · 短窓/長窓 複合</option>
-          <option value="am">OFFLINE · AM包絡 + Phase Vocoder</option>
+          <option value="live">Rust/WASM 部分音 · リアルタイム</option>
+          <option value="pv">Phase Vocoder · 自動先読み</option>
+          <option value="wsola">WSOLA · 自動先読み</option>
+          <option value="dual">短窓/長窓 複合 · 自動先読み</option>
+          <option value="am">AM包絡 + Phase Vocoder · 自動先読み</option>
         </select>
       </label>
       <label class="lab-field">速度 <output id="lab-speed-output" for="lab-speed">1.00×</output>
@@ -36,17 +36,23 @@
       <label class="lab-field">音程 <output id="lab-pitch-output" for="lab-pitch">0 半音</output>
         <input id="lab-pitch" type="range" min="-12" max="12" step="1" value="0">
       </label>
+      <label class="lab-field">窓長 <output id="lab-fft-output" for="lab-fft">2048 samples</output>
+        <input id="lab-fft" type="range" min="10" max="12" step="1" value="11" aria-label="FFT窓長">
+      </label>
+      <label class="lab-field">参照窓数 <output id="lab-windows-output" for="lab-windows">8 窓</output>
+        <input id="lab-windows" type="range" min="2" max="16" step="2" value="8" aria-label="前後参照窓数">
+      </label>
     </div>
+    <p id="lab-window-note" class="lab-note">参照窓数は自動先読みモデルに反映します。</p>
     <div class="lab-bottom">
-      <button id="lab-render" type="button" hidden disabled>選択モデルを計算する</button>
-      <p id="lab-status" role="status" aria-live="polite">音源読込後すぐにRustリアルタイム再生できます。</p>
+      <p id="lab-status" role="status" aria-live="polite">音源を読み込んで「モデルで再生」を押してください。</p>
     </div>
-    <p class="lab-note">音源選択・波形シーク・原音/変換再生は下のコピー元プレイヤーをそのまま使用。LIVEでは元音源の再生速度を変更しRust部分音処理で音程差を補正します。既存4モデルは全曲計算型で、リアルタイム方式とは区別します。</p>
+    <p class="lab-note">全モデルとも再生時に処理を開始します。部分音方式はRust/WASMによる音声処理、ほかのモデルは先読み区間を順次計算して再生します。音源は端末内で処理します。</p>
   </section>
   <div class="workspace-grid">
     <div class="workspace-left">
       <section class="panel player" aria-labelledby="player-title">
-        <div class="section-header"><div><p class="eyebrow">AUDIO SOURCE</p><h2 id="player-title">音を聴きながら調整</h2></div><span class="micro-hint">先頭600秒まで</span></div>
+        <div class="section-header"><div><p class="eyebrow">AUDIO SOURCE</p><h2 id="player-title">音源の読込・再生</h2></div><span class="micro-hint">先頭600秒まで</span></div>
         <label id="drop" class="drop" for="audio-file" role="button" tabindex="0" aria-label="音声ファイルを選ぶ">
           <span aria-hidden="true">♫</span><strong>ここを押して音声を選ぶ</strong>
           <small>WAV / MP3 / M4A など · 75MBまで · ドロップ可</small>
@@ -56,7 +62,7 @@
         <div class="wave-wrap"><canvas id="wave" role="button" tabindex="0" aria-label="波形を押すとその位置から再生"></canvas><div id="playhead" class="playhead"></div></div>
         <div class="transport"><span id="elapsed">0:00.0</span><span>波形を押して移動</span><span id="duration">0:00.0</span></div>
         <div class="actions">
-          <button id="play-wet" class="primary" disabled>▶ 変換して再生</button>
+          <button id="play-wet" class="primary" disabled>▶ モデルで再生</button>
           <button id="play-dry" disabled>原音</button>
           <button id="stop" disabled>■ 停止</button>
         </div>
@@ -239,7 +245,7 @@
       <progress id="progress" value="0" max="100" aria-label="書出し処理進捗"></progress>
       <button id="download" disabled>↓ WAVを保存</button>
     </details>
-    <footer><span>音声は端末内で処理 · 研究試作</span><a href="https://github.com/kinoko34077/frequency-warp-vst">GitHub / Source</a></footer>
+    <footer><span>音声は端末内で処理 · 研究試作</span><a href="https://github.com/kinoko34077/audio-time-frequency-lab">GitHub / Source</a></footer>
   </div>
 </main>
 <!-- Audio status is an overlay, not a child of the player layout. Updating
