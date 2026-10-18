@@ -47,7 +47,7 @@ test('WSOLA N256 on a tone+noise+impulse retains actual short-grain character an
   const j=i/sr;
   const noise=.015*Math.sin(i*2.31)*Math.sin(i*.173);
   return .25*Math.sin(2*Math.PI*(110*j+25*j*j))+.11*Math.sin(2*Math.PI*375*j)+noise+
-    (i===sr||i===Math.floor(sr*1.7)?.8:0);
+    ((i===sr||i===Math.floor(sr*1.7))?.8:0);
  });
  const a=wsola([src],1.6,Math.round(src.length*1.6),256,sr)[0];
  const b=wsola([src],1.6,Math.round(src.length*1.6),1024,sr)[0];
