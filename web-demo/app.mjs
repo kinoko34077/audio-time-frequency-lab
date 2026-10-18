@@ -1560,11 +1560,11 @@ function labRefresh(){
     lab.mode==="live"?"Rustの部分音方式は長窓設定のみ反映します。短窓・参照窓数は使いません。":
     "このモデルは長窓を使います。短窓は複合窓・WSOLAでのみ利用します。";
   const notes={
-    live:"部分音：音に含まれる周波数を追い、再生中に変換します。複雑な和音では音が濁る場合があります。",
+    live:"部分音：周波数の山と、その間の細かな成分も補って再合成します。密度の高い音では変換誤差が残ることがあります。",
     pv:"位相ボコーダー：音を細かな周波数に分けて伸縮します。音程を保ちやすい一方、打音がぼやけることがあります。",
-    wsola:"WSOLA：似た形の波形を探してつなぎます。打音を残しやすい一方、伸ばしすぎると周期的に揺れる場合があります。",
+    wsola:"WSOLA：波形が自然につながる位置を細かく探して伸縮します。和音や大きな音程変更では揺れが残る場合があります。",
     dual:"短窓＋長窓：短窓で音の始まり、長窓で持続音の高さを追い、位相をそろえて切り替える実験方式です。",
-    am:"AM包絡：音量のうねりを一度取り出して伸縮後に戻します。音量変化を保つ工夫で、音源の分離ではありません。"
+    am:"AM包絡：伸縮した音の音量の輪郭をゆっくり整えます。音量を急に掛け直さず、コム状の濁りを抑える実験方式です。"
   };
   $("#lab-model-description").textContent=notes[lab.mode];
   if(!state.player?.labStream)labStatusText(lab.mode==="live"
@@ -1579,7 +1579,7 @@ async function labSettingsChanged(){
   const nextWindows=Number(labWindows.value);
   // The two independently adjustable lengths must maintain short < long;
   // move only the conflicting peer when the user crosses that boundary.
-  if(nextShort>=nextLong){
+  if(nextMode==='dual'&&nextShort>=nextLong){
     if(document.activeElement===labShort)nextLong=Math.min(8192,nextShort*2);
     else nextShort=Math.max(256,nextLong/2);
     labShort.value=String(Math.log2(nextShort));
