@@ -743,3 +743,8 @@ body.model-lab .lab-field input:disabled{opacity:.45;cursor:not-allowed}
  body.model-lab .lab-grid .lab-field:first-child{grid-column:span 1}
  body.model-lab .lab-bottom{display:block}
 }
+
+/* Keep the model explanation beside its selector, not in a separate help panel. */
+body.model-lab .lab-model-description{margin:12px 0 3px;padding:9px 11px;border-left:2px solid #77e9cb;background:rgba(100,180,180,.06);color:#d6edf0;font-size:12px;line-height:1.6}
+body.model-lab .lab-field:has(#lab-short-fft:disabled){opacity:.56}
+body.model-lab .lab-field input[type=range]{min-width:0}
