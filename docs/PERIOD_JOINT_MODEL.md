@@ -1,33 +1,22 @@
-# 周波数ごとの個別波長 — Issue #20 isolated opt-in experiment
+# 「周波数ごとの個別波長」— public experimental multi-partial model
 
-Status: RESEARCH PROTOTYPE. Not production quality, source separation, joint AM/onset/residual inference, or published acceptance.
+Current implementation scope: **publicly auditionable research mode**, independent of legacy Rust/PV/WSOLA/dual/AM engine. This is not a claim of exact physical source attribution or perceptual transparency.
 
-## Checkbox contract
-- Exact Japanese label: 周波数ごとの個別波長. Default OFF. OFF leaves the selected existing DSP unchanged.
-- ON routes exclusively to a separate period-joint model, not PV/WSOLA/dual output mixing. Existing model selection resumes on OFF.
-- UI must say 試験版：単一定常純音のみ; unsupported inputs explicitly error and leave original audio playable. No silent DSP fallback that pretends the checkbox worked.
-- Scope: buffered 0.2–3 seconds, mono/stereo, single stationary sinusoid 80–1600Hz or silence. Model treats amplitude and phase as constant within one chunk. Chunk phase stitching, polyphony, AM/FM, onsets, residual/noise and nonstationary trajectories remain UNIMPLEMENTED.
+## UX contract
+- Checkbox exactly 「周波数ごとの個別波長」, OFF by default; no change to the original selected engine when OFF.
+- ON: independent \`period-joint\` implementation, whose tone parameters are estimated from seven frequency-dependent K=8-period windows for each candidate, with common unknown frequencies, channel amplitude and phase. DO NOT mix independently reconstructed short and long windows.
+- Process mono/stereo and multiple simultaneous notes, AM/FM, noise, attacks and voice/music inputs with a preserved **residual branch** rather than throwing an unsupported-source error. This means the input is processed, not that every modulation source is correctly identified.
+- The user retains original playback as an independent reference if a genuine DSP execution failure occurs. Status does not falsely say the input was physically separated.
 
-## Mathematics
-- The user's 個別波長 means individual frequency-dependent OBSERVATION DURATION, not the physical propagation wavelength (which depends on sound speed).
-- T(f,K)=K/f seconds; integer anchor n=floor(f+0.5) denotes n-0.5 <= f < n+0.5, without quantizing f.
-- For integer anchors a,b with common origin, first positive common end boundary = K/gcd(a,b). Never force coprime channels globally synchronized and never equate shared end boundaries to oscillator phase agreement.
-- Convert theoretical real-valued boundaries to ceil(Fs*t) indices only for sampling; use continuous-time Hann weights.
-- For candidate f and seven different window centers, all windows constrain ONE shared frequency f and per-channel real sinusoidal coefficients (a,b) in x(t)=a cos(2pi f t)+b sin(2pi f t). Fit a,b through weighted 2x2 normal equations minimizing the sum of windowed squared errors. Search f coarse-to-fine. Candidate DISCOVERY may use one short window, but seven-window joint fit determines the final f,a,b. Never mix independent inverse transforms.
-- Different windows reuse the same PCM; the observations are correlated and do not create independent physical information. Current explained-energy threshold 0.90 is a guard, NOT a verified polyphony classifier.
-- For the stationary case only: output pitch p=2^(semitones/12), f_out=p*f, duration frames = round(source frames/speed). This is the f_in(s*t) law only because f_in is constant. Within-chunk oscillator phase is continuous, global cross-chunk phase is NOT proven.
+## Shared model and residual path
+- For each candidate k: T(f_k,K)=K/f_k; seven Hann observations constrain the **same** global f_k and coefficients a_ck,b_ck across all windows. Integer reference n=floor(f+.5) remains a separate theoretical indexing rule. G_c(t)=sum_k a_ck cos(2πf_k t)+b_ck sin(2πf_k t)+r_c(t).
+- FFT peaks at three points are **candidate initialization only**; iterative residual conditional block-refit resolves at most six shared stationary partials (bounded browser work). No individual window's inverse audio is mixed.
+- The residual r_c(t) is the actual PCM minus the fitted shared partial sum, preserving unmatched sidebands, voice, noise and onset information. It undergoes existing anti-aliased resampling + PV stretch with independent speed and pitch, then combines with the pitch-mapped partials as **different physical model components**, not crossfading short/long window outputs.
+- Different windows reuse samples; independent physical information is NOT manufactured. AM versus independent sidebands can have the same PCM: grouping remains explicitly ambiguous. Residual processing is an engineering fallback, not general AM inference.
+- Exact neutral speed=1, pitch=0 preserves the input PCM sample-for-sample even though analysis runs. Transformed duration round(N/s), tonal f_out=p*f, p=2^(semitones/12). Source-absolute phase anchors each stationary oscillator during preview chunk crops. Residual PV may have audible seams/time smearing; time-variable trajectories are not yet optimally estimated.
+- Candidate input frequencies initially target 45Hz–min(7500Hz,.44*Fs), six partials and seven observation windows per segment. Energy outside this tonal model remains in the residual rather than being discarded. The original fixed single-tone P1 estimator remains as \`renderPeriodJointTone\` for isolated deterministic research validation only; actual UI dispatch uses \`renderJointAudio\`.
 
-## Verification and promotion
-- P0: gcd / octave / 3x / 5x / coprime / ±0.5Hz and fractional sample boundaries; tests in period-joint.test.mjs.
-- P1: 16kHz 1s pure 440.4Hz absolute error under 0.1Hz, explained energy above 97%, duration/speed and pitch/p, finite silence, stereo amplitude/phase. These tests accept only this limited synthetic model.
-- P2: multi-component shared latent trajectories f_k(t), a_k(t), phase and onsets with harmonic/AM groups; explicitly compare AM sidebands versus independent tones, score ambiguity and noise.
-- P3: transient/nonpitch residual, perceptual safeguards, onset timing, phase across chunks, adaptive K, stereo stability, bounded memory/CPU.
-- P4: matched STFT/PV, WSOLA, dual, CQT/NSGT, joint-grid baselines; evaluate reconstruction, frequency/phase error, timing, robustness under noise, CPU/memory, and listening on real devices.
-- Do not merge or publish merely because the checkbox exists. Require P2–P4 and review plus target-device proof and user publication authorization. The existing Rust/WASM and production Pages remain untouched.
-### P1 phase-origin corrective proof (pending new PR-head CI)
-
-`sourceStartSeconds` is passed from Worker chunk plan to the experimental estimator, keeping the stationary-tone phase referenced to absolute source time even when render chunks begin at different offsets. Tests compare adjoining synthetic chunks at s=1 and s=.75. This is not a guarantee for evolving spectra, long recordings or noisy frequency estimates; those remain P2/P3 gates.
-
-### Whole-waveform admission guard (research refinement)
-
-Window-only explained energy does not test samples between sparse observation windows. Evaluate full-chunk time-domain resynthesis residual using the *same* fitted oscillator, and require both joint-window and full-waveform explained-energy scores >= .90 for the limited stationary-tone admission. This detects omitted transients that would otherwise be erased. It is a guard, not an added independent source of information. The prescribed transient-between-window synthetic regression must pass before accepting this slice.
+## Test gates and limitations
+- Verified by automated synthetic tests: integer/prime/coprime/fractional period math, single tone, additive polyphony, AM with equivalent sidebands, stereo antiphase, impulse/noise preservation, speed and pitch, neutral and chunk seam; Browser+Rust/WASM and native Pages staging.
+- Follow-up scientific requirements not claimed complete: joint time-varying trajectories, true onset/offset unknowns, adaptive K, harmonic/AM grouping hypothesis selection with ambiguity confidence, accurate residual time/pitch treatment, multiple recording objective comparison with CQT/NSGT/STFT, noise stability and per-device CPU/acoustic acceptance.
+- Public release is explicitly authorized by user on 2026-10-18, *provided native CI and accurate research-status disclosure pass*. Public experimental release does not waive scientific validity claims or alter the unchanged checkbox-OFF models. No user audio uploads, remote access, credentials or paid providers.
