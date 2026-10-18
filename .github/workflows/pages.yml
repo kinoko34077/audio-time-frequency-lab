@@ -40,6 +40,13 @@ jobs:
           test -s _site/lab-dsp.mjs
           test -s _site/lab-processor.worker.mjs
           test -s _site/lab-contract.mjs
+      - name: Source-equivalent native Chrome AudioWorklet browser runtime
+        run: |
+          npm install --no-save --no-package-lock puppeteer-core@24
+          command -v google-chrome
+      - name: Native Chrome real Rust AudioWorklet with Lab live factors
+        run: |
+          WARP_WEB_ROOT=_site node --test web-demo/lab-live-smoke.test.mjs
       - name: Browser tooling (test runtime only)
         run: |
           python3 -m pip install --user playwright==1.56.0
