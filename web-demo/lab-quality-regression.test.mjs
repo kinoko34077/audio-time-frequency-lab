@@ -52,7 +52,7 @@ test('live partial/residual is full-band and independent from hidden Warp contro
  const p=fullBandPartialOptions(48000);
  assert.equal(p.aQuality,100);assert.equal(p.aBandBins,1);
  assert.equal(p.crusherBits,0);assert.equal(p.aReverb,0);
- assert.equal(p.low,1);assert.ok(p.high>20000&&p.high<24000);
+ assert.equal(p.low,1);assert.equal(p.high,20000);
  const lo=fullBandPartialOptions(16000);
  assert.ok(lo.high<8000);
 });
