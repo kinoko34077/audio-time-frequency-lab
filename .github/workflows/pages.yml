@@ -26,7 +26,7 @@ jobs:
           node-version: '22'
       - name: Regression for legacy models, live independent factors and asset graph
         run: |
-          node --test tests/*.test.mjs web-demo/lab-contract.test.mjs web-demo/lab-stream.test.mjs web-demo/lab-phase.test.mjs web-demo/lab-quality-regression.test.mjs web-demo/lab-wsola-short.test.mjs web-demo/period-joint.test.mjs web-demo/period-joint-integration.test.mjs web-demo/period-joint-multi.test.mjs web-demo/stage-pages.test.mjs
+          node --test tests/*.test.mjs web-demo/lab-contract.test.mjs web-demo/lab-stream.test.mjs web-demo/lab-phase.test.mjs web-demo/lab-quality-regression.test.mjs web-demo/lab-wsola-short.test.mjs web-demo/period-joint.test.mjs web-demo/period-joint-integration.test.mjs web-demo/period-joint-multi.test.mjs web-demo/period-joint-close.test.mjs web-demo/stage-pages.test.mjs
       - name: Compile imported upstream Rust DSP to WASM
         run: |
           rustup target add wasm32-unknown-unknown
@@ -39,6 +39,7 @@ jobs:
           test -s _site/realtime.worklet.js
           test -s _site/lab-dsp.mjs
           test -s _site/period-joint-multi.mjs
+          test -s _site/period-joint-close.mjs
           test -s _site/lab-processor.worker.mjs
           test -s _site/lab-contract.mjs
       - name: Source-equivalent native Chrome AudioWorklet browser runtime
@@ -92,7 +93,7 @@ jobs:
         run: |
           set -eu
           base="${PAGE_URL%/}"
-          for asset in index.html style.css app.mjs dsp.mjs dsp_core.wasm realtime.worklet.js lab-dsp.mjs lab-contract.mjs lab-processor.worker.mjs period-joint.mjs period-joint-multi.mjs; do
+          for asset in index.html style.css app.mjs dsp.mjs dsp_core.wasm realtime.worklet.js lab-dsp.mjs lab-contract.mjs lab-processor.worker.mjs period-joint.mjs period-joint-multi.mjs period-joint-close.mjs; do
             curl --fail --silent --show-error --location --retry 8 --retry-delay 3 --retry-all-errors "$base/$asset" -o "/tmp/$asset"
             test -s "/tmp/$asset"
           done
