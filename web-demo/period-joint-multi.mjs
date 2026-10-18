@@ -122,12 +122,64 @@ function addComponent(dest,component,sr,sign=1){
   const step=TAU*f/sr,cs=Math.cos(step),sn=Math.sin(step);
   let x=1,y=0;
   for(let i=0;i<arr.length;i++){
-   arr[i]+=sign*(a*x+b*y);
+   arr[i]+=sign*temporalGain(component,i)*(a*x+b*y);
    const nextX=x*cs-y*sn;
    y=y*cs+x*sn;x=nextX;
    // Periodic exact re-anchor guards against drift over long chunks.
    if((i&4095)===4095){x=Math.cos(step*(i+1));y=Math.sin(step*(i+1));}
   }
+ }
+}
+// All partials share the ORIGINAL SOURCE CLOCK. A frequency detected at the
+// END of a 1.5s slice must not emit a full-length tone before its onset.
+// The exact same time-varying component is subtracted from source PCM to form
+// the residual, and rendered after the requested speed/pitch remapping.
+export function temporalGain(partial,sourceFrame){
+ const env=partial.envelope,hop=partial.envelopeHop;
+ if(!env||!hop)return 1; // initial stationary fit, not an output shortcut
+ const p=Math.max(0,Math.min(env.length-1,sourceFrame/hop));
+ const i=Math.floor(p),fraction=p-i;
+ return env[i]*(1-fraction)+env[Math.min(env.length-1,i+1)]*fraction;
+}
+function sourceSynchronousEnvelope(channels,sr,partials){
+ const L=channels[0].length,step=Math.max(64,Math.round(sr*.01));
+ // Global stationary prediction is only used as a regression basis.
+ // It is NOT the source residual and must NEVER be emitted un-gated.
+ const predicted=channels.map(()=>new Float64Array(L));
+ for(const p of partials)addComponent(predicted,p,sr,1);
+ for(const p of partials){
+  const dot=new Float64Array(L+1),norm=new Float64Array(L+1);
+  const w=TAU*p.frequency/sr,cosStep=Math.cos(w),sinStep=Math.sin(w);
+  let x=1,y=0;
+  for(let i=0;i<L;i++){
+   let cross=0,power=0;
+   for(let c=0;c<channels.length;c++){
+    const {a,b}=p.coefficients[c];
+    const template=a*x+b*y;
+    // The source without other candidate partials. This conditional
+    // projection asks whether p is present NOW, not elsewhere in chunk.
+    const isolated=channels[c][i]-predicted[c][i]+template;
+    cross+=isolated*template;power+=template*template;
+   }
+   dot[i+1]=dot[i]+cross;norm[i+1]=norm[i]+power;
+   const next=x*cosStep-y*sinStep;
+   y=y*cosStep+x*sinStep;x=next;
+   if((i&4095)===4095){x=Math.cos(w*(i+1));y=Math.sin(w*(i+1));}
+  }
+  // 54ms support is small versus the observed ~1s early note; central
+  // alignment keeps any onset smear bounded to ~27ms instead of 1.5s.
+  const radius=Math.max(16,Math.round(sr*.027));
+  const env=new Float32Array(Math.ceil(L/step)+1);
+  for(let j=0;j<env.length;j++){
+   const center=Math.min(L-1,j*step),left=Math.max(0,center-radius);
+   const right=Math.min(L,center+radius+1);
+   const energy=norm[right]-norm[left],projection=dot[right]-dot[left];
+   let gain=energy>1e-12?Math.max(0,Math.min(1.5,projection/energy)):0;
+   // Suppress weak correlation ghosts; absence remains in the residual.
+   if(gain<.07)gain=0;
+   env[j]=gain;
+  }
+  p.envelope=env;p.envelopeHop=step;
  }
 }
 export function estimateSharedPartials({channels,sampleRate,K=PERIOD_K,maxPartials=MAX_PARTIALS}){
@@ -179,6 +231,14 @@ export function estimateSharedPartials({channels,sampleRate,K=PERIOD_K,maxPartia
   }
   addComponent(residual,partial,sampleRate,-1);
  }
+ // Rebuild the complementary residual from the ORIGINAL input using the
+ // SOURCE-TIME envelope for each partial. Subtracting the constant oscillator
+ // here is the bug that made late notes sound up to one chunk early.
+ if(partials.length){
+  sourceSynchronousEnvelope(channels,sampleRate,partials);
+  for(let c=0;c<channels.length;c++)residual[c].set(channels[c]);
+  for(const partial of partials)addComponent(residual,partial,sampleRate,-1);
+ }
  let residualEnergy=0;for(const ch of residual)for(let i=0;i<L;i+=4)residualEnergy+=ch[i]*ch[i];
  return {partials,residual,explained:Math.max(-1,1-residualEnergy/(baseEnergy+1e-12)),
    windows:WINDOW_COUNT,candidates:candidates.length,unresolvedPhysicalGrouping:true};
@@ -206,7 +266,7 @@ export function renderJointAudio({channels,sampleRate,speed=1,semitones=0,source
    const localPhase=Math.atan2(-b,a);
    const globalPhase=transportSourcePhase(localPhase,partial.frequency,sourceStartSeconds,0);
    for(let i=0;i<frames;i++){
-    out[c][i]+=amp*Math.cos(globalPhase+TAU*outF*(absoluteOutputStart+i/sampleRate));
+    out[c][i]+=temporalGain(partial,i*speed)*amp*Math.cos(globalPhase+TAU*outF*(absoluteOutputStart+i/sampleRate));
    }
   }
  }
