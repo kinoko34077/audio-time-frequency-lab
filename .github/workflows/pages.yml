@@ -1,0 +1,65 @@
+name: Test and publish Audio Time-Frequency Lab
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: audio-lab-pages-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Audio & real-browser verification
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: DSP and timeline regression
+        run: node --test tests/*.test.mjs
+      - name: Install browser test runtime
+        run: |
+          python3 -m pip install --user playwright==1.55.0
+          python3 -m playwright install --with-deps chromium
+      - name: Real localhost browser + Module Worker test
+        run: |
+          python3 -m http.server 8123 --bind 127.0.0.1 > /tmp/audio-lab-server.log 2>&1 &
+          python3 tests/browser_smoke.py
+      - name: Stage only deployable browser files
+        if: github.event_name != 'pull_request'
+        run: |
+          mkdir -p public
+          cp index.html style.css app.mjs dsp.mjs timeline.mjs processor.worker.mjs public/
+          touch public/.nojekyll
+          test -s public/index.html
+          test -s public/processor.worker.mjs
+      - uses: actions/upload-pages-artifact@v3
+        if: github.event_name != 'pull_request'
+        with:
+          path: public
+
+  deploy:
+    name: Publish GitHub Pages
+    if: github.event_name != 'pull_request'
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/configure-pages@v5
+      - id: deployment
+        uses: actions/deploy-pages@v4

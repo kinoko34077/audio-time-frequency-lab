@@ -30,8 +30,12 @@ try:
         page.goto(ORIGIN, wait_until='domcontentloaded')
         page.locator('#file').set_input_files(path)
         page.get_by_text('原音を再生できます。', exact=False).wait_for(timeout=12000)
-        page.locator('#speed').fill('1.50')
-        page.locator('#pitch').fill('12')
+        page.locator('#speedNumber').fill('1.50')
+        page.locator('#speedNumber').dispatch_event('change')
+        assert float(page.locator('#speed').input_value()) == 1.5
+        page.locator('#pitchNumber').fill('12')
+        page.locator('#pitchNumber').dispatch_event('change')
+        assert float(page.locator('#pitch').input_value()) == 12
         page.locator('#render').click()
         page.get_by_text('加工音が完成しました。', exact=False).wait_for(timeout=30000)
         assert page.locator('#processed').is_enabled()
