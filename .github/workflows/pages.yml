@@ -42,7 +42,7 @@ jobs:
           test -s _site/lab-contract.mjs
       - name: Browser tooling (test runtime only)
         run: |
-          python3 -m pip install --user playwright==1.55.0
+          python3 -m pip install --user playwright==1.56.0
           python3 -m playwright install --with-deps chromium
       - name: Inherited native file picker, Rust streaming and model overlay
         run: |
