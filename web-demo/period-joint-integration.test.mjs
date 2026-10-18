@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {MODELS,renderPCM} from './lab-dsp.mjs';
+import {planChunk} from './lab-stream.mjs';
 const sr=16000;
 const tone=Float32Array.from({length:sr},(_,i)=>.3*Math.sin(2*Math.PI*440.4*i/sr));
 const base={channels:[tone],sampleRate:sr,speed:.8,semitones:3};
@@ -25,4 +26,20 @@ test('checkbox has exact label/default OFF and selects experimental branch of pl
 test('opted-in mixed tone fails instead of silently reusing an old DSP',()=>{
  const other=Float32Array.from(tone,(v,i)=>v+.3*Math.cos(2*Math.PI*660*i/sr));
  assert.throws(()=>renderPCM({...base,channels:[other],model:'period-joint'}),/未対応/);
+});
+
+test('real preview plan crops preserve stationary phase across adjacent source chunks',()=>{
+ const duration=sr*4,f=440.4,speed=.75;
+ const source=Float32Array.from({length:duration},(_,i)=>.25*Math.cos(2*Math.PI*f*i/sr+.25));
+ function central(startSeconds){
+  const plan=planChunk({totalFrames:duration,sampleRate:sr,speed,startSeconds,
+   model:'period-joint',fftSize:2048,shortFftSize:512,longFftSize:2048,referenceWindows:8});
+  const cropped=source.slice(plan.from,plan.to);
+  const result=renderPCM({channels:[cropped],sampleRate:sr,speed,semitones:0,
+   model:'period-joint',sourceStartSeconds:plan.from/sr});
+  return result.channels[0].subarray(plan.outputStart,plan.outputStart+plan.coreFrames);
+ }
+ const first=central(0),second=central(1.5);
+ assert.ok(first.length>0&&second.length>0);
+ assert.ok(Math.abs(first[first.length-1]-second[0])<.07,'chunk seam should not reset stationary oscillator');
 });
