@@ -1542,7 +1542,7 @@ document.documentElement.dataset.fwBoot="ready";
  * on demand, never claimed to be real-time or physically identifiable.
  */
 const labModel=$("#lab-model"),labSpeed=$("#lab-speed"),labPitch=$("#lab-pitch");
-const labShort=$("#lab-short"),labLong=$("#lab-long"),labWindows=$("#lab-windows"),labStatus=$("#lab-status");
+const labShort=$("#lab-short"),labLong=$("#lab-long"),labWindows=$("#lab-windows"),labStatus=$("#lab-status"),labIndividual=$("#lab-individual-periods");
 function labStatusText(text){labStatus.textContent=text;}
 function labRefresh(){
   $("#lab-speed-output").textContent=lab.speed.toFixed(2)+"×";
@@ -1550,11 +1550,14 @@ function labRefresh(){
   $("#lab-short-output").textContent=String(lab.shortFftSize)+" samples";
   $("#lab-long-output").textContent=String(lab.longFftSize)+" samples";
   $("#lab-windows-output").textContent=String(lab.referenceWindows)+" 窓";
+  labModel.disabled=lab.mode==="period-joint";
   labShort.disabled=!["wsola","dual"].includes(lab.mode);
-  labLong.disabled=lab.mode==="wsola";
-  labWindows.disabled=lab.mode==="live";
+  labLong.disabled=["wsola","period-joint"].includes(lab.mode);
+  labWindows.disabled=["live","period-joint"].includes(lab.mode);
   labLong.max=lab.mode==="live"?"12":"13";
-  $("#lab-window-note").textContent=lab.mode==="dual"?
+  $("#lab-window-note").textContent=lab.mode==="period-joint"?
+    "周波数別の8周期窓×7観測を用いて複数部分音を共同推定し、モデル外の成分は残差経路で保持します。短窓・参照窓数は適用されません。":
+    lab.mode==="dual"?
     "短窓＝打音・音の切替の時間精度、長窓＝持続音の周波数精度。それぞれ別々に処理へ反映します。":
     lab.mode==="wsola"?"WSOLAは短窓を使い、長窓は使用しません。":
     lab.mode==="live"?"Rustの部分音方式は長窓設定のみ反映します。短窓・参照窓数は使いません。":
@@ -1564,7 +1567,8 @@ function labRefresh(){
     pv:"位相ボコーダー：音を細かな周波数に分けて伸縮します。音程を保ちやすい一方、打音がぼやけることがあります。",
     wsola:"WSOLA：波形が自然につながる位置を細かく探して伸縮します。和音や大きな音程変更では揺れが残る場合があります。",
     dual:"短窓＋長窓：短窓で音の始まり、長窓で持続音の高さを追い、位相をそろえて切り替える実験方式です。",
-    am:"AM包絡：伸縮した音の音量の輪郭をゆっくり整えます。音量を急に掛け直さず、コム状の濁りを抑える実験方式です。"
+    am:"AM包絡：伸縮した音の音量の輪郭をゆっくり整えます。音量を急に掛け直さず、コム状の濁りを抑える実験方式です。",
+    "period-joint":"周波数ごとの個別波長（研究版）：7つの周波数別周期窓から複数の共通部分音を推定し、残差も処理します。和音・変調・声・打音も再生対象ですが、物理的な音源分離・完全な位相/音色保持は未証明です。"
   };
   $("#lab-model-description").textContent=notes[lab.mode];
   if(!state.player?.labStream)labStatusText(lab.mode==="live"
@@ -1574,7 +1578,7 @@ function labRefresh(){
 function labInvalidate(){lab.job++;lab.worker?.terminate();lab.worker=null;lab.processed=null;}
 async function labSettingsChanged(){
   const previous=lab.mode,currentTime=playPosition();
-  const nextMode=labModel.value,nextSpeed=Number(labSpeed.value),nextSemi=Number(labPitch.value);
+  const nextMode=labIndividual.checked?"period-joint":labModel.value,nextSpeed=Number(labSpeed.value),nextSemi=Number(labPitch.value);
   let nextShort=2**Number(labShort.value),nextLong=2**Number(labLong.value);
   const nextWindows=Number(labWindows.value);
   // The two independently adjustable lengths must maintain short < long;
@@ -1610,7 +1614,7 @@ async function labSettingsChanged(){
   labRefresh();
   if(state.dry&&lab.mode==="live"&&!state.player)updateParams("lab");
 }
-[labModel,labSpeed,labPitch,labShort,labLong,labWindows].forEach(node=>node.addEventListener("change",()=>void labSettingsChanged()));
+[labModel,labSpeed,labPitch,labShort,labLong,labWindows,labIndividual].forEach(node=>node.addEventListener("change",()=>void labSettingsChanged()));
 function liveSliderValue(){
   $("#lab-speed-output").textContent=Number(labSpeed.value).toFixed(2)+"×";
   $("#lab-pitch-output").textContent=labPitch.value+" 半音";
