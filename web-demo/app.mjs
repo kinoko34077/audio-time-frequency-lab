@@ -703,6 +703,9 @@ async function play(mode="wet",offset=null){
     message("モデルを先に計算してください。原音再生は利用できます。","error");
     return;
   }
+  if(mode==="dry"&&state.player?.labRealtime){
+    const at=offset??playPosition();await stop();return play("dry",at);
+  }
   if(state.player&&(state.player.labProcessed||offlineRequest)){
     const want=offlineRequest&&labReady();
     if(Boolean(state.player.labProcessed)!==want){
@@ -710,7 +713,7 @@ async function play(mode="wet",offset=null){
       await stop();return play(mode,at);
     }
   }
-  if(state.player?.directDry&&mode==="wet"){
+  if(state.player?.directDry&&mode==="wet"&&!offlineRequest){
     // A rejected wet request must not destroy a currently audible original.
     const check=prepareStreamSettings(settings());
     if(!check.ok){
@@ -728,7 +731,7 @@ async function play(mode="wet",offset=null){
     if(offset!==null)seek(offset);
     state.player.mode=mode;
     tuneWet();
-    message(mode==="wet"?"リアルタイム音声処理中。パラメータは即時適用されます。":"原音を連続再生中。");
+    message(offlineRequest?"計算済みモデルを再生中。":mode==="wet"?"リアルタイム音声処理中。パラメータは即時適用されます。":"原音を連続再生中。");
     return;
   }
   const launchEpoch=++state.transportEpoch;
@@ -1520,3 +1523,82 @@ labels();drawCurve();updateEngineInfo();refreshPlayhead();
 ensureSharedCore().catch(()=>{});
 // Set only after all interactive controls have registered successfully.
 document.documentElement.dataset.fwBoot="ready";
+
+/** Audio Lab controls: imported frequency-warp-vst transport and Rust DSP own
+ * live playback. JS phase-vocoder / WSOLA / dual / AM are separately rendered
+ * on demand, never claimed to be real-time or physically identifiable.
+ */
+const labModel=$("#lab-model"),labSpeed=$("#lab-speed"),labPitch=$("#lab-pitch");
+const labStatus=$("#lab-status"),labRender=$("#lab-render");
+function labStatusText(message){labStatus.textContent=message;}
+function labRefresh(){
+  $("#lab-speed-output").textContent=Number(labSpeed.value).toFixed(2)+"×";
+  $("#lab-pitch-output").textContent=(Number(labPitch.value)>0?"+":"")+labPitch.value+" 半音";
+  labRender.disabled=!state.dry||lab.mode==="live";
+  labRender.hidden=lab.mode==="live";
+  if(lab.mode==="live")labStatusText("LIVE · Rust/WASM AudioWorklet。再生開始を事前の全曲計算で待ちません。音質は実験段階。");
+  else if(labReady())labStatusText("計算済み · "+lab.mode+"。既存の「変換して再生」で試聴できます。");
+  else labStatusText("OFFLINE · "+lab.mode+"。モデルを先に計算してください。このモデル自体はリアルタイムではありません。");
+}
+function labInvalidate(){
+  lab.job++;
+  lab.worker?.terminate();lab.worker=null;
+  lab.processed=null;
+}
+async function labSettingsChanged(){
+  const previous=lab.mode;
+  const currentTime=playPosition();
+  const nextMode=labModel.value;
+  const nextSpeed=Number(labSpeed.value),nextSemi=Number(labPitch.value);
+  const changed=nextMode!==lab.mode||nextSpeed!==lab.speed||nextSemi!==lab.semitones;
+  if(!changed)return;
+  liveFactors(nextSpeed,nextSemi);
+  lab.mode=nextMode;lab.speed=nextSpeed;lab.semitones=nextSemi;
+  labInvalidate();
+  if(state.player){
+    if(previous==="live"&&lab.mode==="live"&&state.player.labRealtime){
+      const p=state.player;
+      p.offset=currentTime;p.at=state.ctx.currentTime;p.sourceTimeRate=lab.speed;
+      p.source?.playbackRate.setValueAtTime(lab.speed,state.ctx.currentTime);
+      updateParams("lab");
+    }else{
+      await stop();
+      state.seek=currentTime;
+    }
+  }
+  labRefresh();
+  if(state.dry&&lab.mode==="live"&&!state.player)updateParams("lab");
+}
+[labModel,labSpeed,labPitch].forEach(node=>node.addEventListener("change",()=>void labSettingsChanged()));
+labSpeed.addEventListener("input",()=>{$("#lab-speed-output").textContent=Number(labSpeed.value).toFixed(2)+"×";});
+labPitch.addEventListener("input",()=>{$("#lab-pitch-output").textContent=labPitch.value+" 半音";});
+labRender.addEventListener("click",()=>{
+ if(!state.dry||lab.mode==="live")return;
+ labInvalidate();const job=lab.job;
+ labRender.disabled=true;
+ labStatusText("OFFLINE · "+lab.mode+"モデルを計算しています… 元音源は保持します。");
+ try{
+  const worker=new Worker("./lab-processor.worker.mjs",{type:"module"});
+  lab.worker=worker;
+  worker.onmessage=async({data})=>{
+    if(job!==lab.job)return;
+    worker.terminate();lab.worker=null;
+    if(!data.ok){labRefresh();labStatusText("モデル処理失敗: "+data.message);return;}
+    lab.processed={channels:data.channels,model:lab.mode,speed:lab.speed,semitones:lab.semitones};
+    if(state.player){const at=playPosition();await stop();state.seek=at;}
+    labRefresh();
+  };
+  worker.onerror=()=>{
+    if(job!==lab.job)return;
+    worker.terminate();lab.worker=null;
+    labRefresh();labStatusText("処理失敗。原音再生は利用できます。");
+  };
+  const channels=state.dry.map(ch=>Float32Array.from(ch));
+  worker.postMessage({job,channels,sampleRate:state.decoded.sampleRate,
+    speed:lab.speed,semitones:lab.semitones,model:lab.mode},
+    channels.map(ch=>ch.buffer));
+ }catch(error){
+  labRefresh();labStatusText("処理失敗: "+error.message);
+ }
+});
+labRefresh();
