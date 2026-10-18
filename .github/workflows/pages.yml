@@ -26,7 +26,7 @@ jobs:
           node-version: '22'
       - name: Regression for legacy models, live independent factors and asset graph
         run: |
-          node --test tests/*.test.mjs web-demo/lab-contract.test.mjs web-demo/stage-pages.test.mjs
+          node --test tests/*.test.mjs web-demo/lab-contract.test.mjs web-demo/lab-stream.test.mjs web-demo/stage-pages.test.mjs
       - name: Compile imported upstream Rust DSP to WASM
         run: |
           rustup target add wasm32-unknown-unknown
@@ -55,6 +55,9 @@ jobs:
         run: |
           python3 -m http.server 8123 --bind 127.0.0.1 --directory _site > /tmp/audio-lab-source-server.log 2>&1 &
           python3 tests/upstream_overlay_smoke.py
+      - name: Full-length stereo auto-preview across all models
+        run: |
+          LAB_TEST_ORIGIN=http://127.0.0.1:8123/ python3 tests/long_model_smoke.py
       - name: Legacy lab regression stays available in repository
         run: |
           python3 -m http.server 8124 --bind 127.0.0.1 --directory . > /tmp/audio-lab-legacy-server.log 2>&1 &

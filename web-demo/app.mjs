@@ -1,5 +1,6 @@
 import {QUALITY,mixWet} from "./dsp.mjs";
 import {liveFactors} from "./lab-contract.mjs";
+import {createModelStream} from "./lab-stream.mjs";
 import {frequencyFromSlider,sliderFromFrequency,holdFromFrequency,drawCrusherPreview} from "./crusher-visual.mjs";
 import {drawFrequencyGraph} from "./graph.mjs";
 import {mountDualThumb} from "./dual-thumb.mjs";
@@ -32,7 +33,7 @@ const state={
   precise:Object.create(null),
   effective:{low:20,high:16000},raf:0,lastStats:null,mathCore:null,wasmPromise:null,rebuildTimer:null,sine:null,loadToken:0,transportEpoch:0
 };
-const lab={mode:"live",speed:1,semitones:0,processed:null,worker:null,job:0};
+const lab={mode:"live",speed:1,semitones:0,fftSize:2048,referenceWindows:8,processed:null,worker:null,job:0};
 const labReady=()=>lab.mode!=="live"&&lab.processed?.model===lab.mode&&lab.processed?.speed===lab.speed&&lab.processed?.semitones===lab.semitones;
 
 // Continuous log bands around 20 Hz: 0..200 resolves 0.001..20 Hz,
@@ -469,6 +470,7 @@ function drawAudio(){
 }
 function playPosition(){
   if(!state.player||!state.ctx||!duration())return state.seek;
+  if(state.player.labStream&&!state.player.stream.firstScheduled)return state.player.offset;
   return (state.player.offset+Math.max(0,state.ctx.currentTime-state.player.at)*(state.player.sourceTimeRate||1))%duration();
 }
 function refreshPlayhead(){
@@ -607,6 +609,7 @@ function seek(seconds){
   const where=clamp(seconds,0,Math.max(0,duration()-.001));
   state.seek=where;mediaStatus(Boolean(p));
   if(!p)return;
+  if(p.labStream){void stop().then(()=>play("wet",where));return;}
   // Short host mute covers state reset and rebuffering at the new position.
   const now=state.ctx.currentTime;
   p.master.gain.cancelScheduledValues(now);
@@ -619,7 +622,7 @@ function mediaStatus(playing){
   const session=navigator.mediaSession;
   if(!session)return;
   try{
-    if(typeof MediaMetadata==="function")session.metadata=new MediaMetadata({title:state.name||"Frequency Warp"});
+    if(typeof MediaMetadata==="function")session.metadata=new MediaMetadata({title:state.name||"Audio Time–Frequency Lab"});
     session.playbackState=playing?"playing":"paused";
   }catch{}
 }
@@ -687,6 +690,10 @@ async function stop(){
   }
   state.seek=playPosition();
   state.player=null;
+  if(p.labStream){
+    p.stream.stop();mediaStatus(false);controls.stop.disabled=true;
+    $("#rt-telemetry").textContent="";indicator("停止中");refreshStatusSeek();return;
+  }
   try{p.source?.stop();}catch{}
   try{p.source?.disconnect();p.worklet?.disconnect();p.wet?.disconnect();
     p.dry.disconnect();p.master.disconnect();p.directRoute.disconnect();
@@ -702,6 +709,8 @@ async function stop(){
 }
 async function play(mode="wet",offset=null){
   if(!state.dry)return;
+  if(lab.mode!=="live"&&mode==="wet")return startModelPlayback(offset);
+  if(state.player?.labStream){const where=offset??playPosition();await stop();return play(mode,where);}
   const offlineRequest=lab.mode!=="live"&&mode==="wet";
   if(offlineRequest&&!labReady()){
     message("モデルを先に計算してください。原音再生は利用できます。","error");
@@ -1533,76 +1542,94 @@ document.documentElement.dataset.fwBoot="ready";
  * on demand, never claimed to be real-time or physically identifiable.
  */
 const labModel=$("#lab-model"),labSpeed=$("#lab-speed"),labPitch=$("#lab-pitch");
-const labStatus=$("#lab-status"),labRender=$("#lab-render");
-function labStatusText(message){labStatus.textContent=message;}
+const labFft=$("#lab-fft"),labWindows=$("#lab-windows"),labStatus=$("#lab-status");
+function labStatusText(text){labStatus.textContent=text;}
 function labRefresh(){
-  $("#lab-speed-output").textContent=Number(labSpeed.value).toFixed(2)+"×";
-  $("#lab-pitch-output").textContent=(Number(labPitch.value)>0?"+":"")+labPitch.value+" 半音";
-  labRender.disabled=!state.dry||lab.mode==="live";
-  labRender.hidden=lab.mode==="live";
-  if(lab.mode==="live")labStatusText("LIVE · Rust/WASM AudioWorklet。再生開始を事前の全曲計算で待ちません。音質は実験段階。");
-  else if(labReady())labStatusText("計算済み · "+lab.mode+"。既存の「変換して再生」で試聴できます。");
-  else labStatusText("OFFLINE · "+lab.mode+"。モデルを先に計算してください。このモデル自体はリアルタイムではありません。");
+  $("#lab-speed-output").textContent=lab.speed.toFixed(2)+"×";
+  $("#lab-pitch-output").textContent=(lab.semitones>0?"+":"")+lab.semitones+" 半音";
+  $("#lab-fft-output").textContent=String(lab.fftSize)+" samples";
+  $("#lab-windows-output").textContent=String(lab.referenceWindows)+" 窓";
+  $("#lab-windows").disabled=lab.mode==="live";
+  $("#lab-window-note").textContent=lab.mode==="live"
+    ?"Rust方式は窓長のみ対応。参照窓数は他の4モデル用です。"
+    :"前後の波形を参照する窓数。増やすと初期処理の負荷が高まります。";
+  if(!state.player?.labStream)labStatusText(lab.mode==="live"
+    ?"Rust/WASMの部分音処理 · 音源を選んで再生"
+    :lab.mode.toUpperCase()+" · 自動先読み処理。計算ボタン不要・再生位置から開始");
 }
-function labInvalidate(){
-  lab.job++;
-  lab.worker?.terminate();lab.worker=null;
-  lab.processed=null;
-}
+function labInvalidate(){lab.job++;lab.worker?.terminate();lab.worker=null;lab.processed=null;}
 async function labSettingsChanged(){
-  const previous=lab.mode;
-  const currentTime=playPosition();
-  const nextMode=labModel.value;
-  const nextSpeed=Number(labSpeed.value),nextSemi=Number(labPitch.value);
-  const changed=nextMode!==lab.mode||nextSpeed!==lab.speed||nextSemi!==lab.semitones;
-  if(!changed)return;
+  const previous=lab.mode,currentTime=playPosition();
+  const nextMode=labModel.value,nextSpeed=Number(labSpeed.value),nextSemi=Number(labPitch.value);
+  const nextFft=2**Number(labFft.value),nextWindows=Number(labWindows.value);
+  if(nextMode===lab.mode&&nextSpeed===lab.speed&&nextSemi===lab.semitones&&nextFft===lab.fftSize&&nextWindows===lab.referenceWindows)return;
   liveFactors(nextSpeed,nextSemi);
   lab.mode=nextMode;lab.speed=nextSpeed;lab.semitones=nextSemi;
+  lab.fftSize=nextFft;lab.referenceWindows=nextWindows;
+  // Borrow the original Rust quality control, never silently pretend that
+  // +/- context windows are part of Rust's existing DSP API.
+  $("#quality").value=nextFft===1024?"eco":nextFft===2048?"standard":"high";
   labInvalidate();
   if(state.player){
     if(previous==="live"&&lab.mode==="live"&&state.player.labRealtime){
-      const p=state.player;
-      p.offset=currentTime;p.at=state.ctx.currentTime;p.sourceTimeRate=lab.speed;
+      const p=state.player;p.offset=currentTime;p.at=state.ctx.currentTime;
+      p.sourceTimeRate=lab.speed;
       p.source?.playbackRate.setValueAtTime(lab.speed,state.ctx.currentTime);
       updateParams("lab");
     }else{
-      await stop();
-      state.seek=currentTime;
+      const wasWet=state.player.mode==="wet";
+      await stop();state.seek=currentTime;
+      if(wasWet)void play("wet",currentTime);
+      else void play("dry",currentTime);
     }
   }
   labRefresh();
   if(state.dry&&lab.mode==="live"&&!state.player)updateParams("lab");
 }
-[labModel,labSpeed,labPitch].forEach(node=>node.addEventListener("change",()=>void labSettingsChanged()));
-labSpeed.addEventListener("input",()=>{$("#lab-speed-output").textContent=Number(labSpeed.value).toFixed(2)+"×";});
-labPitch.addEventListener("input",()=>{$("#lab-pitch-output").textContent=labPitch.value+" 半音";});
-labRender.addEventListener("click",()=>{
- if(!state.dry||lab.mode==="live")return;
- labInvalidate();const job=lab.job;
- labRender.disabled=true;
- labStatusText("OFFLINE · "+lab.mode+"モデルを計算しています… 元音源は保持します。");
- try{
-  const worker=new Worker("./lab-processor.worker.mjs",{type:"module"});
-  lab.worker=worker;
-  worker.onmessage=async({data})=>{
-    if(job!==lab.job)return;
-    worker.terminate();lab.worker=null;
-    if(!data.ok){labRefresh();labStatusText("モデル処理失敗: "+data.message);return;}
-    lab.processed={channels:data.channels,model:lab.mode,speed:lab.speed,semitones:lab.semitones};
-    if(state.player){const at=playPosition();await stop();state.seek=at;}
-    labRefresh();
-  };
-  worker.onerror=()=>{
-    if(job!==lab.job)return;
-    worker.terminate();lab.worker=null;
-    labRefresh();labStatusText("処理失敗。原音再生は利用できます。");
-  };
-  const channels=state.dry.map(ch=>Float32Array.from(ch));
-  worker.postMessage({job,channels,sampleRate:state.decoded.sampleRate,
-    speed:lab.speed,semitones:lab.semitones,model:lab.mode},
-    channels.map(ch=>ch.buffer));
- }catch(error){
-  labRefresh();labStatusText("処理失敗: "+error.message);
- }
-});
+[labModel,labSpeed,labPitch,labFft,labWindows].forEach(node=>node.addEventListener("change",()=>void labSettingsChanged()));
+function liveSliderValue(){
+  $("#lab-speed-output").textContent=Number(labSpeed.value).toFixed(2)+"×";
+  $("#lab-pitch-output").textContent=labPitch.value+" 半音";
+  $("#lab-fft-output").textContent=String(2**Number(labFft.value))+" samples";
+  $("#lab-windows-output").textContent=labWindows.value+" 窓";
+}
+[labSpeed,labPitch,labFft,labWindows].forEach(node=>node.addEventListener("input",liveSliderValue));
+async function startModelPlayback(offset=null){
+  const where=clamp(offset??(state.player?playPosition():state.seek),0,Math.max(0,duration()-.001));
+  if(state.player)await stop();
+  // Native AudioContext (and original file decoder/transport) is inherited;
+  // only the streaming model renderer is added.
+  const epoch=++state.transportEpoch;
+  const ctx=await context();
+  if(epoch!==state.transportEpoch)return;
+  state.seek=where;
+  labStatusText(lab.mode.toUpperCase()+" · 再生位置から先読み処理を開始…");
+  let player;
+  try{
+    const stream=createModelStream({
+      ctx,sourceChannels:state.dry,sampleRate:state.decoded.sampleRate,
+      speed:lab.speed,semitones:lab.semitones,model:lab.mode,
+      fftSize:lab.fftSize,referenceWindows:lab.referenceWindows,startSeconds:where,
+      onStatus:text=>{if(state.player===player)labStatusText(text);},
+      onStarted:at=>{
+        if(state.player!==player)return;
+        player.at=at;controls.stop.disabled=false;
+        indicator("モデル再生中 · "+lab.mode.toUpperCase()+" · 自動先読み");
+        message("選択モデルを順次処理して再生中。全曲の計算は不要です。");
+      },
+      onFailure:error=>{
+        if(state.player!==player)return;
+        labStatusText("モデル処理失敗: "+error);
+        void stop().then(()=>play("dry",where));
+      }
+    });
+    player={labStream:true,stream,mode:"wet",offset:where,at:ctx.currentTime,
+      sourceTimeRate:lab.speed,master:stream.master};
+    state.player=player;controls.stop.disabled=false;
+    mediaStatus(true);stream.start();refreshPlayhead();
+  }catch(error){
+    labStatusText("処理開始失敗: "+error.message);
+    if(state.player===player)await stop();
+  }
+}
 labRefresh();

@@ -38,18 +38,26 @@ try:
       # The Playwright browser can suppress AudioWorklet addModule; native
       # actual Chrome worklet proof is separately covered by lab-live-smoke.test.mjs.
       # Here the real native file picker is the acceptance target, not injection.
+      assert page.title().startswith("Audio Time–Frequency Lab")
+      assert page.locator("h1").inner_text()=="Audio Time–Frequency Lab"
+      assert not page.locator(".quick-panel").is_visible()
+      assert not page.locator(".workspace-right").is_visible()
+      assert not page.locator("#settings-open").is_visible()
+      assert page.locator("#lab-render").count()==0
+      page.locator("#lab-fft").evaluate("(e)=>{e.value='10';e.dispatchEvent(new Event('change',{bubbles:true}));}")
+      page.locator("#lab-windows").evaluate("(e)=>{e.value='2';e.dispatchEvent(new Event('change',{bubbles:true}));}")
       page.locator("#lab-model").select_option("wsola")
-      page.locator("#lab-render").click()
-      page.get_by_text("計算済み · wsola",exact=False).wait_for(timeout=25000)
       page.locator("#play-wet").click()
-      page.get_by_text("計算済みのwsolaモデルを再生中",exact=False).wait_for(timeout=15000)
+      page.locator("#rt-indicator").get_by_text("モデル再生中",exact=False).wait_for(timeout=25000)
+      assert page.locator("#lab-fft-output").inner_text()=="1024 samples"
+      assert page.locator("#lab-windows-output").inner_text()=="2 窓"
       page.locator("#stop").click()
       page.locator("#play-dry").click()
       page.locator("#rt-indicator").wait_for(timeout=15000)
       assert "原音再生中" in page.locator("#rt-indicator").inner_text()
       page.locator("#stop").click()
       assert not failures,failures
-      print("PASS upstream-native picker, Rust worklet live speed+pitch, WSOLA offline model and dry transport; mobile emulation:",mobile)
+      print("PASS inherited native chooser, clean Lab UI, automatic WSOLA preview + window controls, original transport; mobile emulation:",mobile)
       page.close()
     browser.close()
 finally:
