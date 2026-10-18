@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {renderPCM} from './lab-dsp.mjs';
 import {planChunk} from './lab-stream.mjs';
+import {estimateSharedPartials,renderJointAudio} from './period-joint-multi.mjs';
 
 const sr=16000;
 function toneAfter({duration=1.6,onset=.9,frequency=392,amplitude=.33}){
@@ -61,4 +62,18 @@ test('actual 1.5s worker-equivalent core preserves late onset source-time / spee
  console.log('WORKER_PLAN_ONSET_ALIGNMENT',JSON.stringify({sourceOnset:onset,speed,expected,early,active,ratio:early/(active+1e-12)}));
  assert.ok(active>.045);
  assert.ok(early<Math.max(.008,active*.12),'worker preview early onset');
+});
+
+test('diagnostic only: separate source latent gate, tonal output and PV residual leakage',()=>{
+ const source=toneAfter({onset:.9});
+ const m=estimateSharedPartials({channels:[source],sampleRate:sr});
+ const resOnly=m.residual[0],amp=rms(resOnly,.2,.7);
+ const tonal=renderJointAudio({channels:[source],sampleRate:sr,speed:.8,semitones:4,
+  renderResidual:(ch,n)=>ch.map(()=>new Float32Array(n))}).channels[0];
+ const combined=renderPCM({channels:[source],sampleRate:sr,speed:.8,semitones:4,model:'period-joint'}).channels[0];
+ const diagnostics={parts:m.partials.map(x=>({f:x.frequency,gainFirst:x.envelope?.[0],
+   gainEarly:x.envelope?.[Math.floor(.4*sr/x.envelopeHop)],gainLate:x.envelope?.[Math.floor(1.2*sr/x.envelopeHop)]})),
+   rawResidualEarly:amp,tonalEarly:rms(tonal,.26,.93),fullEarly:rms(combined,.26,.93)};
+ console.log('TEMPORAL_PARTIAL_DIAG',JSON.stringify(diagnostics));
+ assert.ok(Number.isFinite(amp));
 });
