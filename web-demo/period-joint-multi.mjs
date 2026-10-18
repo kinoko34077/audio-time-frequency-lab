@@ -142,44 +142,65 @@ export function temporalGain(partial,sourceFrame){
  return env[i]*(1-fraction)+env[Math.min(env.length-1,i+1)]*fraction;
 }
 function sourceSynchronousEnvelope(channels,sr,partials){
- const L=channels[0].length,step=Math.max(64,Math.round(sr*.01));
- // Global stationary prediction is only used as a regression basis.
- // It is NOT the source residual and must NEVER be emitted un-gated.
- const predicted=channels.map(()=>new Float64Array(L));
- for(const p of partials)addComponent(predicted,p,sr,1);
- for(const p of partials){
-  const dot=new Float64Array(L+1),norm=new Float64Array(L+1);
-  const w=TAU*p.frequency/sr,cosStep=Math.cos(w),sinStep=Math.sin(w);
+ const L=channels[0].length,count=partials.length;
+ const step=Math.max(64,Math.round(sr*.01)),radius=Math.max(16,Math.round(sr*.027));
+ // Evaluate all sinusoids against the ORIGINAL PCM, not against invented
+ // globally active oscillators. Independent conditional subtraction made
+ // near-degenerate candidate pairs mutually justify phantom pre-onsets.
+ const basis=partials.map(partial=>{
+  const cs=partial.coefficients;
+  const dest=channels.map(()=>new Float32Array(L));
+  const phase=TAU*partial.frequency/sr,co=Math.cos(phase),si=Math.sin(phase);
   let x=1,y=0;
   for(let i=0;i<L;i++){
-   let cross=0,power=0;
+   for(let c=0;c<channels.length;c++)dest[c][i]=cs[c].a*x+cs[c].b*y;
+   const next=x*co-y*si;
+   y=y*co+x*si;x=next;
+   if((i&4095)===4095){x=Math.cos(phase*(i+1));y=Math.sin(phase*(i+1));}
+  }
+  return dest;
+ });
+ const envelopes=partials.map(()=>new Float32Array(Math.ceil(L/step)+1));
+ const stride=Math.max(1,Math.floor(sr/16000));
+ for(let j=0;j<envelopes[0].length;j++){
+  const center=Math.min(L-1,j*step);
+  const start=Math.max(0,center-radius),end=Math.min(L,center+radius+1);
+  const gram=Array.from({length:count},()=>new Float64Array(count));
+  const projection=new Float64Array(count),gain=new Float64Array(count);
+  let signalEnergy=0;
+  for(let i=start;i<end;i+=stride){
    for(let c=0;c<channels.length;c++){
-    const {a,b}=p.coefficients[c];
-    const template=a*x+b*y;
-    // The source without other candidate partials. This conditional
-    // projection asks whether p is present NOW, not elsewhere in chunk.
-    const isolated=channels[c][i]-predicted[c][i]+template;
-    cross+=isolated*template;power+=template*template;
+    const y=channels[c][i];signalEnergy+=y*y;
+    for(let k=0;k<count;k++){
+     const a=basis[k][c][i];
+     projection[k]+=a*y;
+     for(let m=0;m<=k;m++)gram[k][m]+=a*basis[m][c][i];
+    }
    }
-   dot[i+1]=dot[i]+cross;norm[i+1]=norm[i]+power;
-   const next=x*cosStep-y*sinStep;
-   y=y*cosStep+x*sinStep;x=next;
-   if((i&4095)===4095){x=Math.cos(w*(i+1));y=Math.sin(w*(i+1));}
   }
-  // 54ms support is small versus the observed ~1s early note; central
-  // alignment keeps any onset smear bounded to ~27ms instead of 1.5s.
-  const radius=Math.max(16,Math.round(sr*.027));
-  const env=new Float32Array(Math.ceil(L/step)+1);
-  for(let j=0;j<env.length;j++){
-   const center=Math.min(L-1,j*step),left=Math.max(0,center-radius);
-   const right=Math.min(L,center+radius+1);
-   const energy=norm[right]-norm[left],projection=dot[right]-dot[left];
-   let gain=energy>1e-12?Math.max(0,Math.min(1.5,projection/energy)):0;
-   // Suppress weak correlation ghosts; absence remains in the residual.
-   if(gain<.07)gain=0;
-   env[j]=gain;
+  if(signalEnergy>1e-12){
+   for(let k=0;k<count;k++)for(let m=k+1;m<count;m++)gram[k][m]=gram[m][k];
+   // Bounded nonnegative joint least squares with a gentle zero-gain prior.
+   // A silent sample gives b=0 => ALL gains zero, including collinear tones.
+   // It also allows a later note to enter while another source sustains.
+   for(let sweep=0;sweep<20;sweep++){
+    for(let k=0;k<count;k++){
+     const regularizer=gram[k][k]*.025+1e-12;
+     let rest=projection[k];
+     for(let m=0;m<count;m++)if(m!==k)rest-=gram[k][m]*gain[m];
+     gain[k]=Math.max(0,Math.min(1.5,rest/(gram[k][k]+regularizer)));
+    }
+   }
   }
-  p.envelope=env;p.envelopeHop=step;
+  for(let k=0;k<count;k++){
+   let g=gain[k];
+   if(g<.07)g=0;
+   envelopes[k][j]=g;
+  }
+ }
+ for(let k=0;k<count;k++){
+  partials[k].envelope=envelopes[k];
+  partials[k].envelopeHop=step;
  }
 }
 export function estimateSharedPartials({channels,sampleRate,K=PERIOD_K,maxPartials=MAX_PARTIALS}){
