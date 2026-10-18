@@ -25,7 +25,7 @@ export function fullBandPartialOptions(sampleRate){
  if(!(Number.isFinite(sampleRate)&&sampleRate>=8000&&sampleRate<=192000))throw RangeError('invalid sample rate');
  return {
    aQuality:100,aBandBins:1,aMinHz:1,aReverb:0,
-   low:1,high:Math.min(22000,sampleRate*.49),
+   low:1,high:Math.min(20000,sampleRate*.49),
    outside:'pass',crusherBits:0,crusherHold:1,
    ringEnabled:false,wet:1
  };
