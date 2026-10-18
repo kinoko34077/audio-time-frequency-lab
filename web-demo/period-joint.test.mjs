@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {integerReferenceHz,theoreticalWindow,commonBoundary,sampleInterval,estimateJointTone,renderPeriodJointTone} from './period-joint.mjs';
+import {renderPCM} from './lab-dsp.mjs';
 const sr=16000;
 const tone=(f,length=sr,amplitude=.3,phase=.2)=>Float32Array.from({length},(_,i)=>amplitude*Math.cos(2*Math.PI*f*i/sr+phase));
 const crossing=(ch,start=1000,end=ch.length-1000)=>{let n=0;for(let i=start+1;i<end;i++)if(ch[i-1]<0&&ch[i]>=0)n++;return n*sr/(end-start);};
@@ -50,4 +51,20 @@ test('silence finite and length coherent',()=>{
  const x=renderPeriodJointTone({channels:[new Float32Array(sr)],sampleRate:sr,speed:2,semitones:12});
  assert.equal(x.channels[0].length,sr/2);
  assert.ok(x.channels[0].every(v=>v===0));
+});
+
+test('adjacent segments anchor phase to absolute source time for stationary tone',()=>{
+ const freq=437.3,phase=.2;
+ const signal=offset=>Float32Array.from({length:sr},(_,i)=>.3*Math.cos(2*Math.PI*freq*(offset+i/sr)+phase));
+ for(const speed of [1,.75]){
+  const first=renderPeriodJointTone({channels:[signal(0)],sampleRate:sr,speed,sourceStartSeconds:0}).channels[0];
+  const next=renderPeriodJointTone({channels:[signal(1)],sampleRate:sr,speed,sourceStartSeconds:1}).channels[0];
+  assert.ok(Math.abs(first[first.length-1]-next[0])<.075,'stationary tone phase jump at speed '+speed);
+ }
+});
+test('processor dispatch forwards absolute source origin only for opt-in model',()=>{
+ const signal=Float32Array.from({length:sr},(_,i)=>.3*Math.cos(2*Math.PI*437.3*(1+i/sr)+.2));
+ const a=renderPCM({channels:[signal],sampleRate:sr,model:'period-joint',sourceStartSeconds:1});
+ const b=renderPeriodJointTone({channels:[signal],sampleRate:sr,sourceStartSeconds:1});
+ assert.ok(a.channels[0].every((v,i)=>Math.abs(v-b.channels[0][i])<1e-8));
 });

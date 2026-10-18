@@ -24,3 +24,6 @@ Status: RESEARCH PROTOTYPE. Not production quality, source separation, joint AM/
 - P3: transient/nonpitch residual, perceptual safeguards, onset timing, phase across chunks, adaptive K, stereo stability, bounded memory/CPU.
 - P4: matched STFT/PV, WSOLA, dual, CQT/NSGT, joint-grid baselines; evaluate reconstruction, frequency/phase error, timing, robustness under noise, CPU/memory, and listening on real devices.
 - Do not merge or publish merely because the checkbox exists. Require P2–P4 and review plus target-device proof and user publication authorization. The existing Rust/WASM and production Pages remain untouched.
+### P1 phase-origin corrective proof (pending new PR-head CI)
+
+`sourceStartSeconds` is passed from Worker chunk plan to the experimental estimator, keeping the stationary-tone phase referenced to absolute source time even when render chunks begin at different offsets. Tests compare adjoining synthetic chunks at s=1 and s=.75. This is not a guarantee for evolving spectra, long recordings or noisy frequency estimates; those remain P2/P3 gates.

@@ -80,13 +80,21 @@ export function estimateJointTone({channels,sampleRate,K=PERIOD_K}){
   explained:coefficients.reduce((sum,c)=>sum+c.explained,0)/coefficients.length,
   coefficients,windows:WINDOW_COUNT,periods:K,silent:false};
 }
-export function renderPeriodJointTone({channels,sampleRate,speed=1,semitones=0}){
+export function renderPeriodJointTone({channels,sampleRate,speed=1,semitones=0,sourceStartSeconds=0}){
  if(!Number.isFinite(speed)||speed<.5||speed>2||!Number.isFinite(semitones)||semitones<-12||semitones>12)throw RangeError('invalid speed/pitch');
+ if(!(Number.isFinite(sourceStartSeconds)&&sourceStartSeconds>=0))throw RangeError('invalid source origin');
  const estimate=estimateJointTone({channels,sampleRate});
  const frames=Math.max(1,Math.round(channels[0].length/speed));
  if(frames*channels.length>14_000_000)throw RangeError('memory bound');
  if(!estimate.silent&&estimate.explained<.90)throw Error('個別周期・共同推定の試験版は単一定常純音のみ対応（複音・変調・打音は未対応）');
  const f=estimate.frequency*2**(semitones/12);
- return {channels:estimate.coefficients.map(({a,b})=>Float32Array.from({length:frames},(_,i)=>a*Math.cos(TAU*f*i/sampleRate)+b*Math.sin(TAU*f*i/sampleRate))),sampleRate,
+ // Project chunk-local fitted phase onto a common absolute source timeline.
+ // This ensures the *stationary-tone* model does not restart phase at each
+ // processed segment; time-varying multi-tone phase continuity remains future work.
+ return {channels:estimate.coefficients.map(({a,b})=>{
+  const amp=Math.hypot(a,b),phase=Math.atan2(-b,a)-TAU*estimate.frequency*sourceStartSeconds;
+  return Float32Array.from({length:frames},(_,i)=>
+   amp*Math.cos(phase+TAU*f*(sourceStartSeconds/speed+i/sampleRate)));
+ }),sampleRate,
  diagnostics:{...estimate,outFrequency:f}};
 }
