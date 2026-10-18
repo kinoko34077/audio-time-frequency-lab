@@ -1,4 +1,5 @@
 import {QUALITY,mixWet} from "./dsp.mjs";
+import {liveFactors} from "./lab-contract.mjs";
 import {frequencyFromSlider,sliderFromFrequency,holdFromFrequency,drawCrusherPreview} from "./crusher-visual.mjs";
 import {drawFrequencyGraph} from "./graph.mjs";
 import {mountDualThumb} from "./dual-thumb.mjs";
@@ -31,6 +32,9 @@ const state={
   precise:Object.create(null),
   effective:{low:20,high:16000},raf:0,lastStats:null,mathCore:null,wasmPromise:null,rebuildTimer:null,sine:null,loadToken:0,transportEpoch:0
 };
+const lab={mode:"live",speed:1,semitones:0,processed:null,worker:null,job:0};
+const labReady=()=>lab.mode!=="live"&&lab.processed?.model===lab.mode&&lab.processed?.speed===lab.speed&&lab.processed?.semitones===lab.semitones;
+
 // Continuous log bands around 20 Hz: 0..200 resolves 0.001..20 Hz,
 // 200..1000 resolves 20..20,000 Hz. Exact typed values remain independent.
 const MIN_POSITIVE_HZ=0.001;
@@ -205,6 +209,14 @@ function settings(){
     aBandBins:Number($("#a-band").value),
     aQuality:Number($("#a-quality").value)
   };
+  if(lab.mode==="live"){
+    const ratio=liveFactors(lab.speed,lab.semitones);
+    Object.assign(value,{engine:3,rationalEnabled:true,pitchRatio:ratio.spectralRatio,shiftHz:0,
+      low:20,high:Math.min(20000,runtimeSampleRate*.45),
+      curvature:1,invert:0,mode:"blend",outside:"pass",axisShift:0,axisReference:350,
+      axisPivot:350,axisSlope:1,ringEnabled:false,wet:1});
+    return value;
+  }
   // Evaluate the effective curve that is drawn, not just the raw invert
   // mapping. Signed 0-Hz Reflect can reverse the displayed slope even when
   // Invert=0; the auto engine must agree with that change.
@@ -413,11 +425,12 @@ async function ensureSharedCore(){
 function updateEngineInfo(){
   const s=settings(),q=QUALITY[$("#quality").value],rate=state.ctx?.sampleRate||48000;
   const latency=1000*(q.fftSize-1)/rate;
-  const names=["A · 部分音再合成","B · STFT変換"];
+  const names=["A · 部分音再合成","B · STFT変換","C · Ring Mod","LIVE · Rust 音程/速度"];
   const explain=[
     "部分音追跡と発振器による実験的な再合成方式です。残差や過渡音は完全に復元されません。",
     "FFTビン再配置による実験的な再合成方式です。位相・離散格子誤差に注意してください。"
   ];
+  explain.push("Ring Mod実験方式。","Rustの部分音追跡で速度による音高変化を相殺する実験的リアルタイム方式。");
   const automatic=$("#engine-auto").checked;
   $("#engine").disabled=automatic;
   $("#engine").hidden=automatic;
@@ -456,7 +469,7 @@ function drawAudio(){
 }
 function playPosition(){
   if(!state.player||!state.ctx||!duration())return state.seek;
-  return (state.player.offset+Math.max(0,state.ctx.currentTime-state.player.at))%duration();
+  return (state.player.offset+Math.max(0,state.ctx.currentTime-state.player.at)*(state.player.sourceTimeRate||1))%duration();
 }
 function refreshPlayhead(){
   const seconds=playPosition();
@@ -508,10 +521,11 @@ async function prepareCore(){
   if(!state.module)await ensureSharedCore();
   return {ctx,module:state.module};
 }
-function makeBuffer(){
+function makeBuffer(useLab=false){
   const ctx=state.ctx;
-  const audio=ctx.createBuffer(state.dry.length,state.dry[0].length,state.decoded.sampleRate);
-  state.dry.forEach((ch,i)=>audio.copyToChannel(ch,i));
+  const channels=useLab&&labReady()?lab.processed.channels:state.dry;
+  const audio=ctx.createBuffer(channels.length,channels[0].length,state.decoded.sampleRate);
+  channels.forEach((ch,i)=>audio.copyToChannel(ch,i));
   return audio;
 }
 function tuneWet(){
@@ -577,8 +591,11 @@ function startSource(p,offset){
   if(p.worklet)p.worklet.port.postMessage({type:"reset"});
   const src=state.ctx.createBufferSource();
   src.buffer=p.buffer;src.loop=true;src.connect(p.worklet||p.dry);
+  p.sourceTimeRate=(p.labRealtime||p.labProcessed)?lab.speed:1;
+  src.playbackRate.value=p.labRealtime?lab.speed:1;
+  const inputOffset=p.labProcessed?offset/lab.speed:offset;
   const when=state.ctx.currentTime+.025;
-  src.start(when,clamp(offset,0,Math.max(0,duration()-.001)));
+  src.start(when,clamp(inputOffset,0,Math.max(0,p.buffer.duration-.001)));
   p.source=src;p.offset=offset;p.at=when;state.seek=offset;
 }
 function seek(seconds){
@@ -681,6 +698,18 @@ async function stop(){
 }
 async function play(mode="wet",offset=null){
   if(!state.dry)return;
+  const offlineRequest=lab.mode!=="live"&&mode==="wet";
+  if(offlineRequest&&!labReady()){
+    message("モデルを先に計算してください。原音再生は利用できます。","error");
+    return;
+  }
+  if(state.player&&(state.player.labProcessed||offlineRequest)){
+    const want=offlineRequest&&labReady();
+    if(Boolean(state.player.labProcessed)!==want){
+      const at=offset??playPosition();
+      await stop();return play(mode,at);
+    }
+  }
   if(state.player?.directDry&&mode==="wet"){
     // A rejected wet request must not destroy a currently audible original.
     const check=prepareStreamSettings(settings());
@@ -704,8 +733,8 @@ async function play(mode="wet",offset=null){
   }
   const launchEpoch=++state.transportEpoch;
   controls.dry.disabled=true;controls.wet.disabled=true;
-  if(mode==="dry"){
-    indicator("原音を起動中…");
+  if(mode==="dry"||offlineRequest){
+    indicator(offlineRequest?"モデル再生を起動中…":"原音を起動中…");
     try{
       // Browser native buffer playback; even a broken/unavailable wet WASM
       // engine or an invalid theoretical F cannot block original audition.
@@ -716,8 +745,9 @@ async function play(mode="wet",offset=null){
       dry.connect(master);master.connect(directRoute);directRoute.connect(ctx.destination);
       const player={
         directDry:true,worklet:null,dry,wet:null,master,directRoute,
-        bridgeRoute:null,outputRoute:"direct",buffer:makeBuffer(),
-        source:null,mode:"dry",at:ctx.currentTime,offset:0
+        labProcessed:offlineRequest,labRealtime:false,
+        bridgeRoute:null,outputRoute:"direct",buffer:makeBuffer(offlineRequest),
+        source:null,mode:offlineRequest?"wet":"dry",at:ctx.currentTime,offset:0
       };
       state.player=player;
       startSource(player,offset===null?state.seek:offset);
@@ -725,8 +755,8 @@ async function play(mode="wet",offset=null){
       void mediaBridge(player);
       controls.stop.disabled=false;
       $("#rt-telemetry").textContent="";
-      indicator("原音再生中 · 変換DSPから独立");
-      message("原音再生中。変換設定にかかわらず音源を再生しています。");
+      indicator(offlineRequest?"計算済みモデル再生中":"原音再生中 · 変換DSPから独立");
+      message(offlineRequest?"計算済みの"+lab.mode+"モデルを再生中。":"原音再生中。変換設定にかかわらず音源を再生しています。");
     }catch(error){
       if(launchEpoch!==state.transportEpoch)return;
       await stop();
@@ -760,7 +790,7 @@ async function play(mode="wet",offset=null){
     master.gain.value=1;
     const player={
       worklet,dry,wet,master,directRoute,bridgeRoute:null,outputRoute:"direct",
-      buffer:makeBuffer(),source:null,
+      buffer:makeBuffer(),source:null,labRealtime:lab.mode==="live",labProcessed:false,
       mode,quality:current.qualityIndex,engine:current.engine,hopDiv:current.hopDiv,at:ctx.currentTime,
       offset:0,appliedRevision:0,feedback:createPlaybackFeedback(),
       notice:preflight.warnings.join(" ")
@@ -1212,7 +1242,9 @@ async function load(file){
     if(state.rebuildTimer){clearTimeout(state.rebuildTimer);state.rebuildTimer=null;}
     if(state.offlineWorker){state.offlineWorker.terminate();state.offlineWorker=null;}
     state.offline=null;state.decoded={sampleRate:data.sampleRate};
-    state.dry=dry;state.seek=0;state.lastStats=null;
+    lab.job++;lab.worker?.terminate();lab.worker=null;lab.processed=null;
+    state.dry=dry;state.seek=0;
+    labRefresh();state.lastStats=null;
     state.name=file.name.replace(/\.[^.]+$/,"");
     mediaStatus(false);
     state.fileMeta=file.name+" · "+duration().toFixed(1)+"秒 · "+data.sampleRate+"Hz · "+count+"ch";
