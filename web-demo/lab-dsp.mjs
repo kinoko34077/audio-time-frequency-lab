@@ -160,8 +160,8 @@ export function wsola(channels,stretch,outLen,fftSize=1024,sampleRate=48000){
    // unpredictably. The time-map advance, not spectral peak matching,
    // defines the requested playback rate.
    const radius=Math.max(4,Math.min(Math.floor(hop*.38),Math.round(Math.sqrt(N))));
-   const lo=Math.max(0,prev+1,ideal-search,predicted-radius);
-   const hi=Math.min(L-N,ideal+search,predicted+radius);
+   const lo=Math.max(0,prev+1,ideal-search,ideal-Math.max(hop,Math.floor(N/2)),predicted-radius);
+   const hi=Math.min(L-N,ideal+search,ideal+Math.max(hop,Math.floor(N/2)),predicted+radius);
    if(lo<=hi){
     let best=-Infinity,bestSrc=predicted;
     for(let candidate=lo;candidate<=hi;candidate+=4){
@@ -173,7 +173,7 @@ export function wsola(channels,stretch,outLen,fftSize=1024,sampleRate=48000){
      if(score>best){best=score;bestSrc=candidate;}
     }
     src=bestSrc;
-   }else src=Math.max(prev+1,ideal);
+   }else src=Math.min(L-N,Math.max(prev+1,ideal));
   }
   for(let j=0;j<N&&pos+j<weight.length;j++){
    const wi=w[j],index=pos+j;
