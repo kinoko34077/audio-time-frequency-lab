@@ -45,7 +45,8 @@ try:
       page.get_by_text("計算済みのwsolaモデルを再生中",exact=False).wait_for(timeout=15000)
       page.locator("#stop").click()
       page.locator("#play-dry").click()
-      page.get_by_text("原音再生中",exact=False).wait_for(timeout=15000)
+      page.locator("#rt-indicator").wait_for(timeout=15000)
+      assert "原音再生中" in page.locator("#rt-indicator").inner_text()
       page.locator("#stop").click()
       assert not failures,failures
       print("PASS upstream-native picker, Rust worklet live speed+pitch, WSOLA offline model and dry transport; mobile emulation:",mobile)
