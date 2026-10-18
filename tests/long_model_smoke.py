@@ -20,6 +20,13 @@ try:
     with sync_playwright() as p:
         browser=p.chromium.launch(channel='chromium',headless=True,args=['--no-sandbox','--autoplay-policy=no-user-gesture-required','--disable-dev-shm-usage'])
         page=browser.new_page()
+        page.add_init_script("""(() => {
+          window.__labStarts=0;
+          const original=AudioBufferSourceNode.prototype.start;
+          AudioBufferSourceNode.prototype.start=function(...args){
+            window.__labStarts++;return original.apply(this,args);
+          };
+        })()""")
         failures=[]
         page.on('pageerror',lambda err: failures.append(str(err)))
         page.goto(url,wait_until='domcontentloaded')
@@ -38,6 +45,14 @@ try:
             except Exception as err:
                 raise AssertionError(f'{model} could not start: '+page.locator('#lab-status').inner_text()) from err
             assert 'メモリ上限' not in page.locator('#lab-status').inner_text()
+            if model=='pv':
+                # 1.5sec input chunks at 0.5x occupy about 3sec playback.
+                # Multiple native AudioBufferSource starts prove continuous
+                # replenishment past the first processed preview segment.
+                page.wait_for_timeout(7600)
+                started=page.evaluate('window.__labStarts')
+                assert started>=3, f'only {started} preview segment(s) scheduled'
+                assert 'モデル再生中' in page.locator('#rt-indicator').inner_text()
             # Seek directly to mid-song; replacement preview must start at
             # the requested source timeline without waiting for full render.
             if model=='wsola':
