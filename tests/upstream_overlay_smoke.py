@@ -15,6 +15,12 @@ try:
     browser=p.chromium.launch(channel="chromium",headless=True,args=["--no-sandbox","--disable-dev-shm-usage","--autoplay-policy=no-user-gesture-required"])
     for mobile in (False,True):
       page=browser.new_page(viewport={"width":390 if mobile else 1200,"height":844 if mobile else 850},is_mobile=mobile,has_touch=mobile)
+      page.add_init_script("""(() => {
+        const Native=window.AudioContext;window.__labContexts=[];
+        if(Native)window.AudioContext=class extends Native {
+          constructor(...args){super(...args);window.__labContexts.push(this);}
+        };
+      })()""")
       failures=[]
       page.on("pageerror",lambda e:failures.append(str(e)))
       page.goto(URL,wait_until="domcontentloaded")
@@ -38,7 +44,9 @@ try:
           indicator:document.querySelector('#rt-indicator')?.textContent,
           lab:document.querySelector('#lab-status')?.textContent,
           audioReady:!document.querySelector('#play-wet')?.disabled,
-          fileMeta:document.querySelector('#file-meta')?.textContent
+          fileMeta:document.querySelector('#file-meta')?.textContent,
+          contexts:window.__labContexts?.map(c=>({state:c.state,time:c.currentTime,sampleRate:c.sampleRate})),
+          loadedAssets:performance.getEntriesByType('resource').filter(e=>/wasm|worklet/.test(e.name)).map(e=>e.name)
         })"""),"JSERRORS:",failures,flush=True)
         raise
       page.locator("#stop").click()
