@@ -77,3 +77,38 @@ test('diagnostic only: separate source latent gate, tonal output and PV residual
  console.log('TEMPORAL_PARTIAL_DIAG',JSON.stringify(diagnostics));
  assert.ok(Number.isFinite(amp));
 });
+
+test('arbitrary frequencies and speed factors cannot create notes far ahead of true event',()=>{
+ for(const scenario of [
+  {frequency:137.37,onset:.78,speed:.5,semitones:-3},
+  {frequency:981.75,onset:1.03,speed:1.5,semitones:5}
+ ]){
+  const input=toneAfter({frequency:scenario.frequency,onset:scenario.onset,duration:1.6});
+  const result=renderPCM({channels:[input],sampleRate:sr,speed:scenario.speed,semitones:scenario.semitones,model:'period-joint'}).channels[0];
+  const expected=scenario.onset/scenario.speed;
+  const prior=rms(result,Math.max(.02,expected-.60),Math.max(.04,expected-.17));
+  const post=rms(result,expected+.06,Math.min(result.length/sr,expected+.32));
+  console.log('ARBITRARY_FREQUENCY_ONSET',JSON.stringify({...scenario,expected,prior,post,ratio:prior/(post+1e-12)}));
+  assert.ok(post>.04,'actual note lost '+JSON.stringify(scenario));
+  assert.ok(prior<Math.max(.008,post*.1),'arbitrary frequency advanced by substantial fraction of a second');
+ }
+});
+test('note enters just after 1.5s chunk boundary: earlier core remains silent and later core starts at mapped time',()=>{
+ const source=toneAfter({frequency:735.4,onset:1.65,duration:3.5});
+ const speed=.75;
+ const core=startSeconds=>{
+  const plan=planChunk({totalFrames:source.length,sampleRate:sr,speed,startSeconds,
+   model:'period-joint',fftSize:2048,shortFftSize:512,longFftSize:2048,referenceWindows:8});
+  const out=renderPCM({channels:[source.subarray(plan.from,plan.to)],sampleRate:sr,speed,semitones:2,
+   model:'period-joint',sourceStartSeconds:plan.from/sr}).channels[0];
+  return out.subarray(plan.outputStart,plan.outputStart+plan.coreFrames);
+ };
+ const earlier=core(0),later=core(1.5);
+ const before=rms(earlier,.4,1.7);
+ const expected=(1.65-1.5)/speed,precursor=rms(later,.005,Math.max(.03,expected-.075));
+ const active=rms(later,expected+.05,expected+.35);
+ console.log('CROSS_CHUNK_LATE_ENTRY',JSON.stringify({expected,before,precursor,active}));
+ assert.ok(before<.01,'previous core predicts future note early');
+ assert.ok(precursor<Math.max(.008,active*.1),'new core has early note');
+ assert.ok(active>.04,'note after boundary was lost');
+});
