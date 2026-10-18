@@ -2,9 +2,10 @@
 // A small context-bearing chunk is rendered in a module Worker while previous
 // chunks play. This is buffered live audition, NOT sample-by-sample DSP.
 export const CHUNK_SECONDS=1.5;
-export function planChunk({totalFrames,sampleRate,speed,startSeconds,fftSize=2048,referenceWindows=8}){
+export function planChunk({totalFrames,sampleRate,speed,startSeconds,fftSize=2048,shortFftSize=512,referenceWindows=8}){
   if(!(totalFrames>0&&sampleRate>0&&speed>0))throw RangeError('invalid source range');
-  if(![1024,2048,4096].includes(fftSize))throw RangeError('unsupported FFT window');
+  if(![1024,2048,4096].includes(fftSize))throw RangeError('unsupported long FFT window');
+  if(![256,512,1024].includes(shortFftSize)||shortFftSize>=fftSize)throw RangeError('invalid short FFT window');
   if(!Number.isInteger(referenceWindows)||referenceWindows<2||referenceWindows>16)throw RangeError('invalid context window count');
   const start=Math.min(totalFrames-1,Math.max(0,Math.floor(startSeconds*sampleRate)));
   const core=Math.min(totalFrames-start,Math.ceil(CHUNK_SECONDS*sampleRate));
@@ -15,7 +16,7 @@ export function planChunk({totalFrames,sampleRate,speed,startSeconds,fftSize=204
   const tail=Math.min(Math.round(.025*sampleRate),Math.round(right/speed));
   return {from,to,left,right,core,start,outputStart:crop,outputFrames:central+tail,coreFrames:central,nextSeconds:(start+core)/sampleRate};
 }
-export function createModelStream({ctx,sourceChannels,sampleRate,speed,semitones,model,fftSize,referenceWindows,startSeconds=0,onStatus=()=>{},onStarted=()=>{},onFailure=()=>{}}){
+export function createModelStream({ctx,sourceChannels,sampleRate,speed,semitones,model,fftSize,shortFftSize,referenceWindows,startSeconds=0,onStatus=()=>{},onStarted=()=>{},onFailure=()=>{}}){
   let stopped=false,active=false,pending=false,timer=0;
   const nodes=[],totalFrames=sourceChannels[0].length,duration=totalFrames/sampleRate;
   const worker=new Worker('./lab-processor.worker.mjs',{type:'module'});
@@ -64,11 +65,11 @@ export function createModelStream({ctx,sourceChannels,sampleRate,speed,semitones
     const ahead=nextWhen-ctx.currentTime;
     // At most about 5s of decoded preview buffers in addition to the source.
     if(ahead>5.0){timer=setTimeout(refill,350);return;}
-    const plan=planChunk({totalFrames,sampleRate,speed,startSeconds:cursor,fftSize,referenceWindows});
+    const plan=planChunk({totalFrames,sampleRate,speed,startSeconds:cursor,fftSize,shortFftSize,referenceWindows});
     const channels=sourceChannels.map(ch=>ch.slice(plan.from,plan.to));
     pending=true;job++;
     onStatus(started?'次の区間を先読み中':'モデルの先頭区間を準備中…');
-    try{worker.postMessage({job,channels,sampleRate,speed,semitones,model,fftSize,plan},channels.map(ch=>ch.buffer));}
+    try{worker.postMessage({job,channels,sampleRate,speed,semitones,model,fftSize,shortFftSize,plan},channels.map(ch=>ch.buffer));}
     catch(error){pending=false;onFailure(error.message);cleanup();}
   }
   return {master,start(){refill();},stop:cleanup,get active(){return !stopped},get firstScheduled(){return started}};
