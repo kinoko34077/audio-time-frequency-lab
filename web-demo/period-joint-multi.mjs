@@ -160,6 +160,24 @@ function sourceSynchronousEnvelope(channels,sr,partials){
   }
   return dest;
  });
+ // Preserve the exact phase/amplitude of genuinely stationary multi-tone
+ // material. Local low-rank fits cannot resolve 440/441Hz individually in
+ // 54ms and would unnecessarily perturb a valid global shared model.
+ // Use whole-source waveform fit as evidence: NO temporal compensation if
+ // the stationary model already explains nearly all original PCM energy.
+ let stationaryError=0,stationaryEnergy=0;
+ for(let i=0;i<L;i+=Math.max(1,Math.floor(sr/12000))){
+  for(let c=0;c<channels.length;c++){
+   let prediction=0;
+   for(let k=0;k<count;k++)prediction+=basis[k][c][i];
+   const y=channels[c][i],error=y-prediction;
+   stationaryError+=error*error;stationaryEnergy+=y*y;
+  }
+ }
+ if(stationaryEnergy>1e-10&&stationaryError/stationaryEnergy<.012){
+  for(const p of partials){p.envelope=null;p.envelopeHop=0;}
+  return;
+ }
  const envelopes=partials.map(()=>new Float32Array(Math.ceil(L/step)+1));
  const stride=Math.max(1,Math.floor(sr/16000));
  for(let j=0;j<envelopes[0].length;j++){
