@@ -49,16 +49,19 @@ export function phaseVocoder(channels,stretch,outLen,fftSize=2048){
   }
   const transient=!first&&currentEnergy>0.015&&
     positiveFlux/(previousEnergy+1e-9)>.58&&currentEnergy>previousEnergy*1.2;
-  let count=0;
-  for(let k=1;k<half;k++)if(guideMag[k]>=guideMag[k-1]&&
-    guideMag[k]>=guideMag[k+1]&&guideMag[k]>maxMag*.004)peaks[count++]=k;
-  if(count===0)peaks[count++]=Math.max(0,guideMag.indexOf(maxMag));
-  for(let j=0;j<count;j++){
-   const k=peaks[j],expect=TAU*k*hop/N;
+  // Track ALL bins before selecting peaks. A peak may move between FFT
+  // bins from frame to frame; updating only previous peak indices makes the
+  // phase of newly appearing peaks jump arbitrarily.
+  for(let k=0;k<=half;k++){
+   const expect=TAU*k*hop/N;
    const delta=first?0:wrapPhase(phi[k]-prePhase[k]-expect);
    if(first||transient)phaseAcc[k]=phi[k];
    else phaseAcc[k]+=TAU*k*Hs/N+delta*Hs/hop;
   }
+  let count=0;
+  for(let k=1;k<half;k++)if(guideMag[k]>=guideMag[k-1]&&
+    guideMag[k]>=guideMag[k+1]&&guideMag[k]>maxMag*.004)peaks[count++]=k;
+  if(count===0)peaks[count++]=Math.max(0,guideMag.indexOf(maxMag));
   for(let k=0,j=0;k<=half;k++){
    while(j+1<count&&Math.abs(peaks[j+1]-k)<Math.abs(peaks[j]-k))j++;
    const center=peaks[j];
