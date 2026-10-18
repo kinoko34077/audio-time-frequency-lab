@@ -1556,7 +1556,7 @@ function labRefresh(){
   labWindows.disabled=["live","period-joint"].includes(lab.mode);
   labLong.max=lab.mode==="live"?"12":"13";
   $("#lab-window-note").textContent=lab.mode==="period-joint"?
-    "周波数に応じた理論窓8周期×7箇所の観測から、共通の1音成分を推定します。短/長窓・参照窓数スライダーはこの実験モデルでは使いません。":
+    "周波数別の8周期窓×7観測を用いて複数部分音を共同推定し、モデル外の成分は残差経路で保持します。短窓・参照窓数は適用されません。":
     lab.mode==="dual"?
     "短窓＝打音・音の切替の時間精度、長窓＝持続音の周波数精度。それぞれ別々に処理へ反映します。":
     lab.mode==="wsola"?"WSOLAは短窓を使い、長窓は使用しません。":
@@ -1568,7 +1568,7 @@ function labRefresh(){
     wsola:"WSOLA：波形が自然につながる位置を細かく探して伸縮します。和音や大きな音程変更では揺れが残る場合があります。",
     dual:"短窓＋長窓：短窓で音の始まり、長窓で持続音の高さを追い、位相をそろえて切り替える実験方式です。",
     am:"AM包絡：伸縮した音の音量の輪郭をゆっくり整えます。音量を急に掛け直さず、コム状の濁りを抑える実験方式です。",
-    "period-joint":"周波数ごとの個別波長：7窓の同時誤差から1つの周波数・振幅・位相を推定する初期実験。単一定常純音のみ。複音・変調・声・打音・区間間位相連続性は未対応です。"
+    "period-joint":"周波数ごとの個別波長（研究版）：7つの周波数別周期窓から複数の共通部分音を推定し、残差も処理します。和音・変調・声・打音も再生対象ですが、物理的な音源分離・完全な位相/音色保持は未証明です。"
   };
   $("#lab-model-description").textContent=notes[lab.mode];
   if(!state.player?.labStream)labStatusText(lab.mode==="live"

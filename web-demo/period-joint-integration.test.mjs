@@ -23,9 +23,12 @@ test('checkbox has exact label/default OFF and selects experimental branch of pl
  assert.match(app,/labIndividual\.checked\?"period-joint":labModel\.value/);
  assert.match(app,/labModel\.disabled=lab\.mode==="period-joint"/);
 });
-test('opted-in mixed tone fails instead of silently reusing an old DSP',()=>{
+test('opted-in mixed tone renders rather than refusing the requested audio',()=>{
  const other=Float32Array.from(tone,(v,i)=>v+.3*Math.cos(2*Math.PI*660*i/sr));
- assert.throws(()=>renderPCM({...base,channels:[other],model:'period-joint'}),/未対応/);
+ const rendered=renderPCM({...base,channels:[other],model:'period-joint'});
+ assert.equal(rendered.channels[0].length,Math.round(sr/base.speed));
+ assert.ok(rendered.channels[0].every(Number.isFinite));
+ assert.ok(rendered.channels[0].some(v=>Math.abs(v)>.01));
 });
 
 test('real preview plan crops preserve stationary phase across adjacent source chunks',()=>{
