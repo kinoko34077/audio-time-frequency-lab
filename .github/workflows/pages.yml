@@ -63,3 +63,22 @@ jobs:
       - uses: actions/configure-pages@v5
       - id: deployment
         uses: actions/deploy-pages@v4
+      - name: Verify public Pages HTTP entry and required assets
+        env:
+          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
+        run: |
+          set -eu
+          base="${PAGE_URL%/}"
+          for asset in index.html style.css app.mjs dsp.mjs timeline.mjs processor.worker.mjs; do
+            echo "Checking $asset"
+            curl --fail --silent --show-error --location \
+              --retry 10 --retry-delay 4 --retry-all-errors \
+              "$base/$asset" -o "/tmp/$asset"
+            test -s "/tmp/$asset"
+          done
+          curl --fail --silent --show-error --location \
+            --retry 10 --retry-delay 4 --retry-all-errors \
+            "$base/" -o /tmp/audio-lab-live-index.html
+          grep -q 'Audio Time' /tmp/audio-lab-live-index.html
+          grep -q 'renderPCM' /tmp/processor.worker.mjs
+          echo 'PASS: deployed GitHub Pages HTML and all runtime assets are publicly reachable.'
