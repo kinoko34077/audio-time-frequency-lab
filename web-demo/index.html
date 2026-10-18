@@ -36,14 +36,18 @@
       <label class="lab-field">音程 <output id="lab-pitch-output" for="lab-pitch">0 半音</output>
         <input id="lab-pitch" type="range" min="-12" max="12" step="1" value="0">
       </label>
-      <label class="lab-field">窓長 <output id="lab-fft-output" for="lab-fft">2048 samples</output>
-        <input id="lab-fft" type="range" min="10" max="12" step="1" value="11" aria-label="FFT窓長">
+      <label class="lab-field">短窓 <output id="lab-short-output" for="lab-short">512 samples</output>
+        <input id="lab-short" type="range" min="8" max="11" step="1" value="9" aria-label="短窓の長さ">
+      </label>
+      <label class="lab-field">長窓 <output id="lab-long-output" for="lab-long">2048 samples</output>
+        <input id="lab-long" type="range" min="10" max="13" step="1" value="11" aria-label="長窓の長さ">
       </label>
       <label class="lab-field">参照窓数 <output id="lab-windows-output" for="lab-windows">8 窓</output>
         <input id="lab-windows" type="range" min="2" max="16" step="2" value="8" aria-label="前後参照窓数">
       </label>
     </div>
-    <p id="lab-window-note" class="lab-note">参照窓数は自動先読みモデルに反映します。</p>
+    <p id="lab-window-note" class="lab-note">複合窓では短窓が音の立ち上がり、長窓が音程の識別を担当します。</p>
+    <p id="lab-model-description" class="lab-note" aria-live="polite">部分音：音の中の周波数を追って、再生しながら速度と音程を変更します。複雑な音では揺れや濁りが出ることがあります。</p>
     <div class="lab-bottom">
       <p id="lab-status" role="status" aria-live="polite">音源を読み込んで「モデルで再生」を押してください。</p>
     </div>
