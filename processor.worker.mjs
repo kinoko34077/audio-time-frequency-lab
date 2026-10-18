@@ -1,0 +1,2 @@
+import {renderPCM} from './dsp.mjs';
+self.onmessage=e=>{const {job,channels,sampleRate,speed,semitones,model}=e.data;try{let result=renderPCM({channels,sampleRate,speed,semitones,model});self.postMessage({job,ok:true,channels:result.channels,sampleRate:result.sampleRate},result.channels.map(x=>x.buffer));}catch(error){self.postMessage({job,ok:false,message:error?.message||String(error)});}};
