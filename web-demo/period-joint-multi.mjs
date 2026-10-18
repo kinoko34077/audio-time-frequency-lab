@@ -122,12 +122,103 @@ function addComponent(dest,component,sr,sign=1){
   const step=TAU*f/sr,cs=Math.cos(step),sn=Math.sin(step);
   let x=1,y=0;
   for(let i=0;i<arr.length;i++){
-   arr[i]+=sign*(a*x+b*y);
+   arr[i]+=sign*temporalGain(component,i)*(a*x+b*y);
    const nextX=x*cs-y*sn;
    y=y*cs+x*sn;x=nextX;
    // Periodic exact re-anchor guards against drift over long chunks.
    if((i&4095)===4095){x=Math.cos(step*(i+1));y=Math.sin(step*(i+1));}
   }
+ }
+}
+// All partials share the ORIGINAL SOURCE CLOCK. A frequency detected at the
+// END of a 1.5s slice must not emit a full-length tone before its onset.
+// The exact same time-varying component is subtracted from source PCM to form
+// the residual, and rendered after the requested speed/pitch remapping.
+export function temporalGain(partial,sourceFrame){
+ const env=partial.envelope,hop=partial.envelopeHop;
+ if(!env||!hop)return 1; // initial stationary fit, not an output shortcut
+ const p=Math.max(0,Math.min(env.length-1,sourceFrame/hop));
+ const i=Math.floor(p),fraction=p-i;
+ return env[i]*(1-fraction)+env[Math.min(env.length-1,i+1)]*fraction;
+}
+function sourceSynchronousEnvelope(channels,sr,partials){
+ const L=channels[0].length,count=partials.length;
+ const step=Math.max(64,Math.round(sr*.01)),radius=Math.max(16,Math.round(sr*.027));
+ // Evaluate all sinusoids against the ORIGINAL PCM, not against invented
+ // globally active oscillators. Independent conditional subtraction made
+ // near-degenerate candidate pairs mutually justify phantom pre-onsets.
+ const basis=partials.map(partial=>{
+  const cs=partial.coefficients;
+  const dest=channels.map(()=>new Float32Array(L));
+  const phase=TAU*partial.frequency/sr,co=Math.cos(phase),si=Math.sin(phase);
+  let x=1,y=0;
+  for(let i=0;i<L;i++){
+   for(let c=0;c<channels.length;c++)dest[c][i]=cs[c].a*x+cs[c].b*y;
+   const next=x*co-y*si;
+   y=y*co+x*si;x=next;
+   if((i&4095)===4095){x=Math.cos(phase*(i+1));y=Math.sin(phase*(i+1));}
+  }
+  return dest;
+ });
+ // Preserve the exact phase/amplitude of genuinely stationary multi-tone
+ // material. Local low-rank fits cannot resolve 440/441Hz individually in
+ // 54ms and would unnecessarily perturb a valid global shared model.
+ // Use whole-source waveform fit as evidence: NO temporal compensation if
+ // the stationary model already explains nearly all original PCM energy.
+ let stationaryError=0,stationaryEnergy=0;
+ for(let i=0;i<L;i+=Math.max(1,Math.floor(sr/12000))){
+  for(let c=0;c<channels.length;c++){
+   let prediction=0;
+   for(let k=0;k<count;k++)prediction+=basis[k][c][i];
+   const y=channels[c][i],error=y-prediction;
+   stationaryError+=error*error;stationaryEnergy+=y*y;
+  }
+ }
+ if(stationaryEnergy>1e-10&&stationaryError/stationaryEnergy<.012){
+  for(const p of partials){p.envelope=null;p.envelopeHop=0;}
+  return;
+ }
+ const envelopes=partials.map(()=>new Float32Array(Math.ceil(L/step)+1));
+ const stride=Math.max(1,Math.floor(sr/16000));
+ for(let j=0;j<envelopes[0].length;j++){
+  const center=Math.min(L-1,j*step);
+  const start=Math.max(0,center-radius),end=Math.min(L,center+radius+1);
+  const gram=Array.from({length:count},()=>new Float64Array(count));
+  const projection=new Float64Array(count),gain=new Float64Array(count);
+  let signalEnergy=0;
+  for(let i=start;i<end;i+=stride){
+   for(let c=0;c<channels.length;c++){
+    const y=channels[c][i];signalEnergy+=y*y;
+    for(let k=0;k<count;k++){
+     const a=basis[k][c][i];
+     projection[k]+=a*y;
+     for(let m=0;m<=k;m++)gram[k][m]+=a*basis[m][c][i];
+    }
+   }
+  }
+  if(signalEnergy>1e-12){
+   for(let k=0;k<count;k++)for(let m=k+1;m<count;m++)gram[k][m]=gram[m][k];
+   // Bounded nonnegative joint least squares with a gentle zero-gain prior.
+   // A silent sample gives b=0 => ALL gains zero, including collinear tones.
+   // It also allows a later note to enter while another source sustains.
+   for(let sweep=0;sweep<20;sweep++){
+    for(let k=0;k<count;k++){
+     const regularizer=gram[k][k]*.025+1e-12;
+     let rest=projection[k];
+     for(let m=0;m<count;m++)if(m!==k)rest-=gram[k][m]*gain[m];
+     gain[k]=Math.max(0,Math.min(1.5,rest/(gram[k][k]+regularizer)));
+    }
+   }
+  }
+  for(let k=0;k<count;k++){
+   let g=gain[k];
+   if(g<.07)g=0;
+   envelopes[k][j]=g;
+  }
+ }
+ for(let k=0;k<count;k++){
+  partials[k].envelope=envelopes[k];
+  partials[k].envelopeHop=step;
  }
 }
 export function estimateSharedPartials({channels,sampleRate,K=PERIOD_K,maxPartials=MAX_PARTIALS}){
@@ -179,6 +270,14 @@ export function estimateSharedPartials({channels,sampleRate,K=PERIOD_K,maxPartia
   }
   addComponent(residual,partial,sampleRate,-1);
  }
+ // Rebuild the complementary residual from the ORIGINAL input using the
+ // SOURCE-TIME envelope for each partial. Subtracting the constant oscillator
+ // here is the bug that made late notes sound up to one chunk early.
+ if(partials.length){
+  sourceSynchronousEnvelope(channels,sampleRate,partials);
+  for(let c=0;c<channels.length;c++)residual[c].set(channels[c]);
+  for(const partial of partials)addComponent(residual,partial,sampleRate,-1);
+ }
  let residualEnergy=0;for(const ch of residual)for(let i=0;i<L;i+=4)residualEnergy+=ch[i]*ch[i];
  return {partials,residual,explained:Math.max(-1,1-residualEnergy/(baseEnergy+1e-12)),
    windows:WINDOW_COUNT,candidates:candidates.length,unresolvedPhysicalGrouping:true};
@@ -206,7 +305,7 @@ export function renderJointAudio({channels,sampleRate,speed=1,semitones=0,source
    const localPhase=Math.atan2(-b,a);
    const globalPhase=transportSourcePhase(localPhase,partial.frequency,sourceStartSeconds,0);
    for(let i=0;i<frames;i++){
-    out[c][i]+=amp*Math.cos(globalPhase+TAU*outF*(absoluteOutputStart+i/sampleRate));
+    out[c][i]+=temporalGain(partial,i*speed)*amp*Math.cos(globalPhase+TAU*outF*(absoluteOutputStart+i/sampleRate));
    }
   }
  }
