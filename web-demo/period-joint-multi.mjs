@@ -221,6 +221,124 @@ function sourceSynchronousEnvelope(channels,sr,partials){
   partials[k].envelopeHop=step;
  }
 }
+
+// Precision guard for predominantly stationary slices: use the *original PCM*
+// to refine all selected sinusoid frequencies continuously, then solve their
+// stereo cos/sin coefficients TOGETHER. A discrete .05 Hz final search leaks
+// the same audible carrier into the separately transformed residual.
+function solveDense(matrix,rhs){
+ const n=rhs.length,a=matrix.map((r,i)=>Float64Array.from([...r,rhs[i]]));
+ let scale=0;for(let i=0;i<n;i++)scale=Math.max(scale,Math.abs(a[i][i]));
+ if(!(scale>1e-14))return null;
+ for(let i=0;i<n;i++)a[i][i]+=scale*1e-10;
+ for(let i=0;i<n;i++){
+  let pivot=i;
+  for(let j=i+1;j<n;j++)if(Math.abs(a[j][i])>Math.abs(a[pivot][i]))pivot=j;
+  if(Math.abs(a[pivot][i])<scale*1e-8)return null;
+  [a[pivot],a[i]]=[a[i],a[pivot]];
+  const d=a[i][i];for(let j=i;j<=n;j++)a[i][j]/=d;
+  for(let j=0;j<n;j++)if(j!==i){
+   const amount=a[j][i];for(let q=i;q<=n;q++)a[j][q]-=amount*a[i][q];
+  }
+ }
+ return a.map(r=>r[n]);
+}
+function sourceJointFit(channels,sr,freqs,stride){
+ const length=channels[0].length,dimension=freqs.length*2;
+ const gram=Array.from({length:dimension},()=>new Float64Array(dimension));
+ const targets=channels.map(()=>new Float64Array(dimension));
+ const phases=freqs.map(f=>TAU*f/sr);
+ const basis=new Float64Array(dimension);
+ let energy=0;
+ for(let i=0;i<length;i+=stride){
+  for(let k=0;k<freqs.length;k++){
+   const phase=phases[k]*i;
+   basis[2*k]=Math.cos(phase);basis[2*k+1]=Math.sin(phase);
+  }
+  for(let c=0;c<channels.length;c++){
+   const y=channels[c][i];energy+=y*y;
+   for(let k=0;k<dimension;k++)targets[c][k]+=basis[k]*y;
+  }
+  for(let k=0;k<dimension;k++)for(let j=0;j<=k;j++)gram[k][j]+=basis[k]*basis[j];
+ }
+ for(let k=0;k<dimension;k++)for(let j=k+1;j<dimension;j++)gram[k][j]=gram[j][k];
+ const coefficients=targets.map(t=>solveDense(gram,t));
+ if(coefficients.some(v=>!v))return null;
+ let error=energy;
+ for(let c=0;c<channels.length;c++){
+  for(let k=0;k<dimension;k++)error-=coefficients[c][k]*targets[c][k];
+ }
+ return {coefficients,error:Math.max(0,error),energy};
+}
+function refineOriginalWaveform(channels,sr,partials){
+ const count=partials.length;
+ if(count===0)return;
+ // Limit full-file optimization work to bounded, high-confidence stationary
+ // regions. Late attacks and modulated tones still use source-time NNLS.
+ const stride=Math.max(1,Math.floor(sr/12000));
+ const freqs=partials.map(p=>p.frequency);
+ let current=sourceJointFit(channels,sr,freqs,stride);
+ if(!current||current.energy<1e-10||current.error/current.energy>.075)return;
+ const baseline=current;
+ let best={...current,freqs:[...freqs]};
+ // Joint least squares is linear in channel coefficients; each frequency
+ // coordinate is continuously optimized conditional on all other oscillators.
+ // Golden-section refinement is NOT another integer/sub-Hz quantization grid.
+ for(let sweep=0;sweep<3;sweep++){
+  for(let k=0;k<count;k++){
+   const isolated=channels.map((ch,c)=>{
+    const residual=new Float64Array(Math.ceil(ch.length/stride));
+    const coeff=current.coefficients[c];
+    for(let i=0,n=0;i<ch.length;i+=stride,n++){
+     let other=0;
+     for(let j=0;j<count;j++)if(j!==k){
+      const phase=TAU*freqs[j]*i/sr;
+      other+=coeff[2*j]*Math.cos(phase)+coeff[2*j+1]*Math.sin(phase);
+     }
+     residual[n]=ch[i]-other;
+    }
+    return residual;
+   });
+   const evaluate=f=>{
+    let score=0;
+    const w=TAU*f*stride/sr,cw=Math.cos(w),sw=Math.sin(w);
+    for(const ch of isolated){
+     let cc=0,ss=0,cs=0,cy=0,sy=0,x=1,y=0;
+     for(let i=0;i<ch.length;i++){
+      const z=ch[i];cc+=x*x;ss+=y*y;cs+=x*y;cy+=x*z;sy+=y*z;
+      const xx=x*cw-y*sw;y=y*cw+x*sw;x=xx;
+      if((i&2047)===2047){x=Math.cos(w*(i+1));y=Math.sin(w*(i+1));}
+     }
+     const d=cc*ss-cs*cs;
+     if(d>1e-10)score+=(ss*cy*cy-2*cs*cy*sy+cc*sy*sy)/d;
+    }
+    return score;
+   };
+   let low=Math.max(45,freqs[k]-.105),high=Math.min(sr*.44,freqs[k]+.105);
+   const phi=(Math.sqrt(5)-1)/2;
+   let c=high-phi*(high-low),d=low+phi*(high-low);
+   let fc=evaluate(c),fd=evaluate(d);
+   for(let t=0;t<17;t++){
+    if(fc>fd){high=d;d=c;fd=fc;c=high-phi*(high-low);fc=evaluate(c);}
+    else {low=c;c=d;fc=fd;d=low+phi*(high-low);fd=evaluate(d);}
+   }
+   const candidate=(low+high)/2,old=freqs[k];
+   freqs[k]=candidate;
+   const trial=sourceJointFit(channels,sr,freqs,stride);
+   if(!trial||trial.error>current.error+current.energy*1e-9){
+    freqs[k]=old;
+   }else current=trial;
+  }
+  if(current.error<best.error){best={...current,freqs:[...freqs]};}
+ }
+ if(best.error>baseline.error||!best.coefficients.every(x=>x.every(Number.isFinite)))return;
+ for(let k=0;k<count;k++){
+  const f=best.freqs[k];
+  if(Math.abs(f-partials[k].frequency)>.32)continue;
+  partials[k].frequency=f;
+  partials[k].coefficients=best.coefficients.map(v=>({a:v[2*k],b:v[2*k+1]}));
+ }
+}
 export function estimateSharedPartials({channels,sampleRate,K=PERIOD_K,maxPartials=MAX_PARTIALS}){
  if(!PERIOD_CYCLE_CHOICES.includes(K))throw RangeError('unsupported number of analysis cycles');
  if(!Array.isArray(channels)||channels.length<1||channels.length>2||!channels[0]?.length||
@@ -271,6 +389,8 @@ export function estimateSharedPartials({channels,sampleRate,K=PERIOD_K,maxPartia
   }
   addComponent(residual,partial,sampleRate,-1);
  }
+ // Continuous multi-tone, multi-channel source-domain frequency/phase fit.
+ refineOriginalWaveform(channels,sampleRate,partials);
  // Rebuild the complementary residual from the ORIGINAL input using the
  // SOURCE-TIME envelope for each partial. Subtracting the constant oscillator
  // here is the bug that made late notes sound up to one chunk early.
