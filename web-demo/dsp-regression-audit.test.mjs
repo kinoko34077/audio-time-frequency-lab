@@ -129,12 +129,12 @@ test('measure low-frequency harmonic phase and energy fidelity at N1024/2048',()
 test('measure exact 1.5s PV/dual low-band overlap mismatch before any smoothing',()=>{
  const input=wave(sr*4.2,t=>.21*Math.cos(TAU*109.83*t+.17)+.09*Math.cos(TAU*221.19*t+1.2));
  const speed=.8;
- for(const model of ['pv','dual'])for(const longFftSize of [1024,2048]){
+ for(const model of ['pv','dual','wsola'])for(const longFftSize of [1024,2048]){
   const make=startSeconds=>{
    const plan=planChunk({totalFrames:input.length,sampleRate:sr,speed,startSeconds,model,
      fftSize:2048,longFftSize,shortFftSize:256,referenceWindows:8});
    const ch=input.subarray(plan.from,plan.to);
-   const rendered=renderPCM({channels:[ch],sampleRate:sr,speed,semitones:0,model,longFftSize,shortFftSize:256}).channels[0];
+   const rendered=renderPCM({channels:[ch],sampleRate:sr,speed,semitones:0,model,longFftSize,shortFftSize:256,sourceStartSeconds:plan.from/sr}).channels[0];
    return {plan,rendered};
   };
   const first=make(0),second=make(1.5);
