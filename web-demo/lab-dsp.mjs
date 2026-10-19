@@ -122,33 +122,35 @@ export function phaseVocoder(channels,stretch,outLen,fftSize=2048){
 // quasi-periodic grains. Keep the user's requested short synthesis N intact.
 export function transientAnchors(channels,sampleRate){
  const length=channels[0].length;
- const hop=Math.max(24,Math.round(sampleRate*.001));
- const refractory=Math.max(hop*2,Math.round(sampleRate*.035));
- let previous=0,last=-refractory,count=0;
- const anchors=[];
+ // Broadband novelty from first differences, not raw total RMS. A loud
+ // sustained bass note must not mask a quiet snare, pick attack or consonant.
+ // 1ms observation and 9ms refractory allow short 20ms drum flams.
+ const hop=Math.max(16,Math.round(sampleRate*.001));
+ const refractory=Math.max(hop*3,Math.round(sampleRate*.009));
+ const out=[];
+ let previous=0,last=-refractory;
  for(let start=0;start<length;start+=hop){
   const end=Math.min(length,start+hop);
-  let square=0;
+  let energy=0;
   for(let i=start;i<end;i++){
-   let per=0;for(const ch of channels)per+=ch[i]*ch[i];
-   square+=per/channels.length;
+   let p=0;
+   for(const ch of channels){const d=ch[i]-(i>0?ch[i-1]:ch[i]);p+=d*d;}
+   energy+=p/channels.length;
   }
-  const level=Math.sqrt(square/(end-start));
-  if(start-last>refractory&&level>.022&&level>previous*2.6+.012){
-   const floor=Math.max(.023,previous*2.25);
+  const level=Math.sqrt(energy/(end-start));
+  if(start>=hop*3&&start-last>refractory&&level>.016&&level>previous*2.25+.008){
+   const floor=Math.max(.018,previous*2.4+.007);
    let index=start;
    for(let i=start;i<end;i++){
-    let maximum=0;for(const ch of channels)maximum=Math.max(maximum,Math.abs(ch[i]));
-    if(maximum>floor){index=i;break;}
+    let max=0;for(const ch of channels)max=Math.max(max,Math.abs(ch[i]-(i>0?ch[i-1]:ch[i])));
+    if(max>floor){index=i;break;}
    }
-   // Initial attacks are measured in the original source clock.
-   anchors.push(index);
-   last=index;count++;
-   if(count>=256)break;
+   out.push(index);last=index;
+   if(out.length>=256)break;
   }
-  previous=level>previous?previous*.68+level*.32:previous*.82+level*.18;
+  previous=level>previous?previous*.70+level*.30:previous*.74+level*.26;
  }
- return anchors;
+ return out;
 }
 export function wsola(channels,stretch,outLen,fftSize=1024,sampleRate=48000){
  if(Math.abs(stretch-1)<1e-8)return channels.map(x=>fit(x,outLen));
@@ -161,7 +163,6 @@ export function wsola(channels,stretch,outLen,fftSize=1024,sampleRate=48000){
  const search=Math.max(256,Math.min(2048,Math.round(sampleRate*.022)));
  const reference=Math.max(overlap,Math.min(Math.round(sampleRate*.028),Math.max(N*3,overlap)));
  const events=transientAnchors(channels,sampleRate).map(source=>({source,output:Math.round(source*stretch)}));
- const guard=N+search+Math.round(sampleRate*.010);
   const output=channels.map(()=>new Float64Array(outLen+N));
  const weight=new Float64Array(outLen+N);
  let prev=-1;
@@ -218,18 +219,6 @@ export function wsola(channels,stretch,outLen,fftSize=1024,sampleRate=48000){
    }
    src=bestSrc;
   }
-  // During the neighbourhood of one broadband attack, all overlapping
-  // source grains advance by the SAME native hop. This maps an attack at
-  // original source index e to the SINGLE output index round(e*stretch).
-  // Outside attacks keep the prior source-time/phase WSOLA matching (PR #21).
-  let nearest=null,distance=Infinity;
-  for(const event of events){
-    const d=Math.abs(pos-event.output);
-    if(d<distance){distance=d;nearest=event;}
-  }
-  if(nearest&&distance<=guard){
-    src=Math.max(0,Math.min(L-N,nearest.source+(pos-nearest.output)));
-  }
   for(let j=0;j<N&&pos+j<weight.length;j++){
    const wi=w[j],index=pos+j;
    weight[index]+=wi;
@@ -237,8 +226,29 @@ export function wsola(channels,stretch,outLen,fftSize=1024,sampleRate=48000){
   }
   prev=src;
  }
- return output.map(ch=>Float32Array.from({length:outLen},(_,i)=>
+ const rendered=output.map(ch=>Float32Array.from({length:outLen},(_,i)=>
    weight[i]>1e-5?ch[i]/weight[i]:0));
+ // Replace only the immediate transient waveform at its exact mapped sample
+ // while preserving the original phase-compatible grain search everywhere.
+ // Soft shoulders avoid the hard source-index discontinuities of PR #31.
+ const inner=Math.max(8,Math.round(sampleRate*.0018));
+ const outer=Math.max(inner+16,Math.round(sampleRate*.012));
+ for(let i=0;i<outLen;i++){
+  let event=null,dist=Infinity;
+  for(const e of events){
+   const d=Math.abs(i-e.output);
+   if(d<dist){dist=d;event=e;}
+  }
+  if(!event||dist>=outer)continue;
+  const fraction=dist<=inner?1:(outer-dist)/(outer-inner);
+  const blend=fraction*fraction*(3-2*fraction);
+  const sourceIndex=event.source+i-event.output;
+  if(sourceIndex<0||sourceIndex>=L)continue;
+  for(let c=0;c<channels.length;c++){
+   rendered[c][i]=rendered[c][i]*(1-blend)+channels[c][sourceIndex]*blend;
+  }
+ }
+ return rendered;
 }
 // Dual-resolution onset processing. Long window stabilizes sustained
 // partials; short window anchors transient timing. The signals are locally

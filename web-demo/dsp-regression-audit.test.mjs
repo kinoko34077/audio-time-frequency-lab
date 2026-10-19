@@ -103,3 +103,10 @@ test('A/B bass periodic gain modulation vs beforePR31 and across N1024/2048',()=
   console.log('AB_PR31_BASS',JSON.stringify({model,speed,longFftSize,now,before}));
  }
 });
+
+test('bass-backed closely spaced transients must actually be detected by the new source novelty detector',()=>{
+ const {ch,hits}=attackTrack();
+ const actual=transientAnchors([ch],sr).map(i=>i/sr);
+ console.log('TRANSIENT_DETECTED_IN_MUSIC',JSON.stringify({actual,expected:hits}));
+ for(const expected of hits)assert.ok(actual.some(v=>Math.abs(v-expected)<.003),'missed 20ms-separated attack at '+expected);
+});
