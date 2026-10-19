@@ -38,9 +38,15 @@ test('full Chrome: inherited Rust AudioWorklet live independent speed/pitch UI',
   });
   await page.waitForFunction(()=>document.querySelector('#lab-period-cycles-output').textContent==='0.5周期');
   assert.equal(await page.$eval('#lab-period-cycles',e=>e.disabled),false);
+  assert.equal(await page.$eval('#lab-model',e=>e.disabled),false);
+  await page.$eval('#lab-model',e=>{e.value='wsola';e.dispatchEvent(new Event('change',{bubbles:true}));});
+  await page.waitForFunction(()=>document.querySelector('#lab-model').value==='wsola' && document.querySelector('#lab-model-description').textContent.includes('WSOLA'));
+  assert.equal(await page.$eval('#lab-short',e=>e.disabled),false);
   await page.$eval('#lab-individual-periods',e=>{e.checked=false;e.dispatchEvent(new Event('change',{bubbles:true}));});
   await page.waitForFunction(()=>document.querySelector('#lab-period-cycles-field').hidden);
   assert.equal(await page.$eval('#lab-model',e=>e.disabled),false);
+  await page.$eval('#lab-model',e=>{e.value='live';e.dispatchEvent(new Event('change',{bubbles:true}));});
+  await page.waitForFunction(()=>document.querySelector('#lab-model').value==='live');
   await page.$eval('#lab-speed',e=>{e.value='1.5';e.dispatchEvent(new Event('change',{bubbles:true}));});
   await page.$eval('#lab-pitch',e=>{e.value='5';e.dispatchEvent(new Event('change',{bubbles:true}));});
   await (await page.$('#play-wet')).click();
