@@ -60,10 +60,10 @@ test('browser slider appears in opt-in mode and forwards user-selected cycle cou
  const stream=readFileSync(new URL('lab-stream.mjs',import.meta.url),'utf8');
  const worker=readFileSync(new URL('lab-processor.worker.mjs',import.meta.url),'utf8');
  assert.match(html,/id="lab-period-cycles"[^>]+type="range"[^>]+min="-1"[^>]+max="5"/);
- assert.match(app,/labPeriodField.hidden=lab.mode!=="period-joint"/);
- assert.match(app,/labPeriod.disabled=lab.mode!=="period-joint"/);
+ assert.match(app,/labPeriodField.hidden=!lab.individual/);
+ assert.match(app,/labPeriod.disabled=!lab.individual/);
  assert.match(app,/lab.periodCycles=nextCycles/);
  assert.match(app,/periodCycles:lab.periodCycles,startSeconds:where/);
- assert.match(stream,/longFftSize,periodCycles,plan/);
- assert.match(worker,/sourceStartSeconds:plan.from\/sampleRate,periodCycles/);
+ assert.match(stream,/longFftSize,periodCycles,jointBackend,plan/);
+ assert.match(worker,/sourceStartSeconds:plan.from\/sampleRate,periodCycles,jointBackend/);
 });

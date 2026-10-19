@@ -277,14 +277,20 @@ export function amVocoder(channels,stretch,len,sr,fftSize=2048){
  }
  return corrected;
 }
-export function renderPCM({channels,sampleRate,speed=1,semitones=0,model='pv',fftSize=2048,shortFftSize=512,longFftSize=fftSize,sourceStartSeconds=0,periodCycles=8}){if(!Array.isArray(channels)||!channels.length||channels.length>2||!channels[0]?.length)throw Error('有効なモノラル／ステレオ音声が必要です');if(!channels.every(x=>x.length===channels[0].length))throw Error('チャンネル長が一致しません');if(!Number.isFinite(sampleRate)||sampleRate<8000||sampleRate>192000)throw Error('非対応サンプリング周波数です');if(!Number.isFinite(speed)||speed<.5||speed>2||!Number.isFinite(semitones)||semitones<-12||semitones>12)throw Error('範囲外パラメータです');if(!MODELS.some(m=>m.id===model))throw Error('未知の解析モデルです');if(![1024,2048,4096,8192].includes(longFftSize)||![256,512,1024,2048].includes(shortFftSize)||(model==='dual'&&shortFftSize>=longFftSize))throw Error('短窓・長窓の設定が不正です');if(![1024,2048,4096].includes(fftSize))throw Error('窓長は1024/2048/4096サンプルにしてください');let len=Math.max(1,Math.round(channels[0].length/speed));if(len*channels.length>14000000)throw Error('処理結果が安全なメモリ上限を超えます');if(model==='period-joint')return renderJointAudio({
+export function renderPCM({channels,sampleRate,speed=1,semitones=0,model='pv',fftSize=2048,shortFftSize=512,longFftSize=fftSize,sourceStartSeconds=0,periodCycles=8,jointBackend=null}){if(!Array.isArray(channels)||!channels.length||channels.length>2||!channels[0]?.length)throw Error('有効なモノラル／ステレオ音声が必要です');if(!channels.every(x=>x.length===channels[0].length))throw Error('チャンネル長が一致しません');if(!Number.isFinite(sampleRate)||sampleRate<8000||sampleRate>192000)throw Error('非対応サンプリング周波数です');if(!Number.isFinite(speed)||speed<.5||speed>2||!Number.isFinite(semitones)||semitones<-12||semitones>12)throw Error('範囲外パラメータです');if(!MODELS.some(m=>m.id===model))throw Error('未知の解析モデルです');if(![1024,2048,4096,8192].includes(longFftSize)||![256,512,1024,2048].includes(shortFftSize)||(model==='dual'&&shortFftSize>=longFftSize))throw Error('短窓・長窓の設定が不正です');if(![1024,2048,4096].includes(fftSize))throw Error('窓長は1024/2048/4096サンプルにしてください');let len=Math.max(1,Math.round(channels[0].length/speed));if(len*channels.length>14000000)throw Error('処理結果が安全なメモリ上限を超えます');if(model==='period-joint'){
+ if(jointBackend!==null&&!['pv','wsola','dual','am'].includes(jointBackend))
+  throw Error('個別波長の残差モデルはPV・WSOLA・短長複合・AMのみ対応しています（Rust/WASMリアルタイムは未対応）');
+ return renderJointAudio({
  channels,sampleRate,speed,semitones,sourceStartSeconds,periodCycles,
  renderResidual:(residual,frames)=>{
-  const pitch=2**(semitones/12);
-  const shifted=residual.map(ch=>resampleBandlimited(ch,pitch));
-  // UI disables longFFT in this mode: residual analysis uses a stable
-  // model-owned window and cannot be changed through a disabled control.
-  return phaseVocoder(shifted,pitch/speed,frames,2048);
+  // Compatibility: the original standalone joint mode keeps the fixed
+  // PV(2048) residual, so historical K and inactive-window tests stay valid.
+  const chosen=jointBackend||'pv';
+  const result=renderPCM({channels:residual,sampleRate,speed,semitones,model:chosen,
+    fftSize,shortFftSize,longFftSize:jointBackend?longFftSize:2048});
+  if(result.channels.some(ch=>ch.length!==frames))throw RangeError('joint residual duration mismatch');
+  return result.channels;
  }
-});if(speed===1&&semitones===0)return {channels:channels.map(ch=>Float32Array.from(ch)),sampleRate};let p=Math.pow(2,semitones/12),stretch=p/speed,pitched=channels.map(ch=>resampleBandlimited(ch,p)),processed=model==='pv'?phaseVocoder(pitched,stretch,len,longFftSize):model==='wsola'?wsola(pitched,stretch,len,shortFftSize,sampleRate/p):model==='dual'?dualWindowVocoder(pitched,stretch,len,sampleRate,longFftSize,shortFftSize):amVocoder(pitched,stretch,len,sampleRate,longFftSize);for(let ch of processed)for(let i=0;i<ch.length;i++)if(!Number.isFinite(ch[i]))ch[i]=0;return {channels:processed,sampleRate};}
+});
+}if(speed===1&&semitones===0)return {channels:channels.map(ch=>Float32Array.from(ch)),sampleRate};let p=Math.pow(2,semitones/12),stretch=p/speed,pitched=channels.map(ch=>resampleBandlimited(ch,p)),processed=model==='pv'?phaseVocoder(pitched,stretch,len,longFftSize):model==='wsola'?wsola(pitched,stretch,len,shortFftSize,sampleRate/p):model==='dual'?dualWindowVocoder(pitched,stretch,len,sampleRate,longFftSize,shortFftSize):amVocoder(pitched,stretch,len,sampleRate,longFftSize);for(let ch of processed)for(let i=0;i<ch.length;i++)if(!Number.isFinite(ch[i]))ch[i]=0;return {channels:processed,sampleRate};}
 export function wav16({channels,sampleRate}){let count=channels[0].length,nc=channels.length,total=count*nc;if(total>14000000)throw Error('書出しメモリ上限');let buf=new ArrayBuffer(44+total*2),v=new DataView(buf),tag=(p,s)=>{for(let i=0;i<s.length;i++)v.setUint8(p+i,s.charCodeAt(i));};tag(0,'RIFF');v.setUint32(4,36+total*2,true);tag(8,'WAVE');tag(12,'fmt ');v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,nc,true);v.setUint32(24,sampleRate,true);v.setUint32(28,sampleRate*nc*2,true);v.setUint16(32,nc*2,true);v.setUint16(34,16,true);tag(36,'data');v.setUint32(40,total*2,true);let offset=44;for(let i=0;i<count;i++)for(let c=0;c<nc;c++){let s=clamp(channels[c][i],-1,1);v.setInt16(offset,s<0?Math.round(s*32768):Math.round(s*32767),true);offset+=2;}return buf;}

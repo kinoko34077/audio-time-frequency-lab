@@ -33,7 +33,7 @@ const state={
   precise:Object.create(null),
   effective:{low:20,high:16000},raf:0,lastStats:null,mathCore:null,wasmPromise:null,rebuildTimer:null,sine:null,loadToken:0,transportEpoch:0
 };
-const lab={mode:"live",speed:1,semitones:0,fftSize:2048,shortFftSize:512,longFftSize:2048,referenceWindows:8,periodCycles:8,processed:null,worker:null,job:0};
+const lab={mode:"live",speed:1,semitones:0,fftSize:2048,shortFftSize:512,longFftSize:2048,referenceWindows:8,periodCycles:8,individual:false,processed:null,worker:null,job:0};
 const labReady=()=>lab.mode!=="live"&&lab.processed?.model===lab.mode&&lab.processed?.speed===lab.speed&&lab.processed?.semitones===lab.semitones;
 
 // Continuous log bands around 20 Hz: 0..200 resolves 0.001..20 Hz,
@@ -1553,15 +1553,17 @@ function labRefresh(){
   $("#lab-long-output").textContent=String(lab.longFftSize)+" samples";
   $("#lab-windows-output").textContent=String(lab.referenceWindows)+" 窓";
   $("#lab-period-cycles-output").textContent=String(lab.periodCycles)+"周期";
-  labPeriodField.hidden=lab.mode!=="period-joint";
-  labPeriod.disabled=lab.mode!=="period-joint";
-  labModel.disabled=lab.mode==="period-joint";
+  labPeriodField.hidden=!lab.individual;
+  labPeriod.disabled=!lab.individual;
+  // Model selection is independent from the frequency-specific window option.
+  labModel.disabled=false;
+  labModel.querySelector('option[value="live"]').disabled=lab.individual;
   labShort.disabled=!["wsola","dual"].includes(lab.mode);
-  labLong.disabled=["wsola","period-joint"].includes(lab.mode);
-  labWindows.disabled=["live","period-joint"].includes(lab.mode);
+  labLong.disabled=lab.mode==="wsola";
+  labWindows.disabled=lab.mode==="live"||lab.individual;
   labLong.max=lab.mode==="live"?"12":"13";
-  $("#lab-window-note").textContent=lab.mode==="period-joint"?
-    "周波数別の"+lab.periodCycles+"周期窓×7観測で部分音を推定します。0.5周期は半波長の観測です。短窓・長窓・参照窓数は適用されず、推定できない成分は残差として残します。":
+  $("#lab-window-note").textContent=lab.individual?
+    "周波数別の"+lab.periodCycles+"周期窓×7観測で音程成分を推定し、残りは選択中の"+lab.mode.toUpperCase()+"で処理します。短窓・長窓は各残差モデルに適用、参照窓数は使用しません。":
     lab.mode==="dual"?
     "短窓＝打音・音の切替の時間精度、長窓＝持続音の周波数精度。それぞれ別々に処理へ反映します。":
     lab.mode==="wsola"?"WSOLAは短窓を使い、長窓は使用しません。":
@@ -1575,15 +1577,25 @@ function labRefresh(){
     am:"AM包絡：伸縮した音の音量の輪郭をゆっくり整えます。音量を急に掛け直さず、コム状の濁りを抑える実験方式です。",
     "period-joint":"周波数ごとの個別波長（研究版）：7つの周波数別周期窓から複数の共通部分音を推定し、残差も処理します。和音・変調・声・打音も再生対象ですが、物理的な音源分離・完全な位相/音色保持は未証明です。"
   };
-  $("#lab-model-description").textContent=notes[lab.mode];
+  $("#lab-model-description").textContent=lab.individual?
+    "個別波長（"+lab.periodCycles+"周期）＋"+lab.mode.toUpperCase()+"：共通部分音を個別波長で再合成し、残差を選択モデルで処理します。部分音・残差の帰属は推定であり、完全な音源分離は保証しません。":
+    notes[lab.mode];
   if(!state.player?.labStream)labStatusText(lab.mode==="live"
     ?"Rust/WASMの部分音処理 · 音源を選んで再生"
-    :lab.mode.toUpperCase()+" · 自動先読み処理。計算ボタン不要・再生位置から開始");
+    :(lab.individual?"個別波長＋":"")+lab.mode.toUpperCase()+" · 自動先読み処理。計算ボタン不要・再生位置から開始");
 }
 function labInvalidate(){lab.job++;lab.worker?.terminate();lab.worker=null;lab.processed=null;}
 async function labSettingsChanged(){
-  const previous=lab.mode,currentTime=playPosition();
-  const nextMode=labIndividual.checked?"period-joint":labModel.value,nextSpeed=Number(labSpeed.value),nextSemi=Number(labPitch.value);
+  const previous=lab.mode,previousIndividual=lab.individual,currentTime=playPosition();
+  const nextIndividual=labIndividual.checked;
+  let nextMode=labModel.value;
+  if(nextIndividual&&nextMode==="live"){
+    // Rust real-time ABI does not expose frequency-specific K-window analysis.
+    // Switch visibly, never silently claim Rust uses this checkbox.
+    nextMode="pv";labModel.value="pv";
+    message("Rust/WASMリアルタイムは個別波長窓に未対応です。PV＋個別波長に切り替えました。","warning");
+  }
+  const nextSpeed=Number(labSpeed.value),nextSemi=Number(labPitch.value);
   let nextShort=2**Number(labShort.value),nextLong=2**Number(labLong.value);
   const nextWindows=Number(labWindows.value),nextCycles=selectedPeriodCycles();
   // The two independently adjustable lengths must maintain short < long;
@@ -1595,16 +1607,16 @@ async function labSettingsChanged(){
     labLong.value=String(Math.log2(nextLong));
   }
   if(nextMode==="live"&&nextLong>4096){nextLong=4096;labLong.value="12";}
-  if(nextMode===lab.mode&&nextSpeed===lab.speed&&nextSemi===lab.semitones&&nextShort===lab.shortFftSize&&nextLong===lab.longFftSize&&nextWindows===lab.referenceWindows&&nextCycles===lab.periodCycles)return;
+  if(nextMode===lab.mode&&nextSpeed===lab.speed&&nextSemi===lab.semitones&&nextShort===lab.shortFftSize&&nextLong===lab.longFftSize&&nextWindows===lab.referenceWindows&&nextCycles===lab.periodCycles&&nextIndividual===lab.individual)return;
   liveFactors(nextSpeed,nextSemi);
   lab.mode=nextMode;lab.speed=nextSpeed;lab.semitones=nextSemi;
-  lab.shortFftSize=nextShort;lab.longFftSize=nextLong;lab.fftSize=Math.min(4096,nextLong);lab.referenceWindows=nextWindows;lab.periodCycles=nextCycles;
+  lab.shortFftSize=nextShort;lab.longFftSize=nextLong;lab.fftSize=Math.min(4096,nextLong);lab.referenceWindows=nextWindows;lab.periodCycles=nextCycles;lab.individual=nextIndividual;
   // Borrow the original Rust quality control, never silently pretend that
   // +/- context windows are part of Rust's existing DSP API.
   $("#quality").value=lab.fftSize===1024?"eco":lab.fftSize===2048?"standard":"high";
   labInvalidate();
   if(state.player){
-    if(previous==="live"&&lab.mode==="live"&&state.player.labRealtime){
+    if(previous==="live"&&lab.mode==="live"&&!previousIndividual&&!lab.individual&&state.player.labRealtime){
       const p=state.player;p.offset=currentTime;p.at=state.ctx.currentTime;
       p.sourceTimeRate=lab.speed;
       p.source?.playbackRate.setValueAtTime(lab.speed,state.ctx.currentTime);
@@ -1638,18 +1650,19 @@ async function startModelPlayback(offset=null){
   const ctx=await context();
   if(epoch!==state.transportEpoch)return;
   state.seek=where;
-  labStatusText(lab.mode.toUpperCase()+" · 再生位置から先読み処理を開始…");
+  labStatusText((lab.individual?"個別波長＋":"")+lab.mode.toUpperCase()+" · 再生位置から先読み処理を開始…");
   let player;
   try{
     const stream=createModelStream({
       ctx,sourceChannels:state.dry,sampleRate:state.decoded.sampleRate,
-      speed:lab.speed,semitones:lab.semitones,model:lab.mode,
+      speed:lab.speed,semitones:lab.semitones,model:lab.individual?"period-joint":lab.mode,
+      jointBackend:lab.individual?lab.mode:null,
       fftSize:lab.fftSize,shortFftSize:lab.shortFftSize,longFftSize:lab.longFftSize,referenceWindows:lab.referenceWindows,periodCycles:lab.periodCycles,startSeconds:where,
       onStatus:text=>{if(state.player===player)labStatusText(text);},
       onStarted:at=>{
         if(state.player!==player)return;
         player.at=at;controls.stop.disabled=false;
-        indicator("モデル再生中 · "+lab.mode.toUpperCase()+" · 自動先読み");
+        indicator("モデル再生中 · "+(lab.individual?"個別波長＋":"")+lab.mode.toUpperCase()+" · 自動先読み");
         message("選択モデルを順次処理して再生中。全曲の計算は不要です。");
       },
       onFailure:error=>{

@@ -2,16 +2,18 @@
 // A small context-bearing chunk is rendered in a module Worker while previous
 // chunks play. This is buffered live audition, NOT sample-by-sample DSP.
 export const CHUNK_SECONDS=1.5;
-export function planChunk({totalFrames,sampleRate,speed,startSeconds,model='dual',fftSize=2048,shortFftSize=512,longFftSize=fftSize,referenceWindows=8}){
+export function planChunk({totalFrames,sampleRate,speed,startSeconds,model='dual',fftSize=2048,shortFftSize=512,longFftSize=fftSize,referenceWindows=8,jointBackend=null}){
   if(!(totalFrames>0&&sampleRate>0&&speed>0))throw RangeError('invalid source range');
   if(![1024,2048,4096,8192].includes(longFftSize)||![256,512,1024,2048].includes(shortFftSize)||(model==='dual'&&shortFftSize>=longFftSize))throw RangeError('invalid short/long FFT windows');
   if(!Number.isInteger(referenceWindows)||referenceWindows<2||referenceWindows>16)throw RangeError('invalid context window count');
   const start=Math.min(totalFrames-1,Math.max(0,Math.floor(startSeconds*sampleRate)));
   const core=Math.min(totalFrames-start,Math.ceil(CHUNK_SECONDS*sampleRate));
-  const analysisWindow=model==='wsola'?shortFftSize:longFftSize;
+  const analysisWindow=(model==='wsola'||(model==='period-joint'&&jointBackend==='wsola'))?shortFftSize:longFftSize;
   // The experimental joint model disables long FFT and reference-window
   // controls. Its preview context must NOT accidentally depend on either.
-  const context=model==='period-joint'?Math.ceil(sampleRate*.120):
+  const context=model==='period-joint'?
+    (jointBackend?Math.min(Math.ceil(sampleRate*.7),
+      Math.max(Math.ceil(sampleRate*.120),analysisWindow*2)):Math.ceil(sampleRate*.120)):
     Math.min(Math.ceil(sampleRate*.7),Math.max(Math.ceil(sampleRate*.040),referenceWindows*analysisWindow/4,analysisWindow));
   const left=Math.min(start,context),right=Math.min(totalFrames-start-core,context);
   const from=start-left,to=start+core+right;
@@ -34,7 +36,7 @@ export function scheduledSourcePosition(segments,now,initialSource,duration){
   }
   return last;
 }
-export function createModelStream({ctx,sourceChannels,sampleRate,speed,semitones,model,fftSize,shortFftSize=512,longFftSize=fftSize,referenceWindows,periodCycles=8,startSeconds=0,onStatus=()=>{},onStarted=()=>{},onFailure=()=>{}}){
+export function createModelStream({ctx,sourceChannels,sampleRate,speed,semitones,model,fftSize,shortFftSize=512,longFftSize=fftSize,referenceWindows,periodCycles=8,jointBackend=null,startSeconds=0,onStatus=()=>{},onStarted=()=>{},onFailure=()=>{}}){
   let stopped=false,active=false,pending=false,timer=0;
   const nodes=[],scheduled=[],totalFrames=sourceChannels[0].length,duration=totalFrames/sampleRate;
   const worker=new Worker('./lab-processor.worker.mjs',{type:'module'});
@@ -92,11 +94,11 @@ export function createModelStream({ctx,sourceChannels,sampleRate,speed,semitones
     const ahead=nextWhen-ctx.currentTime;
     // At most about 5s of decoded preview buffers in addition to the source.
     if(ahead>5.0){timer=setTimeout(refill,350);return;}
-    const plan=planChunk({totalFrames,sampleRate,speed,startSeconds:cursor,model,fftSize,shortFftSize,longFftSize,referenceWindows});
+    const plan=planChunk({totalFrames,sampleRate,speed,startSeconds:cursor,model,fftSize,shortFftSize,longFftSize,referenceWindows,jointBackend});
     const channels=sourceChannels.map(ch=>ch.slice(plan.from,plan.to));
     pending=true;job++;
     onStatus(started?'次の区間を先読み中':'モデルの先頭区間を準備中…');
-    try{worker.postMessage({job,channels,sampleRate,speed,semitones,model,fftSize,shortFftSize,longFftSize,periodCycles,plan},channels.map(ch=>ch.buffer));}
+    try{worker.postMessage({job,channels,sampleRate,speed,semitones,model,fftSize,shortFftSize,longFftSize,periodCycles,jointBackend,plan},channels.map(ch=>ch.buffer));}
     catch(error){pending=false;onFailure(error.message);cleanup();}
   }
   return {master,start(){refill();},stop:cleanup,
