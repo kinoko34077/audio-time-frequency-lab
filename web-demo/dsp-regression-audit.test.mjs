@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {renderPCM,transientAnchors} from './lab-dsp.mjs';
+import {planChunk} from './lab-stream.mjs';
 import {renderPCM as renderBefore31} from './lab-dsp-pre31.mjs';
 
 const sr=48000,TAU=Math.PI*2;
@@ -109,4 +110,41 @@ test('bass-backed closely spaced transients must actually be detected by the new
  const actual=transientAnchors([ch],sr).map(i=>i/sr);
  console.log('TRANSIENT_DETECTED_IN_MUSIC',JSON.stringify({actual,expected:hits}));
  for(const expected of hits)assert.ok(actual.some(v=>Math.abs(v-expected)<.003),'missed 20ms-separated attack at '+expected);
+});
+
+test('measure low-frequency harmonic phase and energy fidelity at N1024/2048',()=>{
+ const tones=[[82.13,.18,.1],[91.57,.11,.8],[174.61,.075,1.3]];
+ const src=wave(sr*2.7,t=>tones.reduce((sum,[f,a,p])=>sum+a*Math.cos(TAU*f*t+p),0));
+ for(const speed of [.5,1.5])for(const model of ['pv','dual'])for(const longFftSize of [1024,2048]){
+  const out=renderPCM({channels:[src],sampleRate:sr,speed,semitones:0,model,longFftSize,shortFftSize:256}).channels[0];
+  let diff=0,power=0;
+  const from=Math.round(sr*.35),to=Math.min(Math.round(sr*1.1),out.length);
+  for(let i=from;i<to;i+=2){
+   const ideal=tones.reduce((sum,[f,a,p])=>sum+a*Math.cos(TAU*f*i/sr+p),0);
+   diff+=(out[i]-ideal)**2;power+=ideal*ideal;
+  }
+  console.log('AUDIT_MULTI_BASS',JSON.stringify({model,speed,longFftSize,relativeError:Math.sqrt(diff/power)}));
+ }
+});
+test('measure exact 1.5s PV/dual low-band overlap mismatch before any smoothing',()=>{
+ const input=wave(sr*4.2,t=>.21*Math.cos(TAU*109.83*t+.17)+.09*Math.cos(TAU*221.19*t+1.2));
+ const speed=.8;
+ for(const model of ['pv','dual'])for(const longFftSize of [1024,2048]){
+  const make=startSeconds=>{
+   const plan=planChunk({totalFrames:input.length,sampleRate:sr,speed,startSeconds,model,
+     fftSize:2048,longFftSize,shortFftSize:256,referenceWindows:8});
+   const ch=input.subarray(plan.from,plan.to);
+   const rendered=renderPCM({channels:[ch],sampleRate:sr,speed,semitones:0,model,longFftSize,shortFftSize:256}).channels[0];
+   return {plan,rendered};
+  };
+  const first=make(0),second=make(1.5);
+  const len=Math.min(Math.round(sr*.018),first.rendered.length-first.plan.outputStart-first.plan.coreFrames,second.rendered.length-second.plan.outputStart);
+  let err=0,energy=0,dot=0;
+  for(let i=0;i<len;i++){
+   const a=first.rendered[first.plan.outputStart+first.plan.coreFrames+i];
+   const b=second.rendered[second.plan.outputStart+i];
+   err+=(a-b)**2;energy+=a*a+b*b;dot+=a*b;
+  }
+  console.log('AUDIT_BASS_SEAM',JSON.stringify({model,longFftSize,len,relativeMismatch:Math.sqrt(err/(energy/2+1e-12)),dot}));
+ }
 });
