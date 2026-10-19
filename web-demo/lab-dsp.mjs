@@ -6,7 +6,7 @@ export const MODELS=[
 {id:'wsola',label:'WSOLA',description:'Waveform-similarity overlap-add'},
 {id:'dual',label:'Dual-window Onset Blend',description:'Experimental short/long STFT onset-directed output fusion'},
 {id:'am',label:'AM Envelope × Phase Vocoder',description:'Experimental envelope-separated PV; not source identification'},
-{id:'period-joint',label:'Frequency-specific Joint Period (stationary tone ONLY)',description:'Issue #20 opt-in experimental shared-parameter estimator; not polyphony, AM/FM or source separation'}
+{id:'period-joint',label:'Frequency-specific Joint Period (experimental)',description:'Issue #20 opt-in multi-partial joint estimator with source-time gain and residual; physical grouping is not identified'}
 ];
 const TAU=Math.PI*2,clamp=(x,a,b)=>Math.max(a,Math.min(b,x)),fit=(a,n)=>{let b=new Float32Array(n);b.set(a.subarray(0,n));return b};
 function fft(re,im,inv=false){let n=re.length;for(let i=1,j=0;i<n;i++){let bit=n>>1;for(;j&bit;bit>>=1)j^=bit;j^=bit;if(i<j){[re[i],re[j]]=[re[j],re[i]];[im[i],im[j]]=[im[j],im[i]];}}for(let len=2;len<=n;len*=2){let wr0=Math.cos(TAU/len),wi0=Math.sin((inv?1:-1)*TAU/len);for(let i=0;i<n;i+=len){let wr=1,wi=0;for(let j=0;j<len/2;j++){let u=i+j,v=u+len/2,a=re[v]*wr-im[v]*wi,b=re[v]*wi+im[v]*wr;re[v]=re[u]-a;im[v]=im[u]-b;re[u]+=a;im[u]+=b;let nw=wr*wr0-wi*wi0;wi=wr*wi0+wi*wr0;wr=nw;}}}if(inv)for(let i=0;i<n;i++){re[i]/=n;im[i]/=n;}}
@@ -282,7 +282,9 @@ export function renderPCM({channels,sampleRate,speed=1,semitones=0,model='pv',ff
  renderResidual:(residual,frames)=>{
   const pitch=2**(semitones/12);
   const shifted=residual.map(ch=>resampleBandlimited(ch,pitch));
-  return phaseVocoder(shifted,pitch/speed,frames,longFftSize);
+  // UI disables longFFT in this mode: residual analysis uses a stable
+  // model-owned window and cannot be changed through a disabled control.
+  return phaseVocoder(shifted,pitch/speed,frames,2048);
  }
 });if(speed===1&&semitones===0)return {channels:channels.map(ch=>Float32Array.from(ch)),sampleRate};let p=Math.pow(2,semitones/12),stretch=p/speed,pitched=channels.map(ch=>resampleBandlimited(ch,p)),processed=model==='pv'?phaseVocoder(pitched,stretch,len,longFftSize):model==='wsola'?wsola(pitched,stretch,len,shortFftSize,sampleRate/p):model==='dual'?dualWindowVocoder(pitched,stretch,len,sampleRate,longFftSize,shortFftSize):amVocoder(pitched,stretch,len,sampleRate,longFftSize);for(let ch of processed)for(let i=0;i<ch.length;i++)if(!Number.isFinite(ch[i]))ch[i]=0;return {channels:processed,sampleRate};}
 export function wav16({channels,sampleRate}){let count=channels[0].length,nc=channels.length,total=count*nc;if(total>14000000)throw Error('書出しメモリ上限');let buf=new ArrayBuffer(44+total*2),v=new DataView(buf),tag=(p,s)=>{for(let i=0;i<s.length;i++)v.setUint8(p+i,s.charCodeAt(i));};tag(0,'RIFF');v.setUint32(4,36+total*2,true);tag(8,'WAVE');tag(12,'fmt ');v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,nc,true);v.setUint32(24,sampleRate,true);v.setUint32(28,sampleRate*nc*2,true);v.setUint16(32,nc*2,true);v.setUint16(34,16,true);tag(36,'data');v.setUint32(40,total*2,true);let offset=44;for(let i=0;i<count;i++)for(let c=0;c<nc;c++){let s=clamp(channels[c][i],-1,1);v.setInt16(offset,s<0?Math.round(s*32768):Math.round(s*32767),true);offset+=2;}return buf;}
