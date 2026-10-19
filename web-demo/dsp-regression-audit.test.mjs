@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {renderPCM,transientAnchors} from './lab-dsp.mjs';
+import {renderPCM as renderBefore31} from './lab-dsp-pre31.mjs';
 
 const sr=48000,TAU=Math.PI*2;
 const wave=(count,fn)=>Float32Array.from({length:count},(_,i)=>fn(i/sr,i));
@@ -74,4 +75,31 @@ test('AUDIT transient train with 22ms pairs and bass carrier: WSOLA/dual short25
    }
   }
  console.log('AUDIT_ANCHORS',JSON.stringify({actual:transientAnchors([ch],sr).map(i=>i/sr),expected:hits}));
+});
+
+test('A/B actual prePR31 vs now: no post-PR31 increase of rhythmic LF pumping or transient ghosts',()=>{
+ const {ch,hits}=attackTrack();
+ for(const speed of [.5,1.5])for(const shortFftSize of [256,512])for(const model of ['wsola','dual']){
+  for(const longFftSize of model==='dual'?[1024,2048]:[2048]){
+   const args={channels:[ch],sampleRate:sr,speed,semitones:0,model,shortFftSize,longFftSize};
+   const current=renderPCM(args).channels[0];
+   const prior=renderBefore31(args).channels[0];
+   const now=attackDiagnostic(current,hits,speed);
+   const before=attackDiagnostic(prior,hits,speed);
+   console.log('AB_PR31_ATTACK',JSON.stringify({model,speed,shortFftSize,longFftSize,
+    now:{outsideRatio:now.outsideRatio,peaks:now.near.map(x=>({errMs:x.errMs,peak:x.peak}))},
+    before:{outsideRatio:before.outsideRatio,peaks:before.near.map(x=>({errMs:x.errMs,peak:x.peak}))}}));
+  }
+ }
+});
+test('A/B bass periodic gain modulation vs beforePR31 and across N1024/2048',()=>{
+ const source=wave(sr*1.5,t=>.27*Math.cos(TAU*109.83*t+.13));
+ for(const speed of [.5,1.5])for(const model of ['pv','dual'])for(const longFftSize of [1024,2048]){
+  const args={channels:[source],sampleRate:sr,speed,semitones:0,model,shortFftSize:256,longFftSize};
+  const current=renderPCM(args).channels[0];
+  const previous=renderBefore31(args).channels[0];
+  const now=modulation(current,.26,Math.min(1.35,1.5/speed-.15));
+  const before=modulation(previous,.26,Math.min(1.35,1.5/speed-.15));
+  console.log('AB_PR31_BASS',JSON.stringify({model,speed,longFftSize,now,before}));
+ }
 });
