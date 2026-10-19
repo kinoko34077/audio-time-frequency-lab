@@ -117,6 +117,39 @@ export function phaseVocoder(channels,stretch,outLen,fftSize=2048){
 // IMPORTANT: `fftSize` remains the *actual synthesis window* (including 256).
 // The extra reference is evidence for finding a splice, not a silent clamp
 // of the user's window size. All channels use the same source offset.
+// Per-source shared transient markers. Broadband attacks should cross the
+// time map ONCE; a phase-similarity search must not replay them as repeated
+// quasi-periodic grains. Keep the user's requested short synthesis N intact.
+export function transientAnchors(channels,sampleRate){
+ const length=channels[0].length;
+ const hop=Math.max(24,Math.round(sampleRate*.001));
+ const refractory=Math.max(hop*2,Math.round(sampleRate*.035));
+ let previous=0,last=-refractory,count=0;
+ const anchors=[];
+ for(let start=0;start<length;start+=hop){
+  const end=Math.min(length,start+hop);
+  let square=0;
+  for(let i=start;i<end;i++){
+   let per=0;for(const ch of channels)per+=ch[i]*ch[i];
+   square+=per/channels.length;
+  }
+  const level=Math.sqrt(square/(end-start));
+  if(start-last>refractory&&level>.022&&level>previous*2.6+.012){
+   const floor=Math.max(.023,previous*2.25);
+   let index=start;
+   for(let i=start;i<end;i++){
+    let maximum=0;for(const ch of channels)maximum=Math.max(maximum,Math.abs(ch[i]));
+    if(maximum>floor){index=i;break;}
+   }
+   // Initial attacks are measured in the original source clock.
+   anchors.push(index);
+   last=index;count++;
+   if(count>=256)break;
+  }
+  previous=level>previous?previous*.68+level*.32:previous*.82+level*.18;
+ }
+ return anchors;
+}
 export function wsola(channels,stretch,outLen,fftSize=1024,sampleRate=48000){
  if(Math.abs(stretch-1)<1e-8)return channels.map(x=>fit(x,outLen));
  const L=channels[0].length,N=Math.min(fftSize,Math.max(256,Math.floor(L/2)));
@@ -127,7 +160,9 @@ export function wsola(channels,stretch,outLen,fftSize=1024,sampleRate=48000){
  // source position diverges. Short windows need >=1 low-bass period search.
  const search=Math.max(256,Math.min(2048,Math.round(sampleRate*.022)));
  const reference=Math.max(overlap,Math.min(Math.round(sampleRate*.028),Math.max(N*3,overlap)));
- const output=channels.map(()=>new Float64Array(outLen+N));
+ const events=transientAnchors(channels,sampleRate).map(source=>({source,output:Math.round(source*stretch)}));
+ const guard=N+search+Math.round(sampleRate*.010);
+  const output=channels.map(()=>new Float64Array(outLen+N));
  const weight=new Float64Array(outLen+N);
  let prev=-1;
  function comparison(candidate,expected,natural,limit,step){
@@ -183,6 +218,18 @@ export function wsola(channels,stretch,outLen,fftSize=1024,sampleRate=48000){
    }
    src=bestSrc;
   }
+  // During the neighbourhood of one broadband attack, all overlapping
+  // source grains advance by the SAME native hop. This maps an attack at
+  // original source index e to the SINGLE output index round(e*stretch).
+  // Outside attacks keep the prior source-time/phase WSOLA matching (PR #21).
+  let nearest=null,distance=Infinity;
+  for(const event of events){
+    const d=Math.abs(pos-event.output);
+    if(d<distance){distance=d;nearest=event;}
+  }
+  if(nearest&&distance<=guard){
+    src=Math.max(0,Math.min(L-N,nearest.source+(pos-nearest.output)));
+  }
   for(let j=0;j<N&&pos+j<weight.length;j++){
    const wi=w[j],index=pos+j;
    weight[index]+=wi;
@@ -200,7 +247,9 @@ export function dualWindowVocoder(channels,stretch,len,sr,longSize=2048,shortSiz
  if(Math.abs(stretch-1)<1e-8)return channels.map(x=>fit(x,len));
  if(!(shortSize<longSize))throw RangeError('短窓は長窓より短くしてください');
  const long=phaseVocoder(channels,stretch,len,longSize);
- const short=phaseVocoder(channels,stretch,len,shortSize);
+ // The short transient carrier uses phase-coherent sample-grain WSOLA
+ // rather than a SECOND independently phase-locked STFT reconstruction.
+ const short=wsola(channels,stretch,len,shortSize,sr);
  const weights=new Float32Array(len),hop=Math.max(64,shortSize/4);
  const span=Math.max(192,shortSize),L=channels[0].length;
  let previous=0;
@@ -252,6 +301,23 @@ export function dualWindowVocoder(channels,stretch,len,sr,longSize=2048,shortSiz
   for(let c=0;c<channels.length;c++){
    const j=Math.max(0,Math.min(len-1,i+lag));
    out[c][i]=long[c][i]*(1-w)+short[c][j]*w;
+  }
+ }
+ // Transient ownership: the attack is emitted from ONE short, sample-
+ // coherent carrier, not interleaved with smeared long/short STFT attacks.
+ // Suppress the long-window smear over its actual analysis footprint and
+ // use a short crossfade only outside that footprint; source timing is exact.
+ const attackEvents=transientAnchors(channels,sr);
+ const halfWidth=Math.max(Math.round(sr*.032),Math.round(longSize*stretch*.66));
+ const feather=Math.max(32,Math.round(sr*.007));
+ for(const source of attackEvents){
+  const at=Math.round(source*stretch);
+  for(let i=Math.max(0,at-halfWidth-feather);i<Math.min(len,at+halfWidth+feather);i++){
+   const offset=Math.abs(i-at);
+   const factor=offset<=halfWidth?1:
+      Math.max(0,(halfWidth+feather-offset)/feather);
+   const u=factor*factor*(3-2*factor);
+   for(let c=0;c<out.length;c++)out[c][i]=out[c][i]*(1-u)+short[c][i]*u;
   }
  }
  return out;
