@@ -743,3 +743,6 @@ body.model-lab .lab-field input:disabled{opacity:.45;cursor:not-allowed}
  body.model-lab .lab-grid .lab-field:first-child{grid-column:span 1}
  body.model-lab .lab-bottom{display:block}
 }
+
+/* The joint model uses a logarithmic number-of-periods observation slider. */
+body.model-lab .lab-period-field{max-width:450px;margin-top:12px}

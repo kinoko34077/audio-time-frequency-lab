@@ -2,7 +2,7 @@
 // This is a bounded *shared-sinusoid* model, not physical source separation.
 // All observation windows fit the SAME oscillator unknowns for each candidate;
 // no waveforms synthesized by different windows are mixed.
-import {PERIOD_K,WINDOW_COUNT,theoreticalWindow,sampleInterval} from './period-joint.mjs';
+import {PERIOD_K,PERIOD_CYCLE_CHOICES,WINDOW_COUNT,theoreticalWindow,sampleInterval} from './period-joint.mjs';
 import {detectClosePair,transportSourcePhase} from './period-joint-close.mjs';
 const TAU=2*Math.PI;
 const MAX_PARTIALS=6;
@@ -222,6 +222,7 @@ function sourceSynchronousEnvelope(channels,sr,partials){
  }
 }
 export function estimateSharedPartials({channels,sampleRate,K=PERIOD_K,maxPartials=MAX_PARTIALS}){
+ if(!PERIOD_CYCLE_CHOICES.includes(K))throw RangeError('unsupported number of analysis cycles');
  if(!Array.isArray(channels)||channels.length<1||channels.length>2||!channels[0]?.length||
     channels.some(ch=>ch.length!==channels[0].length)||!Number.isFinite(sampleRate)||
     sampleRate<8000||sampleRate>192000)throw RangeError('invalid PCM for shared partial estimation');
@@ -280,19 +281,19 @@ export function estimateSharedPartials({channels,sampleRate,K=PERIOD_K,maxPartia
  }
  let residualEnergy=0;for(const ch of residual)for(let i=0;i<L;i+=4)residualEnergy+=ch[i]*ch[i];
  return {partials,residual,explained:Math.max(-1,1-residualEnergy/(baseEnergy+1e-12)),
-   windows:WINDOW_COUNT,candidates:candidates.length,unresolvedPhysicalGrouping:true};
+   windows:WINDOW_COUNT,periodCycles:K,candidates:candidates.length,unresolvedPhysicalGrouping:true};
 }
-export function renderJointAudio({channels,sampleRate,speed=1,semitones=0,sourceStartSeconds=0,renderResidual}){
+export function renderJointAudio({channels,sampleRate,speed=1,semitones=0,sourceStartSeconds=0,periodCycles=PERIOD_K,renderResidual}){
  if(!(Number.isFinite(speed)&&speed>=.5&&speed<=2&&Number.isFinite(semitones)&&semitones>=-12&&semitones<=12))throw RangeError('invalid transform');
  if(!(Number.isFinite(sourceStartSeconds)&&sourceStartSeconds>=0))throw RangeError('source offset');
  if(typeof renderResidual!=='function')throw TypeError('residual renderer is required');
  const frames=Math.max(1,Math.round(channels[0].length/speed));
  if(frames*channels.length>14_000_000)throw RangeError('memory cap');
- const model=estimateSharedPartials({channels,sampleRate});
+ const model=estimateSharedPartials({channels,sampleRate,K:periodCycles});
  // For the neutral transform, retain the PCM exactly while still running
  // shared estimation. No transient or high-frequency signal is discarded.
  if(speed===1&&semitones===0)return {channels:channels.map(ch=>Float32Array.from(ch)),
-  sampleRate,diagnostics:{partials:model.partials.length,residualEnergy:1-model.explained,neutral:true}};
+  sampleRate,diagnostics:{partials:model.partials.length,residualEnergy:1-model.explained,periodCycles,neutral:true}};
  const transformedResidual=renderResidual(model.residual.map(ch=>Float32Array.from(ch)),frames);
  if(transformedResidual.length!==channels.length||transformedResidual.some(ch=>ch.length!==frames))throw RangeError('residual length mismatch');
  const out=transformedResidual.map(ch=>Float32Array.from(ch));
@@ -312,5 +313,5 @@ export function renderJointAudio({channels,sampleRate,speed=1,semitones=0,source
  // Output never silently drops the unmodeled content; artifacts remain possible.
  for(const ch of out)for(let i=0;i<ch.length;i++)if(!Number.isFinite(ch[i]))throw RangeError('nonfinite rendered PCM');
  return {channels:out,sampleRate,diagnostics:{partials:model.partials.length,
-   residualEnergy:Math.max(0,1-model.explained),candidates:model.candidates,grouping:'ambiguous'}};
+   residualEnergy:Math.max(0,1-model.explained),periodCycles,candidates:model.candidates,grouping:'ambiguous'}};
 }
