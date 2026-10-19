@@ -3,7 +3,7 @@
 // All observation windows fit the SAME oscillator unknowns for each candidate;
 // no waveforms synthesized by different windows are mixed.
 import {PERIOD_K,PERIOD_CYCLE_CHOICES,WINDOW_COUNT,theoreticalWindow,sampleInterval} from './period-joint.mjs';
-import {detectClosePair,transportSourcePhase} from './period-joint-close.mjs';
+import {detectClosePair} from './period-joint-close.mjs';
 const TAU=2*Math.PI;
 const MAX_PARTIALS=6;
 function fft(re,im){
@@ -417,16 +417,30 @@ export function renderJointAudio({channels,sampleRate,speed=1,semitones=0,source
  const transformedResidual=renderResidual(model.residual.map(ch=>Float32Array.from(ch)),frames);
  if(transformedResidual.length!==channels.length||transformedResidual.some(ch=>ch.length!==frames))throw RangeError('residual length mismatch');
  const out=transformedResidual.map(ch=>Float32Array.from(ch));
- const p=2**(semitones/12),absoluteOutputStart=sourceStartSeconds/speed;
+ const p=2**(semitones/12);
  for(const partial of model.partials){
-  const outF=partial.frequency*p;
-  for(let c=0;c<out.length;c++){
-   const {a,b}=partial.coefficients[c],amp=Math.hypot(a,b);
-   if(amp<1e-8)continue;
-   const localPhase=Math.atan2(-b,a);
-   const globalPhase=transportSourcePhase(localPhase,partial.frequency,sourceStartSeconds,0);
-   for(let i=0;i<frames;i++){
-    out[c][i]+=temporalGain(partial,i*speed)*amp*Math.cos(globalPhase+TAU*outF*(absoluteOutputStart+i/sampleRate));
+  const f=partial.frequency,outF=f*p;
+  // The original source coefficients a,b are defined at *chunk-local*
+  // source time zero. At absolute output time sourceStart/speed the correctly
+  // transported phase difference is 2pi*(outF/speed-f)*sourceStart.
+  // Reduce cycles BEFORE cosine rather than cancel two million-cycle angles.
+  // Source residual subtraction and pitched re-synthesis share the same
+  // a*cos(theta)+b*sin(theta) basis; stereo channels share EXACT phase clock.
+  const cycles=(outF/speed-f)*sourceStartSeconds;
+  const phase=TAU*(cycles-Math.round(cycles));
+  const step=TAU*outF/sampleRate,cosStep=Math.cos(step),sinStep=Math.sin(step);
+  let x=Math.cos(phase),y=Math.sin(phase);
+  for(let i=0;i<frames;i++){
+   const g=temporalGain(partial,i*speed);
+   for(let c=0;c<out.length;c++){
+    const {a,b}=partial.coefficients[c];
+    out[c][i]+=g*(a*x+b*y);
+   }
+   const xx=x*cosStep-y*sinStep;
+   y=y*cosStep+x*sinStep;x=xx;
+   if((i&4095)===4095){
+    const exact=phase+step*(i+1);
+    x=Math.cos(exact);y=Math.sin(exact);
    }
   }
  }

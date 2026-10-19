@@ -47,3 +47,23 @@ test('adjacent worker model chunks align source-global phase against exact targe
  const maxSlope=.3*TAU*frequency*2**(pitch/12)/sr*1.3;
  assert.ok(Math.abs(after-before)<maxSlope,'stitched phase jump exceeds one continuous sample step');
 });
+
+test('all seven cycle spans retain continuous source clock and transformed arbitrary stereo phase',()=>{
+ const freq=553.283,phase=.77,speed=.8,semitones=5;
+ const stereo=[
+  signal([[freq,.27,phase]],sr*1.4,.75),
+  signal([[freq,.135,phase+1.12]],sr*1.4,.75)
+ ];
+ for(const periodCycles of [.5,1,2,4,8,16,32]){
+  const r=renderPCM({channels:stereo,sampleRate:sr,speed,semitones,model:'period-joint',
+   periodCycles,sourceStartSeconds:.75,jointBackend:'pv'});
+  assert.equal(r.channels.length,2);
+  assert.equal(r.channels[0].length,Math.round(stereo[0].length/speed));
+  const freqOut=freq*2**(semitones/12),phaseAtStart=TAU*(freqOut/speed-freq)*.75;
+  const expected=Float32Array.from(r.channels[0],(_,i)=>.27*Math.cos(phaseAtStart+TAU*freqOut*i/sr+phase));
+  const ratio=rms(Float32Array.from(r.channels[0],(v,i)=>v-expected[i]))/rms(expected);
+  console.log('PHASE_STEREO_K',JSON.stringify({periodCycles,ratio}));
+  assert.ok(ratio<.07,'phase/stereo changes at K='+periodCycles+': '+ratio);
+  assert.ok(r.channels.every(ch=>ch.every(Number.isFinite)));
+ }
+});
