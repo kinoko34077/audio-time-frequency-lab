@@ -228,24 +228,51 @@ export function wsola(channels,stretch,outLen,fftSize=1024,sampleRate=48000){
  }
  const rendered=output.map(ch=>Float32Array.from({length:outLen},(_,i)=>
    weight[i]>1e-5?ch[i]/weight[i]:0));
- // Replace only the immediate transient waveform at its exact mapped sample
- // while preserving the original phase-compatible grain search everywhere.
- // Soft shoulders avoid the hard source-index discontinuities of PR #31.
- const inner=Math.max(8,Math.round(sampleRate*.0018));
- const outer=Math.max(inner+16,Math.round(sampleRate*.012));
- for(let i=0;i<outLen;i++){
-  let event=null,dist=Infinity;
-  for(const e of events){
-   const d=Math.abs(i-e.output);
-   if(d<dist){dist=d;event=e;}
+ // Move broadband transients to their one correct mapped onset without
+ // dragging low-frequency tonal phase along with them. First subtract the
+ // locally high-passed WSOLA copy (including its premature repeats), then
+ // add the source-clock high-frequency attack once. Use a smooth mask and a
+ // complementary low-band remainder to avoid PR31's hard grain-index jump.
+ const smooth=(input,radius)=>{
+  const out=new Float32Array(input.length);
+  let sum=0,left=0,right=-1;
+  for(let i=0;i<input.length;i++){
+   const begin=Math.max(0,i-radius),end=Math.min(input.length-1,i+radius);
+   while(right<end)sum+=input[++right];
+   while(left<begin)sum-=input[left++];
+   out[i]=sum/(end-begin+1);
   }
-  if(!event||dist>=outer)continue;
-  const fraction=dist<=inner?1:(outer-dist)/(outer-inner);
-  const blend=fraction*fraction*(3-2*fraction);
-  const sourceIndex=event.source+i-event.output;
-  if(sourceIndex<0||sourceIndex>=L)continue;
-  for(let c=0;c<channels.length;c++){
-   rendered[c][i]=rendered[c][i]*(1-blend)+channels[c][sourceIndex]*blend;
+  return out;
+ };
+ if(events.length){
+  const radius=Math.max(1,Math.round(sampleRate*.00045));
+  const origLow=channels.map(ch=>smooth(ch,radius));
+  const outLow=rendered.map(ch=>smooth(ch,radius));
+  const inner=Math.round(sampleRate*.027),outer=Math.round(sampleRate*.049);
+  const mask=new Float32Array(outLen);
+  const replacements=rendered.map(()=>new Float64Array(outLen));
+  const weights=new Float32Array(outLen);
+  for(const event of events){
+   for(let i=Math.max(0,event.output-outer);i<Math.min(outLen,event.output+outer);i++){
+    const delta=i-event.output,d=Math.abs(delta);
+    const srcIndex=event.source+delta;
+    if(srcIndex<0||srcIndex>=L)continue;
+    const z=d<=inner?1:(outer-d)/(outer-inner);
+    const w=z*z*(3-2*z);
+    mask[i]=Math.max(mask[i],w);
+    weights[i]+=w;
+    for(let c=0;c<rendered.length;c++){
+     replacements[c][i]+=w*(channels[c][srcIndex]-origLow[c][srcIndex]);
+    }
+   }
+  }
+  for(let i=0;i<outLen;i++){
+   if(!weights[i])continue;
+   const alpha=mask[i],inv=1/weights[i];
+   for(let c=0;c<rendered.length;c++){
+    const originalHigh=rendered[c][i]-outLow[c][i];
+    rendered[c][i]+=alpha*(replacements[c][i]*inv-originalHigh);
+   }
   }
  }
  return rendered;
