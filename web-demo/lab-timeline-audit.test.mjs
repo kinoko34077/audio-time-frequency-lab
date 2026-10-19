@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-import {scheduledSourcePosition,createModelStream} from './lab-stream.mjs';
+import {scheduledSourcePosition,createModelStream,planChunk} from './lab-stream.mjs';
+import {renderPCM} from './lab-dsp.mjs';
 
 test('audible source clock stays frozen during Worker overrun, resumes from exact scheduled second',()=>{
  const segments=[
@@ -70,4 +71,21 @@ test('app playback and error fallback use audible scheduled source rather than o
  assert.match(app,/if\(state\.player\.labStream\)return state\.player\.stream\.sourcePositionAt\(state\.ctx\.currentTime\)/);
  assert.match(app,/const resume=playPosition\(\);\s*void \(async\(\)=>\{await stop\(\);if\(!state\.player\)await play\("dry",resume\);\}\)\(\)/);
  assert.doesNotMatch(app,/stop\(\)\.then\(\(\)=>play\("dry",where\)\)/);
+});
+
+test('disabled joint-mode long/short/reference controls do not change preview context',()=>{
+ const req={totalFrames:48000*8,sampleRate:48000,speed:.8,startSeconds:3,model:'period-joint',fftSize:2048};
+ const a=planChunk({...req,shortFftSize:256,longFftSize:1024,referenceWindows:2});
+ const b=planChunk({...req,shortFftSize:2048,longFftSize:8192,referenceWindows:16});
+ assert.deepEqual({left:a.left,right:a.right,from:a.from,to:a.to},
+   {left:b.left,right:b.right,from:b.from,to:b.to},'disabled controls must have zero influence');
+ assert.equal(a.left,Math.ceil(48000*.12),'bounded model-owned context');
+});
+test('joint residual PV output does not change when disabled longFFT value changes',()=>{
+ const sr=16000;
+ const pcm=Float32Array.from({length:sr},(_,i)=>.2*Math.sin(2*Math.PI*413*i/sr)+.05*Math.sin(i*2.11));
+ const args={channels:[pcm],sampleRate:sr,speed:.8,semitones:3,model:'period-joint'};
+ const a=renderPCM({...args,fftSize:1024,longFftSize:1024});
+ const b=renderPCM({...args,fftSize:4096,longFftSize:8192});
+ assert.deepEqual(a.channels[0],b.channels[0]);
 });

@@ -9,7 +9,10 @@ export function planChunk({totalFrames,sampleRate,speed,startSeconds,model='dual
   const start=Math.min(totalFrames-1,Math.max(0,Math.floor(startSeconds*sampleRate)));
   const core=Math.min(totalFrames-start,Math.ceil(CHUNK_SECONDS*sampleRate));
   const analysisWindow=model==='wsola'?shortFftSize:longFftSize;
-  const context=Math.min(Math.ceil(sampleRate*.7),Math.max(Math.ceil(sampleRate*.040),referenceWindows*analysisWindow/4,analysisWindow));
+  // The experimental joint model disables long FFT and reference-window
+  // controls. Its preview context must NOT accidentally depend on either.
+  const context=model==='period-joint'?Math.ceil(sampleRate*.120):
+    Math.min(Math.ceil(sampleRate*.7),Math.max(Math.ceil(sampleRate*.040),referenceWindows*analysisWindow/4,analysisWindow));
   const left=Math.min(start,context),right=Math.min(totalFrames-start-core,context);
   const from=start-left,to=start+core+right;
   const crop=Math.round(left/speed),central=Math.round(core/speed);
