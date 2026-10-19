@@ -37,7 +37,46 @@ export function resampleLinear(input,factor){if(Math.abs(factor-1)<1e-12)return 
 // A shared spectral phase guide retains interchannel relative phase; this
 // is not source separation and cannot restore information absent in PCM.
 const wrapPhase=p=>p-TAU*Math.round(p/TAU);
-export function phaseVocoder(channels,stretch,outLen,fftSize=2048){
+// Estimate initial local instantaneous f for the phase-vocoder peak bins.
+// A chunk starts at a different ORIGINAL source time, but its STFT phase
+// accumulator previously assumed every preview segment began at t=0.
+// One additional lookahead STFT isolates exact phase evolution without
+// quantizing low partials to FFT bin centers (unreliable at N1024/2048).
+function initialPhaseFrequencies(channels,N,window,hopA,sampleRate){
+ const get=(at)=>{
+  const re=new Float64Array(N),im=new Float64Array(N);
+  const sumsRe=new Float64Array(N/2+1),sumsIm=new Float64Array(N/2+1);
+  const best=new Float64Array(N/2+1),bestPhase=new Float64Array(N/2+1);
+  let peak=0;
+  for(const ch of channels){
+   for(let i=0;i<N;i++){re[i]=(ch[at+i]||0)*window[i];im[i]=0;}
+   fft(re,im);
+   for(let k=0;k<=N/2;k++){
+    const a=re[k],b=im[k],amp=Math.hypot(a,b);
+    sumsRe[k]+=a;sumsIm[k]+=b;
+    if(amp>best[k]){best[k]=amp;bestPhase[k]=Math.atan2(b,a);}
+    peak=Math.max(peak,amp);
+   }
+  }
+  return {phase:Float64Array.from(sumsRe,(_,k)=>{
+    const total=Math.hypot(sumsRe[k],sumsIm[k]);
+    return total<best[k]*channels.length*.03?bestPhase[k]:Math.atan2(sumsIm[k],sumsRe[k]);
+  }),best,peak};
+ };
+ const first=get(0),next=get(hopA);
+ const hz=new Float64Array(N/2+1),valid=new Uint8Array(N/2+1);
+ for(let k=0;k<hz.length;k++){
+  const mag=Math.min(first.best[k],next.best[k]);
+  if(mag<first.peak*.0015)continue;
+  const expected=TAU*k*hopA/N;
+  const delta=wrapPhase(next.phase[k]-first.phase[k]-expected);
+  const f=(expected+delta)*sampleRate/(TAU*hopA);
+  if(!Number.isFinite(f)||f<0||f>sampleRate*.5)continue;
+  hz[k]=f;valid[k]=1;
+ }
+ return {hz,valid};
+}
+export function phaseVocoder(channels,stretch,outLen,fftSize=2048,sourceClockSeconds=0,sampleRate=48000){
  if(Math.abs(stretch-1)<1e-8)return channels.map(x=>fit(x,outLen));
  const N=fftSize??2048,half=N/2,Hs=N/4,w=hann(N),L=channels[0].length;
  const result=channels.map(()=>new Float64Array(outLen+N+Hs));
@@ -46,6 +85,8 @@ export function phaseVocoder(channels,stretch,outLen,fftSize=2048){
  const phi=new Float64Array(half+1),guideMag=new Float64Array(half+1);
  const synthPhase=new Float64Array(half+1),peaks=new Int32Array(half+1);
  const specs=channels.map(()=>({re:new Float64Array(N),im:new Float64Array(N)}));
+ const phaseClock=(sourceClockSeconds>0&&Number.isFinite(sourceClockSeconds))?
+   initialPhaseFrequencies(channels,N,w,Math.max(1,Math.round(Hs/stretch)),sampleRate):null;
  let prevSrc=0,first=true;
  for(let pos=0;pos<outLen+N;pos+=Hs){
   const src=Math.round(pos/stretch),hop=first?0:Math.max(1,src-prevSrc);
@@ -79,7 +120,11 @@ export function phaseVocoder(channels,stretch,outLen,fftSize=2048){
   for(let k=0;k<=half;k++){
    const expect=TAU*k*hop/N;
    const delta=first?0:wrapPhase(phi[k]-prePhase[k]-expect);
-   if(first||transient)phaseAcc[k]=phi[k];
+   if(first||transient){
+    const hz=phaseClock?.valid[k]?phaseClock.hz[k]:k*sampleRate/N;
+    const shift=phaseClock&&phaseClock.valid[k]?TAU*(hz*sourceClockSeconds*(stretch-1)%1):0;
+    phaseAcc[k]=phi[k]+shift;
+   }
    else phaseAcc[k]+=TAU*k*Hs/N+delta*Hs/hop;
   }
   let count=0;
@@ -122,33 +167,35 @@ export function phaseVocoder(channels,stretch,outLen,fftSize=2048){
 // quasi-periodic grains. Keep the user's requested short synthesis N intact.
 export function transientAnchors(channels,sampleRate){
  const length=channels[0].length;
- const hop=Math.max(24,Math.round(sampleRate*.001));
- const refractory=Math.max(hop*2,Math.round(sampleRate*.035));
- let previous=0,last=-refractory,count=0;
- const anchors=[];
+ // Broadband novelty from first differences, not raw total RMS. A loud
+ // sustained bass note must not mask a quiet snare, pick attack or consonant.
+ // 1ms observation and 9ms refractory allow short 20ms drum flams.
+ const hop=Math.max(16,Math.round(sampleRate*.001));
+ const refractory=Math.max(hop*3,Math.round(sampleRate*.009));
+ const out=[];
+ let previous=0,last=-refractory;
  for(let start=0;start<length;start+=hop){
   const end=Math.min(length,start+hop);
-  let square=0;
+  let energy=0;
   for(let i=start;i<end;i++){
-   let per=0;for(const ch of channels)per+=ch[i]*ch[i];
-   square+=per/channels.length;
+   let p=0;
+   for(const ch of channels){const d=ch[i]-(i>0?ch[i-1]:ch[i]);p+=d*d;}
+   energy+=p/channels.length;
   }
-  const level=Math.sqrt(square/(end-start));
-  if(start-last>refractory&&level>.022&&level>previous*2.6+.012){
-   const floor=Math.max(.023,previous*2.25);
+  const level=Math.sqrt(energy/(end-start));
+  if(start>=hop*3&&start-last>refractory&&level>.016&&level>previous*2.25+.008){
+   const floor=Math.max(.018,previous*2.4+.007);
    let index=start;
    for(let i=start;i<end;i++){
-    let maximum=0;for(const ch of channels)maximum=Math.max(maximum,Math.abs(ch[i]));
-    if(maximum>floor){index=i;break;}
+    let max=0;for(const ch of channels)max=Math.max(max,Math.abs(ch[i]-(i>0?ch[i-1]:ch[i])));
+    if(max>floor){index=i;break;}
    }
-   // Initial attacks are measured in the original source clock.
-   anchors.push(index);
-   last=index;count++;
-   if(count>=256)break;
+   out.push(index);last=index;
+   if(out.length>=256)break;
   }
-  previous=level>previous?previous*.68+level*.32:previous*.82+level*.18;
+  previous=level>previous?previous*.70+level*.30:previous*.74+level*.26;
  }
- return anchors;
+ return out;
 }
 export function wsola(channels,stretch,outLen,fftSize=1024,sampleRate=48000){
  if(Math.abs(stretch-1)<1e-8)return channels.map(x=>fit(x,outLen));
@@ -161,8 +208,52 @@ export function wsola(channels,stretch,outLen,fftSize=1024,sampleRate=48000){
  const search=Math.max(256,Math.min(2048,Math.round(sampleRate*.022)));
  const reference=Math.max(overlap,Math.min(Math.round(sampleRate*.028),Math.max(N*3,overlap)));
  const events=transientAnchors(channels,sampleRate).map(source=>({source,output:Math.round(source*stretch)}));
- const guard=N+search+Math.round(sampleRate*.010);
-  const output=channels.map(()=>new Float64Array(outLen+N));
+ // Separate short broadband attack components BEFORE waveform-similarity
+ // search, so WSOLA cannot repeat them at multiple chosen source grains.
+ // Preserve bass/tonal background in the original N=256/512 WSOLA path.
+ const work=channels.map(ch=>Float32Array.from(ch));
+ const attackOut=channels.map(()=>new Float32Array(outLen));
+ if(events.length){
+  const radius=Math.max(2,Math.round(sampleRate*.00045));
+  const low=channels.map(ch=>{
+   const result=new Float32Array(ch.length);
+   let sum=0,l=0,r=-1;
+   for(let i=0;i<ch.length;i++){
+    const begin=Math.max(0,i-radius),end=Math.min(ch.length-1,i+radius);
+    while(r<end)sum+=ch[++r];
+    while(l<begin)sum-=ch[l++];
+    result[i]=sum/(end-begin+1);
+   }
+   return result;
+  });
+  const before=Math.max(32,Math.round(sampleRate*.003));
+  const after=Math.max(96,Math.round(sampleRate*.014));
+  const mask=new Float32Array(L);
+  const owner=new Int16Array(L);
+  const distance=new Float32Array(L);distance.fill(Infinity);
+  for(let k=0;k<events.length;k++){
+   const evt=events[k],at=evt.source;
+   for(let i=Math.max(0,at-before);i<Math.min(L,at+after);i++){
+    const d=i-at;
+    let w=1;
+    if(d<0){const q=(d+before)/before;w=q*q*(3-2*q);}
+    else if(d>after*.7){const q=(after-d)/(after*.3);w=q*q*(3-2*q);}
+    if(w>mask[i])mask[i]=w;
+    const dist=Math.abs(d);
+    if(dist<distance[i]){distance[i]=dist;owner[i]=k;}
+   }
+  }
+  for(let i=0;i<L;i++){
+   const w=mask[i];if(w<=0)continue;
+   const evt=events[owner[i]],dest=evt.output+i-evt.source;
+   for(let c=0;c<channels.length;c++){
+    const transient=(channels[c][i]-low[c][i])*w;
+    work[c][i]-=transient;
+    if(dest>=0&&dest<outLen)attackOut[c][dest]+=transient;
+   }
+  }
+ }
+ const output=channels.map(()=>new Float64Array(outLen+N));
  const weight=new Float64Array(outLen+N);
  let prev=-1;
  function comparison(candidate,expected,natural,limit,step){
@@ -173,7 +264,7 @@ export function wsola(channels,stretch,outLen,fftSize=1024,sampleRate=48000){
   let overlapDot=0,overlapA=0,overlapB=0,refDot=0,refA=0,refB=0;
   for(let j=0;j<available;j+=step){
    for(let c=0;c<channels.length;c++){
-    const ch=channels[c],x=ch[refFrom+j],y=ch[candidate+j];
+    const ch=work[c],x=ch[refFrom+j],y=ch[candidate+j];
     if(j<overlap){
       overlapDot+=x*y;overlapA+=x*x;overlapB+=y*y;
     }
@@ -218,35 +309,24 @@ export function wsola(channels,stretch,outLen,fftSize=1024,sampleRate=48000){
    }
    src=bestSrc;
   }
-  // During the neighbourhood of one broadband attack, all overlapping
-  // source grains advance by the SAME native hop. This maps an attack at
-  // original source index e to the SINGLE output index round(e*stretch).
-  // Outside attacks keep the prior source-time/phase WSOLA matching (PR #21).
-  let nearest=null,distance=Infinity;
-  for(const event of events){
-    const d=Math.abs(pos-event.output);
-    if(d<distance){distance=d;nearest=event;}
-  }
-  if(nearest&&distance<=guard){
-    src=Math.max(0,Math.min(L-N,nearest.source+(pos-nearest.output)));
-  }
   for(let j=0;j<N&&pos+j<weight.length;j++){
    const wi=w[j],index=pos+j;
    weight[index]+=wi;
-   for(let c=0;c<channels.length;c++)output[c][index]+=(channels[c][src+j]||0)*wi;
+   for(let c=0;c<channels.length;c++)output[c][index]+=(work[c][src+j]||0)*wi;
   }
   prev=src;
  }
- return output.map(ch=>Float32Array.from({length:outLen},(_,i)=>
-   weight[i]>1e-5?ch[i]/weight[i]:0));
+ const rendered=output.map((ch,c)=>Float32Array.from({length:outLen},(_,i)=>
+   (weight[i]>1e-5?ch[i]/weight[i]:0)+attackOut[c][i]));
+ return rendered;
 }
 // Dual-resolution onset processing. Long window stabilizes sustained
 // partials; short window anchors transient timing. The signals are locally
 // time-aligned before equal-power switching to avoid blind opposite-phase mix.
-export function dualWindowVocoder(channels,stretch,len,sr,longSize=2048,shortSize=512){
+export function dualWindowVocoder(channels,stretch,len,sr,longSize=2048,shortSize=512,sourceClockSeconds=0){
  if(Math.abs(stretch-1)<1e-8)return channels.map(x=>fit(x,len));
  if(!(shortSize<longSize))throw RangeError('短窓は長窓より短くしてください');
- const long=phaseVocoder(channels,stretch,len,longSize);
+ const long=phaseVocoder(channels,stretch,len,longSize,sourceClockSeconds,sr);
  // The short transient carrier uses phase-coherent sample-grain WSOLA
  // rather than a SECOND independently phase-locked STFT reconstruction.
  const short=wsola(channels,stretch,len,shortSize,sr);
@@ -327,9 +407,9 @@ function envelope(channels,sr){let tau=1-Math.exp(-1/(sr*.012)),out=new Float32A
 // carrier by the reciprocal of near-silent RMS (the former AM path magnified
 // floor noise and introduced periodic, comb-like modulation).
 // A gently smoothed gain envelope makes no new independently delayed copy.
-export function amVocoder(channels,stretch,len,sr,fftSize=2048){
+export function amVocoder(channels,stretch,len,sr,fftSize=2048,sourceClockSeconds=0){
  if(Math.abs(stretch-1)<1e-8)return channels.map(x=>fit(x,len));
- const processed=phaseVocoder(channels,stretch,len,fftSize);
+ const processed=phaseVocoder(channels,stretch,len,fftSize,sourceClockSeconds,sr);
  const original=envelope(channels,sr),actual=envelope(processed,sr);
  const target=resampleLinear(original,original.length/len);
  const corrected=processed.map(()=>new Float32Array(len));
@@ -358,5 +438,5 @@ export function renderPCM({channels,sampleRate,speed=1,semitones=0,model='pv',ff
   return result.channels;
  }
 });
-}if(speed===1&&semitones===0)return {channels:channels.map(ch=>Float32Array.from(ch)),sampleRate};let p=Math.pow(2,semitones/12),stretch=p/speed,pitched=channels.map(ch=>resampleBandlimited(ch,p)),processed=model==='pv'?phaseVocoder(pitched,stretch,len,longFftSize):model==='wsola'?wsola(pitched,stretch,len,shortFftSize,sampleRate/p):model==='dual'?dualWindowVocoder(pitched,stretch,len,sampleRate,longFftSize,shortFftSize):amVocoder(pitched,stretch,len,sampleRate,longFftSize);for(let ch of processed)for(let i=0;i<ch.length;i++)if(!Number.isFinite(ch[i]))ch[i]=0;return {channels:processed,sampleRate};}
+}if(speed===1&&semitones===0)return {channels:channels.map(ch=>Float32Array.from(ch)),sampleRate};let p=Math.pow(2,semitones/12),stretch=p/speed,pitched=channels.map(ch=>resampleBandlimited(ch,p)),processed=model==='pv'?phaseVocoder(pitched,stretch,len,longFftSize,sourceStartSeconds/p,sampleRate):model==='wsola'?wsola(pitched,stretch,len,shortFftSize,sampleRate/p):model==='dual'?dualWindowVocoder(pitched,stretch,len,sampleRate,longFftSize,shortFftSize,sourceStartSeconds/p):amVocoder(pitched,stretch,len,sampleRate,longFftSize,sourceStartSeconds/p);for(let ch of processed)for(let i=0;i<ch.length;i++)if(!Number.isFinite(ch[i]))ch[i]=0;return {channels:processed,sampleRate};}
 export function wav16({channels,sampleRate}){let count=channels[0].length,nc=channels.length,total=count*nc;if(total>14000000)throw Error('書出しメモリ上限');let buf=new ArrayBuffer(44+total*2),v=new DataView(buf),tag=(p,s)=>{for(let i=0;i<s.length;i++)v.setUint8(p+i,s.charCodeAt(i));};tag(0,'RIFF');v.setUint32(4,36+total*2,true);tag(8,'WAVE');tag(12,'fmt ');v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,nc,true);v.setUint32(24,sampleRate,true);v.setUint32(28,sampleRate*nc*2,true);v.setUint16(32,nc*2,true);v.setUint16(34,16,true);tag(36,'data');v.setUint32(40,total*2,true);let offset=44;for(let i=0;i<count;i++)for(let c=0;c<nc;c++){let s=clamp(channels[c][i],-1,1);v.setInt16(offset,s<0?Math.round(s*32768):Math.round(s*32767),true);offset+=2;}return buf;}
