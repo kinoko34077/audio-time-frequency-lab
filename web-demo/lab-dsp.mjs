@@ -120,7 +120,7 @@ export function phaseVocoder(channels,stretch,outLen,fftSize=2048){
 // Per-source shared transient markers. Broadband attacks should cross the
 // time map ONCE; a phase-similarity search must not replay them as repeated
 // quasi-periodic grains. Keep the user's requested short synthesis N intact.
-function transientAnchors(channels,sampleRate){
+export function transientAnchors(channels,sampleRate){
  const length=channels[0].length;
  const hop=Math.max(24,Math.round(sampleRate*.001));
  const refractory=Math.max(hop*2,Math.round(sampleRate*.035));
