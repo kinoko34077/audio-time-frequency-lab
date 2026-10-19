@@ -67,3 +67,17 @@ test('all seven cycle spans retain continuous source clock and transformed arbit
   assert.ok(r.channels.every(ch=>ch.every(Number.isFinite)));
  }
 });
+
+test('two separate off-grid close components use a jointly constrained source clock, not 0.01Hz output snapping',()=>{
+ // Close components deliberately NOT 440/441. 2.4s contains enough beat
+ // observation to distinguish this 1.31Hz pair without inventing time shifts.
+ const fs=[382.137,383.447];
+ const x=signal([[fs[0],.21,.14],[fs[1],.16,.71]],Math.round(sr*2.4));
+ const m=estimateSharedPartials({channels:[x],sampleRate:sr});
+ const nearestErrors=fs.map(f=>Math.abs(nearest(m,f).frequency-f));
+ const residualRatio=rms(m.residual[0])/rms(x);
+ console.log('PHASE_PRECISION_CLOSEPAIR',JSON.stringify({actual:m.partials.map(p=>p.frequency),nearestErrors,residualRatio}));
+ assert.ok(m.partials.length>=2,'a resolved pair must keep two separate partials');
+ assert.ok(nearestErrors.every(e=>e<.015),'remaining pair-frequency error '+JSON.stringify(nearestErrors));
+ assert.ok(residualRatio<.04,'close components leak into time-stretched residual');
+});
