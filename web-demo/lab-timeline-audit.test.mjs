@@ -59,8 +59,10 @@ test('real schedule registers late Worker completion without skipping playback p
   ctx.currentTime=14.5;
   assert.ok(Math.abs(stream.sourcePositionAt(ctx.currentTime)-5.5)<.0001,'clock frozen between buffers');
   fake.flush();
-  assert.ok(Math.abs(stream.sourcePositionAt(15.04)-5.5)<.0001);
-  assert.ok(Math.abs(stream.sourcePositionAt(16.04)-6.25)<.0001);
+  assert.ok(Math.abs(stream.sourcePositionAt(14.53)-5.5)<.0001);
+  // Worker finished at ctx=14.5, so audio is scheduled at 14.54, NOT 15.04.
+  assert.ok(Math.abs(stream.sourcePositionAt(14.54)-5.5)<.0001);
+  assert.ok(Math.abs(stream.sourcePositionAt(15.54)-6.25)<.0001);
  }finally{stream?.stop();globalThis.Worker=original;}
 });
 test('app playback and error fallback use audible scheduled source rather than original start offset',()=>{

@@ -246,7 +246,7 @@
   </div>
   <div class="below-workspace">
     <details class="offline-tool"><summary>WAVファイルを書き出す（オフライン処理）</summary>
-      <p>書出しだけ曲全体の変換を行います。再生中の音の変更には不要です。</p>
+      <p>この書出しは従来の周波数ワープ（Rust/WASM）用です。上部のモデル比較（PV・WSOLA・複合窓・AM・周波数別周期窓）の試聴結果はまだWAVに書き出せません。再生中の音の変更には不要です。</p>
       <button id="render" disabled>書出し用に変換</button>
       <progress id="progress" value="0" max="100" aria-label="書出し処理進捗"></progress>
       <button id="download" disabled>↓ WAVを保存</button>
