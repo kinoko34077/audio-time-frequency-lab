@@ -4,7 +4,7 @@ Current implementation scope: **publicly auditionable research mode**, independe
 
 ## UX contract
 - Checkbox exactly 「周波数ごとの個別波長」, OFF by default; no change to the original selected engine when OFF.
-- ON: independent \`period-joint\` implementation, whose tone parameters are estimated from seven frequency-dependent K=8-period windows for each candidate, with common unknown frequencies, channel amplitude and phase. DO NOT mix independently reconstructed short and long windows.
+- ON: independent \`period-joint\` implementation, whose tone parameters are estimated from seven frequency-dependent user-selected K-period windows for each candidate, with common unknown frequencies, channel amplitude and phase. DO NOT mix independently reconstructed short and long windows.
 - Process mono/stereo and multiple simultaneous notes, AM/FM, noise, attacks and voice/music inputs with a preserved **residual branch** rather than throwing an unsupported-source error. This means the input is processed, not that every modulation source is correctly identified.
 - The user retains original playback as an independent reference if a genuine DSP execution failure occurs. Status does not falsely say the input was physically separated.
 
@@ -37,3 +37,9 @@ Current implementation scope: **publicly auditionable research mode**, independe
 
 ## Model-owned parameters: disabled Lab controls (2026-10-19 audit)
 - When opt-in period-joint is ON, short FFT, long FFT, and number of reference context windows are disabled in UI and **must not silently change** processing. The source preview context is fixed at 120ms per side; residual-only PV FFT size is fixed at 2048 samples. Existing 7 frequency-dependent K=8-window joint observations remain in effect and independent of these UI slider controls. Tests vary disabled inputs and require identical model source context and residual output. This does not claim the fixed values are acoustically optimal on every recording.
+
+## Configurable frequency-specific observation window — 2026-10-19
+
+- Slider `解析窓の長さ` appears only with the opt-in `周波数ごとの個別波長` checkbox ON; positions are logarithmic `K = 2^position` with positions -1 to 5, values `0.5, 1, 2, 4, 8, 16, 32` periods and default **8**. K is observation duration in **cycles of each frequency**, not the time stretching factor, output duration, pitch, nor number of observations. In a nonstationary/noisy/closely-spaced recording K changes the estimation trade-off; no monotonic quality guarantee. `T(f,K)=K/f` seconds; `K=.5` is half an oscillation.
+- All seven frequency-specific Hann windows and their shared-coefficient refinements use the selected K; `periodCycles` is forwarded UI→stream→Worker→DSP→joint model with exact validation. Candidate FFT discovery, full-segment close-pair parametric hypothesis, joint NNLS onset envelope and residual PV remain **separate unchanged mechanisms**: this slider does NOT claim to shrink *all* internal analysis to half a cycle or alter oscillator frequency.
+- Checkbox OFF keeps inherited Rust/PV/WSOLA/dual/AM settings and output unchanged. Value retained if checkbox toggled and live preview is restarted at current source location on a changed K. Extremely small K can become ill-conditioned at high frequencies; unsupported tonal content is preserved through existing residual rather than asserting a valid partial.

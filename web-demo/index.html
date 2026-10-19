@@ -47,6 +47,10 @@
       </label>
     </div>
     <label class="lab-note" for="lab-individual-periods"><input id="lab-individual-periods" type="checkbox" aria-describedby="lab-individual-note"> <strong>周波数ごとの個別波長</strong></label>
+    <label class="lab-field lab-period-field" id="lab-period-cycles-field" for="lab-period-cycles" hidden>解析窓の長さ <output id="lab-period-cycles-output" for="lab-period-cycles">8周期</output>
+      <input id="lab-period-cycles" type="range" min="-1" max="5" step="1" value="3" aria-label="周波数別の解析に使う周期数（0.5から32周期）" disabled>
+      <small>0.5 · 1 · 2 · 4 · 8 · 16 · 32周期</small>
+    </label>
     <p id="lab-individual-note" class="lab-note">オフ：従来モデルを保持。オン：周波数別周期窓から共通部分音を推定し、残差・過渡音も処理。試験版のため、音色・位相や音源の一意識別は保証しません。</p>
     <p id="lab-window-note" class="lab-note">複合窓では短窓が音の立ち上がり、長窓が音程の識別を担当します。</p>
     <p id="lab-model-description" class="lab-note" aria-live="polite">部分音：音の中の周波数を追って、再生しながら速度と音程を変更します。複雑な音では揺れや濁りが出ることがあります。</p>

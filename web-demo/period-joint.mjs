@@ -3,12 +3,13 @@
 const TAU=2*Math.PI;
 export const PERIOD_MODEL_ID='period-joint';
 export const PERIOD_K=8, WINDOW_COUNT=7;
+export const PERIOD_CYCLE_CHOICES=Object.freeze([.5,1,2,4,8,16,32]);
 export function integerReferenceHz(f){
  if(!Number.isFinite(f)||f>=1e9||f<.5)throw RangeError('positive reference frequency');
  return Math.floor(f+.5); // n-.5 <= f < n+.5; f is not quantized
 }
 export function theoreticalWindow(f,K=PERIOD_K){
- if(!Number.isFinite(f)||f<=0||!Number.isInteger(K)||K<1||K>128)throw RangeError('invalid frequency/period count');
+ if(!Number.isFinite(f)||f<=0||!Number.isFinite(K)||K<.5||K>128)throw RangeError('invalid frequency/period count');
  return K/f;
 }
 export function gcd(a,b){

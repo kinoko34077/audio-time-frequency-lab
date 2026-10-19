@@ -34,7 +34,7 @@ export function scheduledSourcePosition(segments,now,initialSource,duration){
   }
   return last;
 }
-export function createModelStream({ctx,sourceChannels,sampleRate,speed,semitones,model,fftSize,shortFftSize=512,longFftSize=fftSize,referenceWindows,startSeconds=0,onStatus=()=>{},onStarted=()=>{},onFailure=()=>{}}){
+export function createModelStream({ctx,sourceChannels,sampleRate,speed,semitones,model,fftSize,shortFftSize=512,longFftSize=fftSize,referenceWindows,periodCycles=8,startSeconds=0,onStatus=()=>{},onStarted=()=>{},onFailure=()=>{}}){
   let stopped=false,active=false,pending=false,timer=0;
   const nodes=[],scheduled=[],totalFrames=sourceChannels[0].length,duration=totalFrames/sampleRate;
   const worker=new Worker('./lab-processor.worker.mjs',{type:'module'});
@@ -96,7 +96,7 @@ export function createModelStream({ctx,sourceChannels,sampleRate,speed,semitones
     const channels=sourceChannels.map(ch=>ch.slice(plan.from,plan.to));
     pending=true;job++;
     onStatus(started?'次の区間を先読み中':'モデルの先頭区間を準備中…');
-    try{worker.postMessage({job,channels,sampleRate,speed,semitones,model,fftSize,shortFftSize,longFftSize,plan},channels.map(ch=>ch.buffer));}
+    try{worker.postMessage({job,channels,sampleRate,speed,semitones,model,fftSize,shortFftSize,longFftSize,periodCycles,plan},channels.map(ch=>ch.buffer));}
     catch(error){pending=false;onFailure(error.message);cleanup();}
   }
   return {master,start(){refill();},stop:cleanup,

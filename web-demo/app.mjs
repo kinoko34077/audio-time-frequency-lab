@@ -33,7 +33,7 @@ const state={
   precise:Object.create(null),
   effective:{low:20,high:16000},raf:0,lastStats:null,mathCore:null,wasmPromise:null,rebuildTimer:null,sine:null,loadToken:0,transportEpoch:0
 };
-const lab={mode:"live",speed:1,semitones:0,fftSize:2048,shortFftSize:512,longFftSize:2048,referenceWindows:8,processed:null,worker:null,job:0};
+const lab={mode:"live",speed:1,semitones:0,fftSize:2048,shortFftSize:512,longFftSize:2048,referenceWindows:8,periodCycles:8,processed:null,worker:null,job:0};
 const labReady=()=>lab.mode!=="live"&&lab.processed?.model===lab.mode&&lab.processed?.speed===lab.speed&&lab.processed?.semitones===lab.semitones;
 
 // Continuous log bands around 20 Hz: 0..200 resolves 0.001..20 Hz,
@@ -1543,6 +1543,8 @@ document.documentElement.dataset.fwBoot="ready";
  */
 const labModel=$("#lab-model"),labSpeed=$("#lab-speed"),labPitch=$("#lab-pitch");
 const labShort=$("#lab-short"),labLong=$("#lab-long"),labWindows=$("#lab-windows"),labStatus=$("#lab-status"),labIndividual=$("#lab-individual-periods");
+const labPeriod=$("#lab-period-cycles"),labPeriodField=$("#lab-period-cycles-field");
+const selectedPeriodCycles=()=>2**Number(labPeriod.value);
 function labStatusText(text){labStatus.textContent=text;}
 function labRefresh(){
   $("#lab-speed-output").textContent=lab.speed.toFixed(2)+"×";
@@ -1550,13 +1552,16 @@ function labRefresh(){
   $("#lab-short-output").textContent=String(lab.shortFftSize)+" samples";
   $("#lab-long-output").textContent=String(lab.longFftSize)+" samples";
   $("#lab-windows-output").textContent=String(lab.referenceWindows)+" 窓";
+  $("#lab-period-cycles-output").textContent=String(lab.periodCycles)+"周期";
+  labPeriodField.hidden=lab.mode!=="period-joint";
+  labPeriod.disabled=lab.mode!=="period-joint";
   labModel.disabled=lab.mode==="period-joint";
   labShort.disabled=!["wsola","dual"].includes(lab.mode);
   labLong.disabled=["wsola","period-joint"].includes(lab.mode);
   labWindows.disabled=["live","period-joint"].includes(lab.mode);
   labLong.max=lab.mode==="live"?"12":"13";
   $("#lab-window-note").textContent=lab.mode==="period-joint"?
-    "周波数別の8周期窓×7観測を用いて複数部分音を共同推定し、モデル外の成分は残差経路で保持します。短窓・参照窓数は適用されません。":
+    "周波数別の"+lab.periodCycles+"周期窓×7観測で部分音を推定します。0.5周期は半波長の観測です。短窓・長窓・参照窓数は適用されず、推定できない成分は残差として残します。":
     lab.mode==="dual"?
     "短窓＝打音・音の切替の時間精度、長窓＝持続音の周波数精度。それぞれ別々に処理へ反映します。":
     lab.mode==="wsola"?"WSOLAは短窓を使い、長窓は使用しません。":
@@ -1580,7 +1585,7 @@ async function labSettingsChanged(){
   const previous=lab.mode,currentTime=playPosition();
   const nextMode=labIndividual.checked?"period-joint":labModel.value,nextSpeed=Number(labSpeed.value),nextSemi=Number(labPitch.value);
   let nextShort=2**Number(labShort.value),nextLong=2**Number(labLong.value);
-  const nextWindows=Number(labWindows.value);
+  const nextWindows=Number(labWindows.value),nextCycles=selectedPeriodCycles();
   // The two independently adjustable lengths must maintain short < long;
   // move only the conflicting peer when the user crosses that boundary.
   if(nextMode==='dual'&&nextShort>=nextLong){
@@ -1590,10 +1595,10 @@ async function labSettingsChanged(){
     labLong.value=String(Math.log2(nextLong));
   }
   if(nextMode==="live"&&nextLong>4096){nextLong=4096;labLong.value="12";}
-  if(nextMode===lab.mode&&nextSpeed===lab.speed&&nextSemi===lab.semitones&&nextShort===lab.shortFftSize&&nextLong===lab.longFftSize&&nextWindows===lab.referenceWindows)return;
+  if(nextMode===lab.mode&&nextSpeed===lab.speed&&nextSemi===lab.semitones&&nextShort===lab.shortFftSize&&nextLong===lab.longFftSize&&nextWindows===lab.referenceWindows&&nextCycles===lab.periodCycles)return;
   liveFactors(nextSpeed,nextSemi);
   lab.mode=nextMode;lab.speed=nextSpeed;lab.semitones=nextSemi;
-  lab.shortFftSize=nextShort;lab.longFftSize=nextLong;lab.fftSize=Math.min(4096,nextLong);lab.referenceWindows=nextWindows;
+  lab.shortFftSize=nextShort;lab.longFftSize=nextLong;lab.fftSize=Math.min(4096,nextLong);lab.referenceWindows=nextWindows;lab.periodCycles=nextCycles;
   // Borrow the original Rust quality control, never silently pretend that
   // +/- context windows are part of Rust's existing DSP API.
   $("#quality").value=lab.fftSize===1024?"eco":lab.fftSize===2048?"standard":"high";
@@ -1614,15 +1619,16 @@ async function labSettingsChanged(){
   labRefresh();
   if(state.dry&&lab.mode==="live"&&!state.player)updateParams("lab");
 }
-[labModel,labSpeed,labPitch,labShort,labLong,labWindows,labIndividual].forEach(node=>node.addEventListener("change",()=>void labSettingsChanged()));
+[labModel,labSpeed,labPitch,labShort,labLong,labWindows,labIndividual,labPeriod].forEach(node=>node.addEventListener("change",()=>void labSettingsChanged()));
 function liveSliderValue(){
   $("#lab-speed-output").textContent=Number(labSpeed.value).toFixed(2)+"×";
   $("#lab-pitch-output").textContent=labPitch.value+" 半音";
   $("#lab-short-output").textContent=String(2**Number(labShort.value))+" samples";
   $("#lab-long-output").textContent=String(2**Number(labLong.value))+" samples";
   $("#lab-windows-output").textContent=labWindows.value+" 窓";
+  $("#lab-period-cycles-output").textContent=String(selectedPeriodCycles())+"周期";
 }
-[labSpeed,labPitch,labShort,labLong,labWindows].forEach(node=>node.addEventListener("input",liveSliderValue));
+[labSpeed,labPitch,labShort,labLong,labWindows,labPeriod].forEach(node=>node.addEventListener("input",liveSliderValue));
 async function startModelPlayback(offset=null){
   const where=clamp(offset??(state.player?playPosition():state.seek),0,Math.max(0,duration()-.001));
   if(state.player)await stop();
@@ -1638,7 +1644,7 @@ async function startModelPlayback(offset=null){
     const stream=createModelStream({
       ctx,sourceChannels:state.dry,sampleRate:state.decoded.sampleRate,
       speed:lab.speed,semitones:lab.semitones,model:lab.mode,
-      fftSize:lab.fftSize,shortFftSize:lab.shortFftSize,longFftSize:lab.longFftSize,referenceWindows:lab.referenceWindows,startSeconds:where,
+      fftSize:lab.fftSize,shortFftSize:lab.shortFftSize,longFftSize:lab.longFftSize,referenceWindows:lab.referenceWindows,periodCycles:lab.periodCycles,startSeconds:where,
       onStatus:text=>{if(state.player===player)labStatusText(text);},
       onStarted:at=>{
         if(state.player!==player)return;
