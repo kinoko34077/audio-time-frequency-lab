@@ -26,6 +26,21 @@ test('full Chrome: inherited Rust AudioWorklet live independent speed/pitch UI',
   await page.waitForSelector('html[data-fw-boot="ready"]');
   await (await page.$('#audio-file')).uploadFile(audioFile);
   await page.waitForFunction(()=>!document.querySelector('#play-wet').disabled,{timeout:20000});
+  // Native Chrome UI contract: opt-in controls a real slider; log2 positions
+  // select half through 32 cycles and switching OFF restores legacy mode.
+  assert.equal(await page.$eval('#lab-period-cycles-field',e=>e.hidden),true);
+  await page.$eval('#lab-individual-periods',e=>{e.checked=true;e.dispatchEvent(new Event('change',{bubbles:true}));});
+  await page.waitForFunction(()=>!document.querySelector('#lab-period-cycles-field').hidden);
+  await page.$eval('#lab-period-cycles',e=>{
+    e.value='-1';
+    e.dispatchEvent(new Event('input',{bubbles:true}));
+    e.dispatchEvent(new Event('change',{bubbles:true}));
+  });
+  await page.waitForFunction(()=>document.querySelector('#lab-period-cycles-output').textContent==='0.5周期');
+  assert.equal(await page.$eval('#lab-period-cycles',e=>e.disabled),false);
+  await page.$eval('#lab-individual-periods',e=>{e.checked=false;e.dispatchEvent(new Event('change',{bubbles:true}));});
+  await page.waitForFunction(()=>document.querySelector('#lab-period-cycles-field').hidden);
+  assert.equal(await page.$eval('#lab-model',e=>e.disabled),false);
   await page.$eval('#lab-speed',e=>{e.value='1.5';e.dispatchEvent(new Event('change',{bubbles:true}));});
   await page.$eval('#lab-pitch',e=>{e.value='5';e.dispatchEvent(new Event('change',{bubbles:true}));});
   await (await page.$('#play-wet')).click();
