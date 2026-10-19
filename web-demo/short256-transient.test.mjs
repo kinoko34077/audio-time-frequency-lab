@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {renderPCM,transientAnchors} from './lab-dsp.mjs';
+import {planChunk} from './lab-stream.mjs';
 const sr=48000,TAU=Math.PI*2;
 function attacks({seconds=1.7,times=[.47,1.12],stereo=false,tone=false}={}){
  const count=Math.round(seconds*sr);
@@ -102,4 +103,22 @@ test('pitch tracking of N256 WSOLA with low sustained pitch remains unmodified',
  const hz=crossings/((b-a)/sr);
  console.log('TRANSIENT_BASS_PITCH',JSON.stringify({actual:hz,expected:f}));
  assert.ok(Math.abs(hz-f)<8,'onset anchor incorrectly scaled sustained 110Hz pitch');
+});
+
+test('actual 1.5s Worker core seam does not replay a late attack before its absolute timestamp',()=>{
+ const seconds=3.4,at=1.508,channels=attacks({seconds,times:[at],stereo:true});
+ for(const mode of ['wsola','dual'])for(const speed of [.5,1.5]){
+  const next=planChunk({totalFrames:channels[0].length,sampleRate:sr,speed,startSeconds:1.5,
+   model:mode,fftSize:2048,shortFftSize:256,longFftSize:2048,referenceWindows:8});
+  const sliced=channels.map(x=>x.subarray(next.from,next.to));
+  const out=renderPCM({channels:sliced,sampleRate:sr,speed,semitones:0,model:mode,
+   shortFftSize:256,longFftSize:2048}).channels;
+  const core=out.map(x=>x.subarray(next.outputStart,next.outputStart+next.coreFrames));
+  const relative=(at-1.5)/speed;
+  const detail=diagnostic(core,[at-1.5],speed);
+  const attack=detail.peaks[0];
+  console.log('TRANSIENT_SEAM',JSON.stringify({mode,speed,relative,peakError:attack.peakErrorMs,secondary:attack.secondRatio}));
+  assert.ok(Math.abs(attack.peakErrorMs)<5,'relative chunk attack moved or repeated');
+  assert.ok(detail.nearRatio>.82,'seam created outside attack energy');
+ }
 });
