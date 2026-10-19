@@ -59,8 +59,8 @@ test('all seven cycle spans retain continuous source clock and transformed arbit
    periodCycles,sourceStartSeconds:.75,jointBackend:'pv'});
   assert.equal(r.channels.length,2);
   assert.equal(r.channels[0].length,Math.round(stereo[0].length/speed));
-  const freqOut=freq*2**(semitones/12),phaseAtStart=TAU*(freqOut/speed-freq)*.75;
-  const expected=Float32Array.from(r.channels[0],(_,i)=>.27*Math.cos(phaseAtStart+TAU*freqOut*i/sr+phase));
+  const freqOut=freq*2**(semitones/12);
+  const expected=Float32Array.from(r.channels[0],(_,i)=>.27*Math.cos(TAU*freqOut*(.75/speed+i/sr)+phase));
   const ratio=rms(Float32Array.from(r.channels[0],(v,i)=>v-expected[i]))/rms(expected);
   console.log('PHASE_STEREO_K',JSON.stringify({periodCycles,ratio}));
   assert.ok(ratio<.07,'phase/stereo changes at K='+periodCycles+': '+ratio);
