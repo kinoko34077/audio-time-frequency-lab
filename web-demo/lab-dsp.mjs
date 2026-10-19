@@ -6,7 +6,7 @@ export const MODELS=[
 {id:'wsola',label:'WSOLA',description:'Waveform-similarity overlap-add'},
 {id:'dual',label:'Dual-window Onset Blend',description:'Experimental short/long STFT onset-directed output fusion'},
 {id:'am',label:'AM Envelope × Phase Vocoder',description:'Experimental envelope-separated PV; not source identification'},
-{id:'period-joint',label:'Frequency-specific Joint Period (stationary tone ONLY)',description:'Issue #20 opt-in experimental shared-parameter estimator; not polyphony, AM/FM or source separation'}
+{id:'period-joint',label:'Frequency-specific Joint Period (experimental)',description:'Issue #20 opt-in multi-partial joint estimator with source-time gain and residual; physical grouping is not identified'}
 ];
 const TAU=Math.PI*2,clamp=(x,a,b)=>Math.max(a,Math.min(b,x)),fit=(a,n)=>{let b=new Float32Array(n);b.set(a.subarray(0,n));return b};
 function fft(re,im,inv=false){let n=re.length;for(let i=1,j=0;i<n;i++){let bit=n>>1;for(;j&bit;bit>>=1)j^=bit;j^=bit;if(i<j){[re[i],re[j]]=[re[j],re[i]];[im[i],im[j]]=[im[j],im[i]];}}for(let len=2;len<=n;len*=2){let wr0=Math.cos(TAU/len),wi0=Math.sin((inv?1:-1)*TAU/len);for(let i=0;i<n;i+=len){let wr=1,wi=0;for(let j=0;j<len/2;j++){let u=i+j,v=u+len/2,a=re[v]*wr-im[v]*wi,b=re[v]*wi+im[v]*wr;re[v]=re[u]-a;im[v]=im[u]-b;re[u]+=a;im[u]+=b;let nw=wr*wr0-wi*wi0;wi=wr*wi0+wi*wr0;wr=nw;}}}if(inv)for(let i=0;i<n;i++){re[i]/=n;im[i]/=n;}}

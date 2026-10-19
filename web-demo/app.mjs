@@ -470,7 +470,7 @@ function drawAudio(){
 }
 function playPosition(){
   if(!state.player||!state.ctx||!duration())return state.seek;
-  if(state.player.labStream&&!state.player.stream.firstScheduled)return state.player.offset;
+  if(state.player.labStream)return state.player.stream.sourcePositionAt(state.ctx.currentTime);
   return (state.player.offset+Math.max(0,state.ctx.currentTime-state.player.at)*(state.player.sourceTimeRate||1))%duration();
 }
 function refreshPlayhead(){
@@ -1649,7 +1649,10 @@ async function startModelPlayback(offset=null){
       onFailure:error=>{
         if(state.player!==player)return;
         labStatusText("モデル処理失敗: "+error);
-        void stop().then(()=>play("dry",where));
+        // Recover from the last AUDIBLE source time, not the initial seek.
+        // A pending Worker may fail minutes after stream launch.
+        const resume=playPosition();
+        void (async()=>{await stop();if(!state.player)await play("dry",resume);})();
       }
     });
     player={labStream:true,stream,mode:"wet",offset:where,at:ctx.currentTime,

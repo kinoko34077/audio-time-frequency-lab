@@ -16,12 +16,28 @@ export function planChunk({totalFrames,sampleRate,speed,startSeconds,model='dual
   const tail=Math.min(Math.round(.025*sampleRate),Math.round(right/speed));
   return {from,to,left,right,core,start,shortFftSize,longFftSize,outputStart:crop,outputFrames:central+tail,coreFrames:central,nextSeconds:(start+core)/sampleRate};
 }
+// The host audio clock can advance while the Worker has produced NO audio.
+// Position is derived from SCHEDULED audible chunks, not elapsed wall time.
+export function scheduledSourcePosition(segments,now,initialSource,duration){
+  if(!(Number.isFinite(now)&&duration>0))throw RangeError('invalid playback clock');
+  let last=initialSource;
+  for(const segment of segments){
+    if(now<segment.at)return last;
+    if(now<segment.until){
+      const t=Math.min(segment.sourceEnd,segment.sourceFrom+(now-segment.at)*segment.speed);
+      return t>=duration?0:t;
+    }
+    last=segment.sourceTo;
+  }
+  return last;
+}
 export function createModelStream({ctx,sourceChannels,sampleRate,speed,semitones,model,fftSize,shortFftSize=512,longFftSize=fftSize,referenceWindows,startSeconds=0,onStatus=()=>{},onStarted=()=>{},onFailure=()=>{}}){
   let stopped=false,active=false,pending=false,timer=0;
-  const nodes=[],totalFrames=sourceChannels[0].length,duration=totalFrames/sampleRate;
+  const nodes=[],scheduled=[],totalFrames=sourceChannels[0].length,duration=totalFrames/sampleRate;
   const worker=new Worker('./lab-processor.worker.mjs',{type:'module'});
   const master=ctx.createGain(); master.gain.value=1;master.connect(ctx.destination);
   let cursor=((startSeconds%duration)+duration)%duration;
+  let pastSource=cursor;
   let nextWhen=ctx.currentTime+.12,started=false,job=0;
   function cleanup(){
     if(stopped)return;stopped=true;clearTimeout(timer);worker.terminate();
@@ -47,6 +63,14 @@ export function createModelStream({ctx,sourceChannels,sampleRate,speed,semitones
     src.start(startAt);
     src.onended=()=>{try{src.disconnect();gain.disconnect();}catch{}const idx=nodes.indexOf(src);if(idx>=0)nodes.splice(idx,1);};
     nodes.push(src);
+    const sourceFrom=plan.start/sampleRate,sourceEnd=(plan.start+plan.core)/sampleRate;
+    scheduled.push({at:startAt,until:end,sourceFrom,sourceEnd,
+      sourceTo:sourceEnd>=duration-.5/sampleRate?0:sourceEnd,speed});
+    // Bound the scheduling ledger independently from track length.
+    // Retain pastSource so pruning does not reset the playhead.
+    while(scheduled.length>1&&scheduled[1].until<ctx.currentTime-1){
+      pastSource=scheduled.shift().sourceTo;
+    }
     if(!started){started=true;onStarted(startAt);onStatus('モデル音声を再生中 · 順次処理');}
     if(startAt>nextWhen+.040&&started)onStatus('処理が追いつかず短い音切れが発生した可能性があります');
     nextWhen=end;
@@ -72,5 +96,7 @@ export function createModelStream({ctx,sourceChannels,sampleRate,speed,semitones
     try{worker.postMessage({job,channels,sampleRate,speed,semitones,model,fftSize,shortFftSize,longFftSize,plan},channels.map(ch=>ch.buffer));}
     catch(error){pending=false;onFailure(error.message);cleanup();}
   }
-  return {master,start(){refill();},stop:cleanup,get active(){return !stopped},get firstScheduled(){return started}};
+  return {master,start(){refill();},stop:cleanup,
+    sourcePositionAt(now=ctx.currentTime){return scheduledSourcePosition(scheduled,now,pastSource,duration);},
+    get active(){return !stopped},get firstScheduled(){return started}};
 }

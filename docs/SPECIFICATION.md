@@ -1,6 +1,6 @@
 # Audio Time–Frequency Lab — Initial specification (2026-10-18)
 
-Status: INITIAL ACCEPTED REQUIREMENTS; implementations / performance and publication not yet verified.
+Status: INITIAL ACCEPTED REQUIREMENTS (historical scope); browser implementation and experimental Pages public release verified through 2026-10-19, main @ 189181dc59224bb488296d9e946dc42dfe48d8c3 (PR #26). No certification of real-recording fidelity or physical iPhone Safari. This document preserves original requirements; implementation-specific current details and open acceptance are recorded in PERIOD_JOINT_MODEL.md, Issue #20, DSP #2 and iPhone #8.
 
 ## Objective and accepted inputs
 Dedicated research/audition website, not an addition to existing frequency-warp-vst. Upload/drag-drop existing audio (WAV and browser-supported MP3 etc.), preview and compare several *actual implemented* processing models. Speed and pitch controls must be independent. Recordings/offline first; buffering for future real-time is allowed and not a blocker.
