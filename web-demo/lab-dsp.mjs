@@ -163,7 +163,52 @@ export function wsola(channels,stretch,outLen,fftSize=1024,sampleRate=48000){
  const search=Math.max(256,Math.min(2048,Math.round(sampleRate*.022)));
  const reference=Math.max(overlap,Math.min(Math.round(sampleRate*.028),Math.max(N*3,overlap)));
  const events=transientAnchors(channels,sampleRate).map(source=>({source,output:Math.round(source*stretch)}));
-  const output=channels.map(()=>new Float64Array(outLen+N));
+ // Separate short broadband attack components BEFORE waveform-similarity
+ // search, so WSOLA cannot repeat them at multiple chosen source grains.
+ // Preserve bass/tonal background in the original N=256/512 WSOLA path.
+ const work=channels.map(ch=>Float32Array.from(ch));
+ const attackOut=channels.map(()=>new Float32Array(outLen));
+ if(events.length){
+  const radius=Math.max(2,Math.round(sampleRate*.00045));
+  const low=channels.map(ch=>{
+   const result=new Float32Array(ch.length);
+   let sum=0,l=0,r=-1;
+   for(let i=0;i<ch.length;i++){
+    const begin=Math.max(0,i-radius),end=Math.min(ch.length-1,i+radius);
+    while(r<end)sum+=ch[++r];
+    while(l<begin)sum-=ch[l++];
+    result[i]=sum/(end-begin+1);
+   }
+   return result;
+  });
+  const before=Math.max(32,Math.round(sampleRate*.003));
+  const after=Math.max(96,Math.round(sampleRate*.014));
+  const mask=new Float32Array(L);
+  const owner=new Int16Array(L);
+  const distance=new Float32Array(L);distance.fill(Infinity);
+  for(let k=0;k<events.length;k++){
+   const evt=events[k],at=evt.source;
+   for(let i=Math.max(0,at-before);i<Math.min(L,at+after);i++){
+    const d=i-at;
+    let w=1;
+    if(d<0){const q=(d+before)/before;w=q*q*(3-2*q);}
+    else if(d>after*.7){const q=(after-d)/(after*.3);w=q*q*(3-2*q);}
+    if(w>mask[i])mask[i]=w;
+    const dist=Math.abs(d);
+    if(dist<distance[i]){distance[i]=dist;owner[i]=k;}
+   }
+  }
+  for(let i=0;i<L;i++){
+   const w=mask[i];if(w<=0)continue;
+   const evt=events[owner[i]],dest=evt.output+i-evt.source;
+   for(let c=0;c<channels.length;c++){
+    const transient=(channels[c][i]-low[c][i])*w;
+    work[c][i]-=transient;
+    if(dest>=0&&dest<outLen)attackOut[c][dest]+=transient;
+   }
+  }
+ }
+ const output=channels.map(()=>new Float64Array(outLen+N));
  const weight=new Float64Array(outLen+N);
  let prev=-1;
  function comparison(candidate,expected,natural,limit,step){
@@ -174,7 +219,7 @@ export function wsola(channels,stretch,outLen,fftSize=1024,sampleRate=48000){
   let overlapDot=0,overlapA=0,overlapB=0,refDot=0,refA=0,refB=0;
   for(let j=0;j<available;j+=step){
    for(let c=0;c<channels.length;c++){
-    const ch=channels[c],x=ch[refFrom+j],y=ch[candidate+j];
+    const ch=work[c],x=ch[refFrom+j],y=ch[candidate+j];
     if(j<overlap){
       overlapDot+=x*y;overlapA+=x*x;overlapB+=y*y;
     }
@@ -222,59 +267,12 @@ export function wsola(channels,stretch,outLen,fftSize=1024,sampleRate=48000){
   for(let j=0;j<N&&pos+j<weight.length;j++){
    const wi=w[j],index=pos+j;
    weight[index]+=wi;
-   for(let c=0;c<channels.length;c++)output[c][index]+=(channels[c][src+j]||0)*wi;
+   for(let c=0;c<channels.length;c++)output[c][index]+=(work[c][src+j]||0)*wi;
   }
   prev=src;
  }
- const rendered=output.map(ch=>Float32Array.from({length:outLen},(_,i)=>
-   weight[i]>1e-5?ch[i]/weight[i]:0));
- // Move broadband transients to their one correct mapped onset without
- // dragging low-frequency tonal phase along with them. First subtract the
- // locally high-passed WSOLA copy (including its premature repeats), then
- // add the source-clock high-frequency attack once. Use a smooth mask and a
- // complementary low-band remainder to avoid PR31's hard grain-index jump.
- const smooth=(input,radius)=>{
-  const out=new Float32Array(input.length);
-  let sum=0,left=0,right=-1;
-  for(let i=0;i<input.length;i++){
-   const begin=Math.max(0,i-radius),end=Math.min(input.length-1,i+radius);
-   while(right<end)sum+=input[++right];
-   while(left<begin)sum-=input[left++];
-   out[i]=sum/(end-begin+1);
-  }
-  return out;
- };
- if(events.length){
-  const radius=Math.max(1,Math.round(sampleRate*.00045));
-  const origLow=channels.map(ch=>smooth(ch,radius));
-  const outLow=rendered.map(ch=>smooth(ch,radius));
-  const inner=Math.round(sampleRate*.027),outer=Math.round(sampleRate*.049);
-  const mask=new Float32Array(outLen);
-  const replacements=rendered.map(()=>new Float64Array(outLen));
-  const weights=new Float32Array(outLen);
-  for(const event of events){
-   for(let i=Math.max(0,event.output-outer);i<Math.min(outLen,event.output+outer);i++){
-    const delta=i-event.output,d=Math.abs(delta);
-    const srcIndex=event.source+delta;
-    if(srcIndex<0||srcIndex>=L)continue;
-    const z=d<=inner?1:(outer-d)/(outer-inner);
-    const w=z*z*(3-2*z);
-    mask[i]=Math.max(mask[i],w);
-    weights[i]+=w;
-    for(let c=0;c<rendered.length;c++){
-     replacements[c][i]+=w*(channels[c][srcIndex]-origLow[c][srcIndex]);
-    }
-   }
-  }
-  for(let i=0;i<outLen;i++){
-   if(!weights[i])continue;
-   const alpha=mask[i],inv=1/weights[i];
-   for(let c=0;c<rendered.length;c++){
-    const originalHigh=rendered[c][i]-outLow[c][i];
-    rendered[c][i]+=alpha*(replacements[c][i]*inv-originalHigh);
-   }
-  }
- }
+ const rendered=output.map((ch,c)=>Float32Array.from({length:outLen},(_,i)=>
+   (weight[i]>1e-5?ch[i]/weight[i]:0)+attackOut[c][i]));
  return rendered;
 }
 // Dual-resolution onset processing. Long window stabilizes sustained
