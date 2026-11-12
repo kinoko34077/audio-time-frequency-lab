@@ -947,7 +947,9 @@ async function stop(){
   if(state.rebuildTimer){clearTimeout(state.rebuildTimer);state.rebuildTimer=null;}
   const p=state.player;
   if(!p){
-    controls.stop.disabled=true;mediaStatus(false);
+    controls.stop.disabled=true;
+    controls.main.disabled=!state.dry;
+    mediaStatus(false);
     indicator("停止中");
     return;
   }
@@ -996,7 +998,7 @@ async function play(mode="wet",offset=null){
       const check=prepareStreamSettings(settings());
       if(!check.ok){
         indicator("再生中 · モデル設定未反映 · "+check.field);
-        message("再生を継続中。モデル設定は未反映: "+check.message,"error");
+        message("再生を継続中。変換設定は未反映: "+check.message,"error");
         return;
       }
     }
@@ -1213,6 +1215,7 @@ async function play(mode="wet",offset=null){
       indicator("原音起動失敗");
     }finally{
       if(launchEpoch===state.transportEpoch){
+        controls.main.disabled=!state.dry;
         controls.dry.disabled=!state.dry;
         controls.wet.disabled=!state.dry;
       }
@@ -1288,6 +1291,7 @@ async function play(mode="wet",offset=null){
     }
   }finally{
     if(launchEpoch===state.transportEpoch){
+      controls.main.disabled=!state.dry;
       controls.dry.disabled=!state.dry;
       controls.wet.disabled=!state.dry;
     }
