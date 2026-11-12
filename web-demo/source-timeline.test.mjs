@@ -136,6 +136,31 @@ test("forward exhaustion also persists and direction reversal restores the last 
   assert.equal(t.state.ended,false);
 });
 
+test("exhaustion survives same-direction speed edits and freeze until actual reversal",()=>{
+  const reverse=make({sourceFrames:10,startFrame:1,speed:-1});
+  reverse.advance(128);
+  assert.equal(reverse.state.ended,true);
+  for(const speed of [-2,0,-.001]){
+    reverse.setSpeed(speed);
+    assert.equal(reverse.sampleIndexAt(0),null);
+    assert.equal(reverse.state.ended,true);
+  }
+  reverse.setSpeed(1);
+  assert.equal(reverse.sampleIndexAt(0),0);
+  assert.equal(reverse.state.ended,false);
+
+  const forward=make({sourceFrames:10,startFrame:9,speed:1});
+  forward.advance(128);
+  assert.equal(forward.state.ended,true);
+  for(const speed of [8,0,.001]){
+    forward.setSpeed(speed);
+    assert.equal(forward.sampleIndexAt(0),null);
+  }
+  forward.setSpeed(-1);
+  assert.equal(forward.sampleIndexAt(0),9);
+  assert.equal(forward.state.ended,false);
+});
+
 test("source/sample rate conversion and malformed inputs",()=>{
   const t=createSourceTimeline({sourceFrames:48000,sourceSampleRate:48000,
     outputSampleRate:44100,speed:1});
