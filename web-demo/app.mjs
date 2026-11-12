@@ -226,7 +226,11 @@ function refreshAB(){
 function syncLoopToPlayer(player=state.player){
   if(!player?.pcmBridge||player.pcmBridge.processingMode!=="granular"||
      player.initializing)return;
-  player.pendingLoop={a:ab.a,b:ab.b,enabled:ab.enabled};
+  const requested={a:ab.a,b:ab.b,enabled:ab.enabled};
+  if(!player.loopBusy&&!player.pendingLoop&&player.appliedLoop?.a===requested.a&&
+     player.appliedLoop?.b===requested.b&&
+     player.appliedLoop?.enabled===requested.enabled)return;
+  player.pendingLoop=requested;
   if(player.loopBusy)return;
   player.loopBusy=true;
   void (async()=>{
@@ -238,6 +242,7 @@ function syncLoopToPlayer(player=state.player){
       await player.pcmBridge.setLoopBounds(requested.a,requested.b);
       if(state.player!==player)return;
       await player.pcmBridge.setLoopEnabled(requested.enabled);
+      player.appliedLoop=requested;
     }
     if(state.player===player)
       $("#player-loop-hint").textContent="区間の音声処理への反映が完了しました。";
@@ -1127,15 +1132,24 @@ async function play(mode="wet",offset=null){
           await bridge.setPitch(granular.pitch);
         if(launchEpoch!==state.transportEpoch||state.player!==player)return;
       }
-      // Changes to sample-exact A/B during registration must be reconciled
-      // before the first audible quantum, using existing atomic bridge API.
-      if(granularActive&&(initialLoop.a!==ab.a||initialLoop.b!==ab.b||
-        initialLoop.enabled!==ab.enabled)){
-        await bridge.setLoopBounds(ab.a,ab.b);
+      // Sample-exact interval edits may arrive WHILE an earlier loop-config
+      // command is waiting for its AudioWorklet acknowledgment. Re-snapshot
+      // after every response; never begin audible playback at stale A/B.
+      let installedLoop=initialLoop;
+      const sameLoop=(x,y)=>x.a===y.a&&x.b===y.b&&x.enabled===y.enabled;
+      for(let pass=0;granularActive&&pass<8&&!sameLoop(installedLoop,ab);pass++){
+        const requested={...ab};
+        await bridge.setLoopBounds(requested.a,requested.b);
         if(launchEpoch!==state.transportEpoch||state.player!==player)return;
-        await bridge.setLoopEnabled(ab.enabled);
+        await bridge.setLoopEnabled(requested.enabled);
         if(launchEpoch!==state.transportEpoch||state.player!==player)return;
+        installedLoop=requested;
       }
+      // UI text edits are finite events. If repeatedly interrupted, stop
+      // rather than falsely claiming the first audible quantum uses latest A/B.
+      if(granularActive&&!sameLoop(installedLoop,ab))
+        throw Error("区間変更が連続したため開始位置を確定できません。操作後に再生してください。");
+      player.appliedLoop=installedLoop;
       // If the user scrubbed while the AudioWorklet was registering, the
       // latest source location must be in the Worklet BEFORE audio starts.
       // No outdated grain may be emitted as the first audible quantum.
