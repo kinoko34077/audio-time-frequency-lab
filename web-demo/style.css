@@ -846,3 +846,41 @@ body.model-lab .player-pitch-speed .lab-grid .lab-field:first-child{grid-column:
   body.model-lab .player-pitch-speed .lab-grid .lab-field:first-child{grid-column:auto}
   .player-loop-fields{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
+
+/* #36 R4 — AudioStretch / Voice Memos interaction patterns, original UI.
+   Playhead is stationary in the detailed waveform; source moves beneath it.
+   The whole-track overview retains the historic #wave tap/seek API. */
+.wave-editor{display:grid;gap:5px;min-width:0;margin:12px 0 0}
+.wave-editor-toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.wave-editor-caption,.wave-overview-header{font-size:11px;color:#aacdca;font-weight:700}
+.wave-zoom-actions{display:flex;align-items:center;gap:5px}
+.wave-zoom-actions button{height:36px;min-width:40px;padding:4px 8px;font-size:20px;line-height:1}
+.wave-zoom-actions output{min-width:59px;text-align:center;font:12px/1.4 ui-monospace,monospace;color:#a1e3cb}
+.wave-detail-wrap{position:relative;overflow:hidden;border:1px solid #3a6064;border-radius:11px;background:#0a1e27;height:clamp(185px,31vh,280px);touch-action:none}
+.wave-detail-wrap canvas{display:block;width:100%;height:100%;touch-action:none;cursor:grab;outline-offset:-3px}
+.wave-detail-wrap canvas:active{cursor:grabbing}
+.wave-center-head{position:absolute;z-index:4;pointer-events:none;top:0;bottom:0;left:50%;width:2px;transform:translateX(-50%);background:#ffac72;box-shadow:0 0 6px #ffb76a82}
+.wave-center-head::before{content:"";position:absolute;top:0;left:-6px;width:14px;height:9px;background:#ffac72;border-radius:0 0 4px 4px}
+.wave-marker{position:absolute;z-index:5;pointer-events:none;top:0;left:0;transform:translateX(-50%);min-width:27px;height:27px;line-height:27px;text-align:center;font-size:12px;font-weight:800;border:1px solid #cef6ee;border-radius:0 0 8px 8px;color:#11232a;background:#6be2c4}
+.wave-marker-b{background:#ffd38a;border-color:#ffedc4}
+.wave-marker[hidden]{display:none!important}
+.wave-detail-wrap[data-interaction="a"] .wave-marker-a,
+.wave-detail-wrap[data-interaction="b"] .wave-marker-b{filter:brightness(1.23)}
+.wave-editor-footer{display:flex;justify-content:space-between;gap:8px;color:#9ebcbc;font:11px/1.35 ui-monospace,monospace}
+.wave-editor-footer span:nth-child(2){text-align:center;font-family:inherit;font-size:10px;color:#b9d9d1}
+.wave-overview-header{margin-top:7px}
+.wave-editor .wave-wrap{height:65px!important;padding:4px 6px}
+.wave-editor #wave{height:54px!important;width:100%}
+.wave-overview-selection{position:absolute;top:4px;bottom:4px;left:0;width:100%;border-left:2px solid #71e2c7;border-right:2px solid #ffcd88;background:#83ceb733;pointer-events:none;z-index:1}
+.wave-editor .playhead{top:4px;bottom:4px;z-index:2}
+body[data-main-tab="model"] .wave-detail-wrap{height:175px}
+body[data-main-tab="model"] .wave-editor .wave-wrap{height:51px!important}
+body[data-main-tab="model"] .wave-editor #wave{height:41px!important}
+@media(max-width:560px){
+ .wave-editor-toolbar{gap:5px}
+ .wave-detail-wrap{height:min(33vh,250px)}
+ .wave-editor-footer span:nth-child(2){font-size:9px}
+ .wave-editor .wave-wrap{height:53px!important}
+ .wave-editor #wave{height:43px!important}
+ .wave-zoom-actions button{min-width:42px;height:40px}
+}
