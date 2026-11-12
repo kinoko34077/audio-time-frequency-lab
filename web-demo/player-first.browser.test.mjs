@@ -83,14 +83,25 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, swit
     await page.click("#wave-zoom-in");
     assert.notEqual(await page.$eval("#wave-zoom-label",el=>el.textContent),initialSpan,
       "zoom controls must change the source-time viewport");
+    await page.$eval("#wave-detail",el=>el.scrollIntoView({block:"center"}));
+    const editingWave=await page.$eval("#wave-detail",el=>{
+      const r=el.getBoundingClientRect();
+      return {x:r.x,y:r.y,width:r.width,height:r.height};
+    });
     const bHandle=await page.$eval("#wave-b-marker",el=>{
       const r=el.getBoundingClientRect();
       return {x:r.left+r.width/2,y:r.top+r.height/2,visible:!el.hidden};
     });
     assert.ok(bHandle.visible,"B handle should be in the zoomed viewport");
-    await page.mouse.move(bHandle.x,wave.y+wave.height*.5);
+    const bTarget=await page.evaluate(({x,y})=>{
+      const e=document.elementFromPoint(x,y);
+      return {id:e?.id,tag:e?.tagName,cls:e?.className};
+    },{x:bHandle.x,y:editingWave.y+editingWave.height*.5});
+    assert.equal(bTarget.id,"wave-detail",
+      "physical B drag must hit the editable waveform, not an overlapping panel: "+JSON.stringify(bTarget));
+    await page.mouse.move(bHandle.x,editingWave.y+editingWave.height*.5);
     await page.mouse.down();
-    await page.mouse.move(bHandle.x+55,wave.y+wave.height*.5,{steps:6});
+    await page.mouse.move(bHandle.x+55,editingWave.y+editingWave.height*.5,{steps:6});
     await page.mouse.up();
     await page.waitForFunction(()=>Number(document.querySelector("#player-loop-b").value)>12000,
       {timeout:15000});
@@ -99,9 +110,9 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, swit
     // Move the waveform under the fixed head (as opposed to moving a head
     // over a static whole-song overview).
     const beforePan=Number(await page.$eval("#wave-detail",el=>el.getAttribute("aria-valuenow")));
-    await page.mouse.move(wave.x+wave.width*.20,wave.y+wave.height*.65);
+    await page.mouse.move(editingWave.x+editingWave.width*.20,editingWave.y+editingWave.height*.65);
     await page.mouse.down();
-    await page.mouse.move(wave.x+wave.width*.10,wave.y+wave.height*.65,{steps:8});
+    await page.mouse.move(editingWave.x+editingWave.width*.10,editingWave.y+editingWave.height*.65,{steps:8});
     await page.mouse.up();
     await page.waitForFunction(prev=>Number(document.querySelector("#wave-detail")
       ?.getAttribute("aria-valuenow"))>prev,{timeout:15000},beforePan);
@@ -116,8 +127,8 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, swit
     await touch.send("Emulation.setTouchEmulationEnabled",
       {enabled:true,maxTouchPoints:2});
     const point=(fraction,id)=>({
-      x:Math.round(wave.x+wave.width*fraction),
-      y:Math.round(wave.y+wave.height*.40),id
+      x:Math.round(editingWave.x+editingWave.width*fraction),
+      y:Math.round(editingWave.y+editingWave.height*.40),id
     });
     await touch.send("Input.dispatchTouchEvent",{type:"touchStart",
       touchPoints:[point(.37,21),point(.63,22)]});
