@@ -43,6 +43,19 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
             revision:st.revision,rawPCM:true});
           return;
         }
+        if(m.type==="loop-config"){
+          // No process() callback can run between endpoint-cache installation
+          // and transport bounds/enable update in this synchronous handler.
+          const st=this.renderer.applyLoopConfiguration(
+            m.a,m.b,m.enabled,m.endpoints
+          );
+          this.pendingRequest=null;
+          this.port.postMessage({type:"command-accepted",requestId:m.requestId,
+            op:m.op,sourceFrame:st.sourceFrame,revision:st.revision,
+            loopStartFrame:st.loopStartFrame,loopEndFrame:st.loopEndFrame,
+            loopEnabled:st.loopEnabled,rawPCM:true});
+          return;
+        }
         if(m.type!=="command")return;
         const t=this.renderer.timeline;
         switch(m.op){
