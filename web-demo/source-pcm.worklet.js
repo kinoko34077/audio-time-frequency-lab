@@ -16,6 +16,7 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
     this.pendingRequest=null;
     this.refillSequence=0;
     this.lastMissing=0;
+    this.renderPending=null;
     this.port.onmessage=event=>{
       const m=event.data||{};
       try{
@@ -23,6 +24,7 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
           this.running=false;
           this.disposed=true;
           this.pendingRequest=null;
+          this.renderPending=null;
           this.port.close();
           return;
         }
@@ -41,6 +43,7 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
           this.renderer.installWindow(m.start,m.channels,null,"seek");
           const st=this.renderer.timeline.seek(m.frame);
           this.pendingRequest=null;
+          this.queueRenderReceipt(m.requestId,st);
           this.port.postMessage({type:"command-accepted",
             requestId:m.requestId,op:"seek",sourceFrame:st.sourceFrame,
             revision:st.revision,rawPCM:true});
@@ -53,6 +56,7 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
             m.a,m.b,m.enabled,m.endpoints
           );
           this.pendingRequest=null;
+          this.queueRenderReceipt(m.requestId,st);
           this.port.postMessage({type:"command-accepted",requestId:m.requestId,
             op:m.op,sourceFrame:st.sourceFrame,revision:st.revision,
             loopStartFrame:st.loopStartFrame,loopEndFrame:st.loopEndFrame,
@@ -73,6 +77,7 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
         if(m.op==="seek"||m.op==="speed"||m.op==="bounds"||m.op==="loop")
           this.pendingRequest=null;
         const st=t.state;
+        this.queueRenderReceipt(m.requestId,st);
         this.port.postMessage({type:"command-accepted",requestId:m.requestId,op:m.op,
           sourceFrame:st.sourceFrame,revision:st.revision,rawPCM:true});
       }catch(error){
@@ -80,6 +85,32 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
           message:error?.message||String(error)});
       }
     };
+  }
+  queueRenderReceipt(requestId,state){
+    // A command accepted by the message handler may never reach an output
+    // quantum if another command arrives first. Do not falsely report that
+    // the earlier command was heard.
+    if(this.renderPending){
+      this.port.postMessage({type:"render-superseded",
+        requestId:this.renderPending.requestId,
+        revision:this.renderPending.revision,
+        supersededBy:requestId});
+    }
+    this.renderPending={requestId,revision:state.revision};
+  }
+  emitRenderReceipt(sourceFrame,missingInBlock){
+    const pending=this.renderPending;
+    if(!pending)return;
+    this.renderPending=null;
+    // currentFrame belongs to AudioWorkletGlobalScope. The first frame of
+    // this output quantum is the exact render-thread observation boundary,
+    // NOT the speaker/DAC presentation time.
+    this.port.postMessage({type:"render-applied",
+      requestId:pending.requestId,revision:pending.revision,
+      outputFrame:typeof currentFrame==="number"?currentFrame:null,
+      outputTime:typeof currentTime==="number"?currentTime:null,
+      sourceFrame,missingFramesInBlock:missingInBlock,
+      running:this.running,rawPCM:true});
   }
   request(frame){
     if(frame===null||this.pendingRequest!==null)return;
@@ -93,11 +124,14 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
     const out=outputs[0];
     if(this.disposed)return false;
     if(!out?.length||!out[0]?.length)return true;
+    const sourceFrame=this.renderer.timeline.state.sourceFrame;
     if(!this.running){
       for(const ch of out)ch.fill(0);
+      this.emitRenderReceipt(sourceFrame,0);
       return true;
     }
     const missing=this.renderer.render(out);
+    this.emitRenderReceipt(sourceFrame,missing);
     this.blocks++;
     // Host window cache refill is outside the audio callback and never
     // blocks or starts/stops the AudioWorklet on every loop wrap.
