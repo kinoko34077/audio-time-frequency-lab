@@ -190,8 +190,8 @@ test("native Chrome content-audio stereo output matches independent source-time 
       // The same fixture contains an intentionally silent section:
       // output zero samples there are correct, not a cache underrun.
       await long.setSpeed(1);
-      await long.seek(144850);
-      const intendedSilence=await observe(144850,1,null,50);
+      await long.seek(144250);
+      const intendedSilence=await observe(144250,1,null,50);
       await long.setSpeed(8);
       await long.seek(250000);
       await sleep(70);
