@@ -87,8 +87,9 @@ export async function createSourcePCMBridge({
     }else if(data.type==="progress")latest=data;
     onEvent(data);
   };
-  // One PCM window per loop endpoint and one dynamic window. For a 1-sample
-  // loop the transfer can be tiny; three slots cap duplicated PCM memory.
+  // At initial start only, populate both loop endpoints before play.
+  // Later user A/B changes use one atomic loop-config message.
+  // The renderer bounds its cache to four windows by default.
   primeLoop();
   sendWindow(startFrame===frames?frames-1:startFrame);
   const command=(op,params={})=>{
@@ -97,6 +98,21 @@ export async function createSourcePCMBridge({
     return new Promise((resolve,reject)=>{
       pending.set(id,{resolve,reject});
       node.port.postMessage({type:"command",op,...params,requestId:id});
+    });
+  };
+  const updateLoop=(a,b,enabled,op)=>{
+    if(closed)return Promise.reject(Error("PCM bridge disposed"));
+    // Transfer both endpoint PCM windows and target loop configuration as
+    // one message. No render quantum can see new pins with old A/B bounds.
+    const endpoints=enabled?[
+      windowSlice(a,1),windowSlice(b-1,-1)
+    ]:[];
+    const id=++requestId;
+    return new Promise((resolve,reject)=>{
+      pending.set(id,{resolve,reject});
+      node.port.postMessage({type:"loop-config",op,a,b,enabled,
+        endpoints,requestId:id},
+        endpoints.flatMap(w=>w.channels.map(ch=>ch.buffer)));
     });
   };
   const api={
@@ -126,14 +142,14 @@ export async function createSourcePCMBridge({
     setLoopBounds(a,b){
       if(!Number.isSafeInteger(a)||!Number.isSafeInteger(b)||
          a<0||a>=b||b>frames)return Promise.reject(RangeError("invalid A/B bounds"));
-      A=a;B=b;primeLoop();
-      return command("bounds",{a,b});
+      A=a;B=b;
+      return updateLoop(a,b,loop,"bounds");
     },
     setLoopEnabled(enabled){
       if(typeof enabled!=="boolean")
         return Promise.reject(TypeError("invalid loop enabled"));
-      loop=enabled;primeLoop();
-      return command("loop",{enabled});
+      loop=enabled;
+      return updateLoop(A,B,enabled,"loop");
     },
     get latest(){return latest;},
     dispose(){
