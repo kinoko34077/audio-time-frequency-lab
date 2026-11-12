@@ -21,7 +21,7 @@ Current user request and [Issue #36](https://github.com/kinoko34077/audio-time-f
 | Required signed speed | Current main at 8caa8f3 | To implement and verify |
 | --- | --- | --- |
 | 0.5..2, positive | Rust liveFactors sourceRate=s and spectralRatio=p/s; offline models plan 1.5s chunks | Move to continuous source transport and preserve independent pitch |
-| 0 < s < 0.5 and 2 < s <= 8 | Both current liveFactors and planChunk reject these bounds | Extended time-stretch model processing, CPU/fidelity evidence |
+| 0 < s < 0.5 and 2 < s <= 8 | Current liveFactors and renderPCM reject these bounds; planChunk alone allows positive values, but its downstream renderPCM rejects them | Extended time-stretch model processing, CPU/fidelity evidence |
 | -8 <= s < 0 | Rejected; no proven reverse source reader | Reverse PCM access and DSP pitch preservation, stereo/transient checks |
 | s = 0 | Rejected; undefined p/s | Deliberate frozen-time synthesis algorithm that produces acceptable audible output |
 | Loop 1..N frames | No source-sample loop in current Worker scheduler | Render without per-lap buffer/node recreation, verify no inserted silent output frames |
