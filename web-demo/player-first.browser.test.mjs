@@ -79,8 +79,22 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, swit
     });
     assert.ok(wave.width>220&&wave.height>160,"large detailed waveform is visible");
     const initialSpan=await page.$eval("#wave-zoom-label",el=>el.textContent);
+    await page.evaluate(()=>{
+      window.__r4SeekCount=0;
+      window.__r4NativePost=MessagePort.prototype.postMessage;
+      MessagePort.prototype.postMessage=function(msg,...args){
+        if(msg?.type==="seek-window")window.__r4SeekCount++;
+        return window.__r4NativePost.call(this,msg,...args);
+      };
+    });
     await page.click("#wave-zoom-in");
     await page.click("#wave-zoom-in");
+    const zoomSeekCount=await page.evaluate(()=>{
+      MessagePort.prototype.postMessage=window.__r4NativePost;
+      return window.__r4SeekCount;
+    });
+    assert.equal(zoomSeekCount,0,
+      "centered visual zoom must not send an audible PCM seek/reset");
     assert.notEqual(await page.$eval("#wave-zoom-label",el=>el.textContent),initialSpan,
       "zoom controls must change the source-time viewport");
     await page.$eval("#wave-detail",el=>el.scrollIntoView({block:"center"}));
@@ -174,6 +188,19 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, swit
     assert.equal(await page.$eval("#granular-speed-value",el=>el.value),"-1.125");
     assert.equal(await page.$eval("#player-loop-enabled",el=>el.checked),false);
     assert.equal(await page.$eval("#rt-telemetry",el=>Number(el.dataset.pcmNodeStarts)),starts);
+    // R4 sample-accurate range: the detailed editor must reach the very
+    // last decoded source frame, not the old 1ms legacy seek cutoff.
+    await page.evaluate(()=>{
+      const speed=document.querySelector("#granular-speed-value");
+      speed.value="0";speed.dispatchEvent(new Event("change",{bubbles:true}));
+    });
+    await page.focus("#wave-detail");
+    await page.keyboard.press("End");
+    const finalSample=3*sourceRate-1;
+    await page.waitForFunction(frame=>Number(document.querySelector("#granular-optin-status")
+      ?.dataset.renderFrame)===frame,{timeout:20000},finalSample);
+    assert.equal(await page.$eval("#wave-detail",
+      el=>Number(el.getAttribute("aria-valuenow"))),finalSample);
     await page.click("#stop");
     await page.waitForFunction(()=>!document.querySelector("#rt-telemetry")
       ?.dataset.pcmTransport,{timeout:20000});
