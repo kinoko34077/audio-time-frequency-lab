@@ -43,6 +43,10 @@ export function createSourcePCMRenderer({
     }
     return null;
   };
+  const readFrame=(channel,index)=>{
+    const w=find(index);
+    return w?w.channels[channel][index-w.start]:NaN;
+  };
   const api={
     timeline,
     get firstMissingFrame(){return firstMissingFrame;},
@@ -160,6 +164,20 @@ export function createSourcePCMRenderer({
      * samples are silence and counted, never fake success.
      * Returns missing output-frame count (not a newly allocated status object).
      */
+    renderGranular(output,granular){
+      // Experimental independent pitch. Reuse EXACTLY the existing R2
+      // bounded window cache, source timeline and missing-frame telemetry.
+      // No whole-song clone into the AudioWorklet.
+      if(!granular||typeof granular.render!=="function")
+        throw RangeError("invalid experimental granular engine");
+      const outcome=granular.render(
+        output,timeline.state,readFrame,sourceFrames);
+      firstMissingFrame=outcome.firstMissingFrame;
+      missingFrames+=outcome.missingFrames;
+      renderedFrames+=output[0].length;
+      timeline.advance(output[0].length);
+      return outcome.missingFrames;
+    },
     render(output){
       if(!Array.isArray(output)||output.length!==channelCount||
          output.some(ch=>!(ch instanceof Float32Array)||
