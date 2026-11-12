@@ -1075,6 +1075,7 @@ body.model-lab[data-main-tab="model"] .workspace-grid:has(.model-legacy-fold:not
     flex:none;min-width:46px;width:46px;min-height:40px;padding:5px;gap:1px;font-size:11px
   }
   body.model-lab[data-main-tab="model"] .gear span:first-child{font-size:17px}
+  body.model-lab[data-main-tab="model"] .gear span:last-child{display:none}
   body.model-lab[data-main-tab="model"] .audio-lab-panel{padding:10px 11px}
   body.model-lab[data-main-tab="model"] .audio-lab-panel .section-header{margin-bottom:9px}
   body.model-lab[data-main-tab="model"] .audio-lab-panel .section-header .micro-hint{display:none}
