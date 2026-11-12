@@ -1,7 +1,7 @@
-/** #36 R2 experimental raw-source AudioWorklet (NOT the player default).
- * Sound comes from bounded Float32Array source windows, not a 1.5s Worker.
- * Negative speed changes pitch; speed zero holds a PCM sample (DC).
- * A later DSP stage must provide independent musical pitch/frozen-time tone.
+/** #36 R2/R3 experimental AudioWorklet (NOT the default player).
+ * Raw mode: bounded source frames; negative speed shifts pitch and 0x is DC.
+ * Granular mode: provisional independent grain pitch and audible 0x;
+ * formal music/transient/CPU/mobile quality acceptance is still OPEN.
  */
 import {createSourcePCMRenderer} from "./source-pcm-renderer.mjs";
 import {createGranularTimePitch} from "./source-granular.mjs";
@@ -58,7 +58,10 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
           this.queueRenderReceipt(m.requestId,st);
           this.port.postMessage({type:"command-accepted",
             requestId:m.requestId,op:"seek",sourceFrame:st.sourceFrame,
-            revision:st.revision,rawPCM:true});
+            revision:st.revision,
+            processingMode:this.processingMode,
+            pitchRevision:this.granular?.state.pitchRevision??null,
+            rawPCM:this.processingMode==="raw"});
           return;
         }
         if(m.type==="loop-config"){
@@ -73,7 +76,10 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
           this.port.postMessage({type:"command-accepted",requestId:m.requestId,
             op:m.op,sourceFrame:st.sourceFrame,revision:st.revision,
             loopStartFrame:st.loopStartFrame,loopEndFrame:st.loopEndFrame,
-            loopEnabled:st.loopEnabled,rawPCM:true});
+            loopEnabled:st.loopEnabled,
+            processingMode:this.processingMode,
+            pitchRevision:this.granular?.state.pitchRevision??null,
+            rawPCM:this.processingMode==="raw"});
           return;
         }
         if(m.type!=="command")return;
