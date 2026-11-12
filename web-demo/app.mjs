@@ -948,7 +948,9 @@ async function play(mode="wet",offset=null){
               status.dataset.renderRevision=String(data.revision);
               status.dataset.renderPitch=String(data.pitchSemitones);
               status.dataset.renderFrame=String(data.sourceFrame);
-              status.textContent="音声処理済み revision "+data.revision+
+              status.dataset.renderRunning=String(data.running);
+              status.textContent=(data.running?"音声処理済み":"再生前の位置設定済み（出力は無音）")+
+                " revision "+data.revision+
                 " · sourceFrame "+data.sourceFrame+
                 " · cache不足 "+data.missingFramesInBlock;
             }else if(data.type==="render-superseded"){
@@ -994,11 +996,19 @@ async function play(mode="wet",offset=null){
           await bridge.setPitch(granular.pitch);
         if(launchEpoch!==state.transportEpoch||state.player!==player)return;
       }
+      // If the user scrubbed while the AudioWorklet was registering, the
+      // latest source location must be in the Worklet BEFORE audio starts.
+      // No outdated grain may be emitted as the first audible quantum.
+      let initializedAt=at;
+      while(GRANULAR_EXPERIMENT&&state.seek!==initializedAt){
+        const latestAt=state.seek;
+        await bridge.seek(Math.min(state.dry[0].length-1,
+          Math.max(0,Math.round(latestAt*sourceRate))));
+        if(launchEpoch!==state.transportEpoch||state.player!==player)return;
+        initializedAt=latestAt;
+      }
       await bridge.play();
       if(launchEpoch!==state.transportEpoch||state.player!==player)return;
-      // A pointer drag may have moved during asynchronous Worklet creation.
-      // Apply its last source coordinate without starting a second node.
-      if(GRANULAR_EXPERIMENT&&state.seek!==at)seek(state.seek);
       mediaStatus(true);void mediaBridge(player);
       controls.stop.disabled=false;
       const telemetry=$("#rt-telemetry");
