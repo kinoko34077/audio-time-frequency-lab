@@ -122,8 +122,10 @@ export function createSourcePCMRenderer({
      * Render exactly one output block, no new worklet/node per loop.
      * Output must contain zeroed-by-render Float32Array channels of equal length.
      * Missing source data is explicitly counted. On underrun the timeline is
-     * held for the whole block; missing samples are silence, never fake success.
-     * Returns missing-frame count (not a newly allocated status object).
+     * advanced by the output quantum even when a cache miss inserts silence.
+     * Frames already emitted must NEVER be replayed after refill. Missing
+     * samples are silence and counted, never fake success.
+     * Returns missing output-frame count (not a newly allocated status object).
      */
     render(output){
       if(!Array.isArray(output)||output.length!==channelCount||
@@ -161,7 +163,10 @@ export function createSourcePCMRenderer({
       }
       renderedFrames+=len;
       missingFrames+=missing;
-      if(missing===0)timeline.advance(len);
+      // An audible quantum has elapsed regardless of cache availability.
+      // Holding the entire source clock on a partial miss duplicates the PCM
+      // already output before the missing source frame on the next callback.
+      timeline.advance(len);
       return missing;
     },
     /** Used by host to prefetch ahead; does not report an audio success. */
