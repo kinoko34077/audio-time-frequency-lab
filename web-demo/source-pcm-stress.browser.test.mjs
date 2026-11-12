@@ -131,19 +131,33 @@ test("native Chrome measures actual output PCM under tiny loops and long-source 
     assert.deepEqual(evidence.errors,[]);
     assert.equal(evidence.tiny.length,14);
     for(const value of evidence.tiny){
-      assert.ok(value.frames>=128&&value.nonzeroFrames>0,value);
-      assert.equal(value.zeroFrames,0,
-        "stable tiny loop on fully cached nonzero PCM must not inject silence");
-      assert.ok(value.maxStep<.015,value);
-      assert.ok(Math.abs(value.rms-.375)<.015,value);
+      assert.equal(value.inputChannels,2,"stereo input must stay stereo");
+      for(const [ch,reference] of [.375,.5].entries()){
+        const measured=value.channels[ch];
+        assert.ok(measured?.frames>=128&&measured.nonzeroFrames>0,value);
+        assert.equal(measured.zeroFrames,0,
+          `stable loop inserted silence in stereo channel ${ch}`);
+        assert.ok(measured.maxStep<.015,measured);
+        assert.ok(Math.abs(measured.rms-reference)<.015,
+          `stereo channel ${ch} changed amplitude: ${JSON.stringify(measured)}`);
+      }
     }
     assert.ok(evidence.stalledTiny.frames>128,evidence.stalledTiny);
-    assert.equal(evidence.stalledTiny.zeroFrames,0,
-      "a fully cached 1-sample loop must play through a blocked main thread");
+    assert.equal(evidence.stalledTiny.inputChannels,2);
+    for(const [ch,reference] of [.375,.5].entries()){
+      const measured=evidence.stalledTiny.channels[ch];
+      assert.equal(measured.zeroFrames,0,
+        `fully cached short loop dropped stereo channel ${ch} under host stall`);
+      assert.ok(Math.abs(measured.rms-reference)<.015,measured);
+    }
     assert.ok(evidence.stalledLong.frames>=128,evidence.stalledLong);
-    assert.ok(evidence.stalledLong.nonzeroFrames>0,evidence.stalledLong);
+    assert.equal(evidence.stalledLong.inputChannels,2);
+    assert.ok(evidence.stalledLong.channels.every(ch=>ch.nonzeroFrames>0),
+      evidence.stalledLong);
     assert.equal(evidence.recovery.seekFrame,1_200_000);
-    assert.ok(evidence.recovery.nonzeroFrames>0,evidence.recovery);
+    assert.equal(evidence.recovery.inputChannels,2);
+    assert.ok(evidence.recovery.channels.every(ch=>ch.nonzeroFrames>0),
+      evidence.recovery);
     assert.ok(Number.isFinite(evidence.recovery.seekAckMs));
     // A finite source cache cannot guarantee no gap under an arbitrarily
     // long blocked host. Report the observed limit, do NOT mark R2 accepted.
