@@ -751,7 +751,13 @@ detailWaveEditor=createPlayerWaveEditor({
   zoomLabel:$("#wave-zoom-label"),
   visibleStart:$("#wave-visible-start"),visibleEnd:$("#wave-visible-end"),
   getPosition:()=>playPosition(),
-  onScrubState:active=>{detailWaveScrubbing=active;},
+  onScrubState:active=>{
+    // Running Worklet source time can be ahead of the last commanded seek.
+    // Capture it BEFORE selecting gesture-owned state.seek, or the central
+    // playhead would jump backward at the start of every drag/tap/pinch.
+    if(active&&!detailWaveScrubbing)state.seek=playPosition();
+    detailWaveScrubbing=active;
+  },
   onStart:()=>{
     if(!state.dry||state.player)return;
     void play("player",state.seek).catch(error=>message("スクラブ再生失敗: "+error.message,"error"));
