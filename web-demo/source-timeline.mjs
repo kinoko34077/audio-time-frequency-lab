@@ -74,7 +74,7 @@ export function createSourceTimeline({
     advance(outputFrames){
       if(!frame(outputFrames))throw RangeError("invalid output frame count");
       // An exhausted unlooped direction stays exhausted across render quanta.
-      if(outputFrames===0||(!loop&&ended))return state();
+      if(outputFrames===0||(!loop&&ended))return position;
       const p=position+delta(outputFrames);
       if(loop)position=wrap(p,A,B);
       else{
@@ -82,7 +82,8 @@ export function createSourceTimeline({
         if(rate<0&&p<0){ended=true;endedDirection=-1;}
         else if(rate>0&&p>=sourceFrames){ended=true;endedDirection=1;}
       }
-      return state();
+      // The audio render callback needs a scalar: no frozen snapshot allocation.
+      return position;
     },
     seek(p){
       if(!frame(p)||p>sourceFrames)throw RangeError("invalid seek frame");
