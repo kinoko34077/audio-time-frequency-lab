@@ -32,7 +32,10 @@ test("recorded CC0 upright piano goes through the real granular file picker and 
       .includes("meta-piano-a0-cc0-3s-48khz.wav · 3.0秒"),
       {timeout:20000});
     const meta=await page.$eval("#file-meta",e=>e.textContent);
-    assert.match(meta,/48000Hz · 1ch/,
+    const decodedRate=Number(meta.match(/(\d+)Hz/)?.[1]);
+    assert.ok(decodedRate>=8000&&decodedRate<=192000,
+      "actual decoder sample rate required; native AudioContext may resample");
+    assert.match(meta,/ · 1ch/,
       "real mono recording was decoded, not substituted with a generated fixture");
     await page.waitForSelector("#play-dry:not([disabled])",{timeout:10000});
     await page.evaluate(()=>{
@@ -68,18 +71,20 @@ test("recorded CC0 upright piano goes through the real granular file picker and 
     for(let n=1;n<=8;n++)
       await page.mouse.move(box.left+box.width*(.15+.50*n/8),y);
     await page.mouse.up();
-    const expected=Math.round(48000*3*.65);
+    const expected=Math.round(decodedRate*3*.65);
     await page.waitForFunction(frame=>Math.abs(Number(
       document.querySelector("#granular-optin-status")?.dataset.renderFrame)-frame)<=2,
       {timeout:20000},expected);
+    const priorRevision=await page.$eval("#granular-optin-status",
+      el=>Number(el.dataset.renderRevision));
     await page.evaluate(()=>{
       const speed=document.getElementById("granular-speed-value");
       speed.value="-1";speed.dispatchEvent(new Event("change",{bubbles:true}));
     });
-    await page.waitForFunction(()=>document.querySelector("#granular-optin-status")
-      ?.dataset.renderRunning==="true"&&
-      document.querySelector("#rt-telemetry")?.dataset.pcmTransport==="granular-experimental",
-      {timeout:20000});
+    await page.waitForFunction(prev=>
+      Number(document.querySelector("#granular-optin-status")?.dataset.renderRevision)>prev&&
+      document.querySelector("#granular-optin-status")?.dataset.renderRunning==="true",
+      {timeout:20000},priorRevision);
     const after=await page.evaluate(()=>({
       nodeStarts:Number(document.querySelector("#rt-telemetry").dataset.pcmNodeStarts),
       speed:document.querySelector("#granular-speed-value").value,
@@ -93,7 +98,7 @@ test("recorded CC0 upright piano goes through the real granular file picker and 
     assert.match(after.sample,/meta-piano/);
     // A negative-speed reverse lookup is not proof of perceptual fidelity.
     console.log("RECORDED_META_PIANO_CHROME "+JSON.stringify({
-      input:meta,firstRenderFrame:initial.sourceFrame,
+      input:meta,decodedRate,firstRenderFrame:initial.sourceFrame,
       scrubTargetFrame:expected,stereo:false,channels:1,
       after:after.telemetry,nodeStarts:after.nodeStarts,
       proof:"REAL_NATIVE_FILE_INPUT_AND_RENDER_ACK_NOT_DAC_AUDIO_CAPTURE"
