@@ -144,6 +144,7 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
     this.port.postMessage({type:"render-applied",
       requestId:pending.requestId,revision:pending.revision,
       pitchRevision:pending.pitchRevision,
+      pitchSemitones:this.granular?.state.pitchSemitones??null,
       processingMode:this.processingMode,
       outputFrame:typeof currentFrame==="number"?currentFrame:null,
       outputTime:typeof currentTime==="number"?currentTime:null,
