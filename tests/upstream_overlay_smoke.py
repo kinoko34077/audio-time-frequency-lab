@@ -48,6 +48,10 @@ try:
       # remains reachable through the explicit processing-model tab.
       page.locator("#main-tab-model").click()
       assert page.locator("#audio-lab").is_visible()
+      # Legacy Frequency Warp processing is retained but no longer occupies
+      # the default model-comparison view; it is expanded only on demand.
+      assert not page.locator(".quick-panel").is_visible()
+      page.locator(".model-legacy-fold > summary").click()
       assert page.locator(".quick-panel").is_visible()
       assert page.locator("#settings-open").is_visible()
 
