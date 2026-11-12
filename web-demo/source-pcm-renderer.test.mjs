@@ -294,6 +294,57 @@ test("explicit seek window survives full cache and overrides old-cursor eviction
   assert.throws(()=>p.installWindow(100,[data.slice()],null,"invalid"),RangeError);
 });
 
+test("atomic A/B change preloads endpoints before the next output block",()=>{
+  const p=createSourcePCMRenderer({
+    sourceFrames:1000,sourceSampleRate:48000,outputSampleRate:48000,
+    speed:1,startFrame:3,loopEnabled:true,loopStartFrame:0,
+    loopEndFrame:990,maxWindowFrames:20,maxWindows:4
+  });
+  const old=new Float32Array(20).fill(.25);
+  p.installWindow(0,[old],"A");
+  p.installWindow(970,[old],"B");
+  p.installWindow(40,[old]);p.installWindow(60,[old]);
+  assert.equal(block(p,4).missing,0);
+  assert.equal(p.timeline.state.sourceFrame,7);
+  const newWindow={start:400,channels:[new Float32Array(20).fill(.5)]};
+  const nextEnd={start:400,channels:[new Float32Array(20).fill(.5)]};
+  const receipt=p.applyLoopConfiguration(400,420,true,[newWindow,nextEnd]);
+  assert.equal(receipt.sourceFrame,400);
+  assert.equal(receipt.loopStartFrame,400);
+  assert.equal(receipt.loopEndFrame,420);
+  const first=block(p,4);
+  assert.equal(first.missing,0);
+  assert.ok(first.output[0].every(x=>x===.5));
+  assert.equal(p.timeline.state.sourceFrame,404);
+});
+
+test("rejected atomic bounds update leaves source time, loop and cache unchanged",()=>{
+  const p=createSourcePCMRenderer({
+    sourceFrames:1000,sourceSampleRate:48000,outputSampleRate:48000,
+    speed:1,startFrame:3,loopEnabled:true,
+    loopStartFrame:0,loopEndFrame:990,maxWindowFrames:20
+  });
+  const old=new Float32Array(20).fill(.5);
+  p.installWindow(0,[old],"A");
+  p.installWindow(970,[old],"B");
+  const prev=p.timeline.state;
+  assert.throws(()=>p.applyLoopConfiguration(400,420,true,[
+    {start:400,channels:[new Float32Array(20)]},
+    {start:400,channels:[new Float32Array(18)]}
+  ]),RangeError);
+  assert.deepEqual(p.timeline.state,prev);
+  assert.equal(block(p,4).missing,0);
+  assert.equal(p.hasFrame(3),true);
+  assert.equal(p.hasFrame(400),false);
+  p.applyLoopConfiguration(0,990,false,[]);
+  assert.equal(p.timeline.state.loopEnabled,false);
+  assert.equal(p.statistics.windowCount,2);
+  p.installWindow(300,[new Float32Array(20)]);
+  p.installWindow(400,[new Float32Array(20)]);
+  p.installWindow(500,[new Float32Array(20)]);
+  assert.equal(p.hasFrame(0),false,"old A pin must not survive loop disable");
+});
+
 test("directional window placement is bounded even at original source endpoints",()=>{
   const total=48000*600;
   for(const speed of [-8,-1,0,1,8]){
