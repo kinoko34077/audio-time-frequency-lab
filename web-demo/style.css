@@ -746,3 +746,61 @@ body.model-lab .lab-field input:disabled{opacity:.45;cursor:not-allowed}
 
 /* The joint model uses a logarithmic number-of-periods observation slider. */
 body.model-lab .lab-period-field{max-width:450px;margin-top:12px}
+
+
+/* #36 R4: playback-first workspace. Existing DOM/controls remain mounted while
+   navigating; hide visual research clutter rather than replacing controllers. */
+.main-workspace-tabs{
+  display:grid;grid-template-columns:1fr 1fr;gap:5px;
+  background:#0b2126;border:1px solid #31514e;border-radius:13px;
+  padding:5px;margin:0 0 14px;max-width:650px;
+}
+.main-workspace-tabs button{
+  padding:12px 16px;min-height:45px;background:transparent;
+  border:1px solid transparent;font-size:15px;font-weight:650;
+}
+.main-workspace-tabs button[aria-selected="true"]{
+  background:#2a5b50;color:#eafff4;border-color:#4ca58b;
+}
+body[data-main-tab="player"] #audio-lab,
+body[data-main-tab="player"] .workspace-left > .quick-panel,
+body[data-main-tab="player"] .workspace-left > .sine-monitor,
+body[data-main-tab="player"] .workspace-right{display:none!important}
+body[data-main-tab="player"] .workspace-grid{display:block;max-width:1000px;margin:auto}
+body[data-main-tab="player"] .workspace-left{display:block}
+body[data-main-tab="player"] .workspace-left .player{padding:clamp(14px,3vw,26px)}
+body[data-main-tab="player"] #play-wet{display:none}
+body[data-main-tab="player"] .player .wave-wrap{height:218px}
+body[data-main-tab="player"] .player #wave{height:200px}
+body[data-main-tab="player"] .player .actions button{min-height:50px}
+body[data-main-tab="model"] .player .wave-wrap{height:132px}
+.player-pitch-speed{
+  margin-top:14px;padding:12px 0;
+  border-top:1px solid #36565c;border-bottom:1px solid #36565c;
+}
+.player-pitch-speed .lab-grid{gap:10px;grid-template-columns:repeat(2,minmax(0,1fr))}
+.player-pitch-speed .lab-field input[type=range]{width:100%}
+.player-pitch-speed .lab-field input[type=number],
+.player-pitch-speed .lab-field select{width:100%;min-height:40px}
+.player-quality-note{color:#a9c3c4;margin-bottom:9px}
+.player-loop{
+  display:grid;gap:9px;margin-top:14px;padding:13px 14px;
+  border-radius:11px;border:1px solid #36575d;background:#0d2228;
+}
+.player-loop-top{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.player-loop-top strong{font-size:13px}
+.player-loop-top label{display:flex;gap:6px;align-items:center;font-size:13px;cursor:pointer}
+.player-loop-top input{accent-color:#64deb8;width:19px;height:19px}
+.player-loop-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.player-loop-fields label{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:7px;color:#c4dfdc;font-size:12px}
+.player-loop-fields input{grid-column:1 / -1;width:100%;min-width:0;padding:9px 10px;background:#0b1d24;color:#f4fffc;border:1px solid #45666a;border-radius:8px}
+.player-loop-fields button{font-size:12px;padding:7px 11px;grid-column:1 / -1}
+.player-loop .lab-note{margin-top:0}
+@media(max-width:700px){
+  .main-workspace-tabs{max-width:none}
+  .player-loop-fields{gap:9px}
+  .player-pitch-speed .lab-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  body[data-main-tab="player"] .player .wave-wrap{height:172px}
+  body[data-main-tab="player"] .player #wave{height:154px}
+  .player-loop{padding:11px}
+}
