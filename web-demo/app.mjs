@@ -811,7 +811,11 @@ async function play(mode="wet",offset=null){
       if(launchEpoch!==state.transportEpoch||state.player!==player)return;
       mediaStatus(true);void mediaBridge(player);
       controls.stop.disabled=false;
-      $("#rt-telemetry").dataset.pcmTransport="raw-experimental";
+      const telemetry=$("#rt-telemetry");
+      telemetry.dataset.pcmTransport="raw-experimental";
+      telemetry.dataset.pcmNodeStarts=String(
+        Number(telemetry.dataset.pcmNodeStarts||0)+1
+      );
       indicator("原音再生中 · PCM実験経路（速度と音程は未連動）");
       message("実験用PCM再生中。音程変更・0倍の音響品質は未実装です。","warning");
     }catch(err){
