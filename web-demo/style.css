@@ -804,3 +804,32 @@ body[data-main-tab="model"] .player .wave-wrap{height:132px}
   body[data-main-tab="player"] .player #wave{height:154px}
   .player-loop{padding:11px}
 }
+
+/* The old model-lab shell intentionally suppressed the imported research
+   workbench on every page. R4 restores it only on the explicit model tab. */
+body.model-lab[data-main-tab="model"] .gear{display:flex!important}
+body.model-lab[data-main-tab="model"] .quick-panel,
+body.model-lab[data-main-tab="model"] .sine-monitor,
+body.model-lab[data-main-tab="model"] .workspace-right,
+body.model-lab[data-main-tab="model"] .offline-tool{display:block!important}
+body.model-lab[data-main-tab="model"] .workspace-grid{
+  display:grid!important;grid-template-columns:minmax(0,1fr) minmax(310px,.92fr)!important;
+  max-width:none
+}
+body.model-lab[data-main-tab="model"] .workspace-left{display:grid}
+body.model-lab[data-main-tab="model"] #settings-dialog[open]{display:block!important}
+body.model-lab .player-pitch-speed .lab-grid{
+  display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px
+}
+body.model-lab .player-pitch-speed .lab-grid .lab-field:first-child{grid-column:auto}
+@media(max-width:960px){
+  body.model-lab[data-main-tab="model"] .workspace-grid{
+    grid-template-columns:minmax(0,1fr)!important;
+  }
+  body.model-lab[data-main-tab="model"] .workspace-right{position:static}
+}
+@media(max-width:560px){
+  body.model-lab .player-pitch-speed .lab-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  body.model-lab .player-pitch-speed .lab-grid .lab-field:first-child{grid-column:auto}
+  .player-loop-fields{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
