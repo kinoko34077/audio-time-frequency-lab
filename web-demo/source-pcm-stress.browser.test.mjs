@@ -145,10 +145,12 @@ test("native Chrome content-audio stereo output matches independent source-time 
           }))
         }};
       };
-      const errors=[];
+      const errors=[],renderEvents=[];
       const onEvent=e=>{
         if(e.type==="fatal-error"||e.type==="error")
           errors.push({type:e.type,message:e.message});
+        if(e.type==="render-applied"||e.type==="render-superseded")
+          renderEvents.push({...e,observedAt:performance.now()});
       };
       const short=await createSourcePCMBridge({
         ctx,sourceChannels:source,sourceSampleRate:sourceRate,
@@ -283,6 +285,18 @@ test("native Chrome content-audio stereo output matches independent source-time 
       const t0=performance.now();
       const ack=await long.seek(600000);
       const ackMs=performance.now()-t0;
+      // A command-accepted ACK is not sufficient proof of audible render.
+      // Wait for the separate Worklet process() output-quantum receipt.
+      let applied=renderEvents.find(e=>
+        e.type==="render-applied"&&e.requestId===ack.requestId);
+      const deadline=performance.now()+1000;
+      while(!applied&&performance.now()<deadline){
+        await sleep(4);
+        applied=renderEvents.find(e=>
+          e.type==="render-applied"&&e.requestId===ack.requestId);
+      }
+      if(!applied)throw Error("seek ACK never reached an output quantum");
+      const renderReceiptMs=applied.observedAt-t0;
       await long.setSpeed(1);
       const recovery=await observe(600000,1,null,80);
       const recoveredMiss=long.latest?.missingFrames||0;
@@ -303,6 +317,13 @@ test("native Chrome content-audio stereo output matches independent source-time 
         rms:c.rms,maxStep:c.maxStep
       })),sourceMissingDelta:after-before,mainThreadBlockedMs:1050},
       recovery:{...recovery,ackFrame:ack.sourceFrame,ackMs,
+        commandToRenderReceiptMs:renderReceiptMs,
+        firstOutputFrame:applied.outputFrame,
+        firstOutputTime:applied.outputTime,
+        firstOutputSourceFrame:applied.sourceFrame,
+        firstRenderMissing:applied.missingFramesInBlock,
+        firstRenderRevision:applied.revision,
+        ackRevision:ack.revision,
         cumulativeMissing:recoveredMiss},errors};
     });
     assert.deepEqual(errors,[]);
@@ -360,6 +381,19 @@ test("native Chrome content-audio stereo output matches independent source-time 
     assert.ok(evidence.starved.sourceMissingDelta>=0);
     assert.equal(evidence.recovery.ackFrame,600000);
     assert.ok(Number.isFinite(evidence.recovery.ackMs));
+    assert.equal(evidence.recovery.firstOutputSourceFrame,600000,
+      "ACK is not proof until the exact source frame is rendered");
+    assert.equal(evidence.recovery.firstRenderRevision,
+      evidence.recovery.ackRevision);
+    assert.equal(evidence.recovery.firstRenderMissing,0);
+    assert.ok(Number.isSafeInteger(evidence.recovery.firstOutputFrame));
+    assert.ok(evidence.recovery.firstOutputFrame>=0);
+    assert.ok(Number.isFinite(evidence.recovery.firstOutputTime));
+    assert.ok(evidence.recovery.commandToRenderReceiptMs>=
+      evidence.recovery.ackMs,
+      "render observation must not precede command acceptance");
+    assert.ok(evidence.recovery.commandToRenderReceiptMs<1000,
+      "render-thread application must not stall for an entire second");
     // Host starvation beyond a finite cache is a documented limit;
     // measure, do not demand impossible arbitrary-duration gaplessness.
     console.log("R2_CONTENT_AUDIO_EVIDENCE "+JSON.stringify(evidence));
