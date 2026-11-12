@@ -2,6 +2,7 @@ import {QUALITY,mixWet} from "./dsp.mjs";
 import {liveFactors,fullBandPartialOptions} from "./lab-contract.mjs";
 import {createModelStream} from "./lab-stream.mjs";
 import {createSourcePCMBridge} from "./source-pcm-bridge.mjs";
+import {createPlayerWaveEditor} from "./player-wave-editor.mjs";
 import {validatePlaybackSpeed,validateSpeedRailRange,speedOnRail,formatPlaybackSpeed} from "./source-timeline.mjs";
 import {frequencyFromSlider,sliderFromFrequency,holdFromFrequency,drawCrusherPreview} from "./crusher-visual.mjs";
 import {drawFrequencyGraph} from "./graph.mjs";
@@ -29,6 +30,7 @@ const GRANULAR_EXPERIMENT=PCM_EXPERIMENT==="granular";
 // remain compatible, and old wet/Rust/models are still explicitly selectable.
 const PLAYER_GRANULAR_AVAILABLE=true;
 const granular={speed:1,pitch:0,railMax:8};
+let detailWaveEditor=null,detailWaveScrubbing=false;
 const ab={a:0,b:0,enabled:true};
 function mainTab(){
   return document.body.dataset.mainTab==="model"?"model":"player";
@@ -222,6 +224,7 @@ function refreshAB(){
     if(document.activeElement!==input)input.value=String(value);
   }
   $("#player-loop-enabled").checked=ab.enabled;
+  detailWaveEditor?.refresh(true);
 }
 function syncLoopToPlayer(player=state.player){
   if(!player?.pcmBridge||player.pcmBridge.processingMode!=="granular"||
@@ -663,7 +666,7 @@ let activeWavePointer=null;
 function playPosition(){
   // During a native gesture the latest finger/mouse position is the UI source
   // of truth; callback progress/command ACK can lag behind the dragged point.
-  if(activeWavePointer!==null)return state.seek;
+  if(activeWavePointer!==null||detailWaveScrubbing)return state.seek;
   if(!state.player||!state.ctx||!duration())return state.seek;
   if(state.player.labStream)return state.player.stream.sourcePositionAt(state.ctx.currentTime);
   if(state.player.rawPCM){
@@ -677,6 +680,7 @@ function refreshPlayhead(){
   $("#elapsed").textContent=fmtTime(seconds);
   $("#duration").textContent=fmtTime(duration());
   $("#playhead").style.left=(duration()?clamp(seconds/duration(),0,1)*100:0)+"%";
+  detailWaveEditor?.refresh();
   state.raf=requestAnimationFrame(refreshPlayhead);
 }
 function playheadFromPointer(e,startIfStopped=true){
@@ -700,6 +704,7 @@ function playheadFromPointer(e,startIfStopped=true){
 function refreshStatusSeek(){
   $("#elapsed").textContent=fmtTime(state.seek);
   $("#playhead").style.left=(duration()?100*state.seek/duration():0)+"%";
+  detailWaveEditor?.refresh(true);
 }
 // Opt-in R3 scrub: one captured pointer, with real touch/mouse moves; legacy
 // modes retain the existing single-tap seek. Synthetic legacy fixture events
@@ -736,6 +741,32 @@ if(PLAYER_GRANULAR_AVAILABLE){
   for(const type of ["pointerup","pointercancel","lostpointercapture"])
     waveSurface.addEventListener(type,finishWave);
 }
+// Dedicated detail viewport: zoomed waveform moves under a fixed central
+// playhead; original #wave remains a full-track overview and legacy test API.
+detailWaveEditor=createPlayerWaveEditor({
+  canvas:$("#wave-detail"),wrap:document.querySelector(".wave-detail-wrap"),
+  overviewSelection:$("#wave-overview-selection"),
+  markerA:$("#wave-a-marker"),markerB:$("#wave-b-marker"),
+  zoomIn:$("#wave-zoom-in"),zoomOut:$("#wave-zoom-out"),
+  zoomLabel:$("#wave-zoom-label"),
+  visibleStart:$("#wave-visible-start"),visibleEnd:$("#wave-visible-end"),
+  getPosition:()=>playPosition(),
+  onScrubState:active=>{detailWaveScrubbing=active;},
+  onStart:()=>{
+    if(!state.dry||state.player)return;
+    void play("player",state.seek).catch(error=>message("スクラブ再生失敗: "+error.message,"error"));
+  },
+  onPosition:seconds=>{
+    if(!state.dry)return;
+    state.seek=clamp(seconds,0,Math.max(0,duration()-1/state.decoded.sampleRate));
+    if(state.player&&!state.player.initializing)seek(state.seek);
+    else refreshStatusSeek();
+  },
+  onAB:(edge,frame)=>{
+    if(!edge)return {...ab};
+    editAB(edge,String(frame));
+  }
+});
 $("#wave").addEventListener("keydown",e=>{
   if(!state.dry)return;
   if(e.key==="Enter"||e.key===" "){
@@ -1647,7 +1678,7 @@ controls.main.addEventListener("click",()=>play("player"));
 controls.dry.addEventListener("click",()=>play("dry"));
 controls.wet.addEventListener("click",()=>play("wet"));
 controls.stop.addEventListener("click",()=>stop());
-window.addEventListener("resize",()=>{drawCurve();drawAudio();});
+window.addEventListener("resize",()=>{drawCurve();drawAudio();detailWaveEditor?.refresh(true);});
 window.addEventListener("pagehide",()=>{if(state.rebuildTimer)clearTimeout(state.rebuildTimer);stop();if(state.offlineWorker)state.offlineWorker.terminate();});
 // Cold-start audio decode on iOS can stall after the file picker closes.
 // A single OfflineAudioContext promise with a 45s timeout produced the
@@ -1715,6 +1746,7 @@ async function load(file){
     // Preserve the last playable song on decode failure; a successful new
     // source starts with its own valid exact-sample A/B boundaries.
     ab.a=0;ab.b=dry[0].length;ab.enabled=true;
+    detailWaveEditor?.setSource(dry,data.sampleRate);
     refreshAB();
     labRefresh();state.lastStats=null;
     state.name=file.name.replace(/\.[^.]+$/,"");
