@@ -24,7 +24,7 @@ export async function createSourcePCMBridge({
   ctx,sourceChannels,sourceSampleRate,
   speed=1,startFrame=0,loopStartFrame=0,
   loopEndFrame=sourceChannels?.[0]?.length,loopEnabled=false,
-  onEvent=()=>{}
+  onEvent=()=>{},commandTimeoutMs=5000
 }={}){
   if(!ctx?.audioWorklet||!Number.isFinite(ctx.sampleRate)||
      !Array.isArray(sourceChannels)||sourceChannels.length<1||
@@ -35,6 +35,8 @@ export async function createSourcePCMBridge({
   const frames=sourceChannels[0].length;
   if(!Number.isFinite(sourceSampleRate)||sourceSampleRate<=0)
     throw RangeError("invalid source PCM sample rate");
+  if(!Number.isFinite(commandTimeoutMs)||commandTimeoutMs<1||commandTimeoutMs>60000)
+    throw RangeError("invalid PCM command timeout");
   let currentSpeed=validatePlaybackSpeed(speed);
   let A=loopStartFrame,B=loopEndFrame,loop=loopEnabled;
   if(!Number.isSafeInteger(A)||!Number.isSafeInteger(B)||
@@ -54,6 +56,47 @@ export async function createSourcePCMBridge({
   // Do not copy entire track to the worklet; these small snapshots are moved.
   let requestId=0,closed=false,latest=null;
   const pending=new Map();
+  const rejectPending=error=>{
+    for(const ticket of pending.values()){
+      clearTimeout(ticket.timer);
+      ticket.reject(error);
+    }
+    pending.clear();
+  };
+  const failProcessor=error=>{
+    if(closed)return;
+    // A lost command ACK does not mean the audio render thread has stopped.
+    // Ask the processor to terminate before suppressing normal dispose().
+    try{node.port.postMessage({type:"dispose"});}catch{}
+    closed=true;
+    node.port.onmessage=null;
+    node.removeEventListener("processorerror",onProcessorError);
+    try{node.disconnect();}catch{}
+    rejectPending(error);
+    onEvent({type:"fatal-error",message:error.message});
+  };
+  const onProcessorError=()=>failProcessor(
+    Error("AudioWorklet processor unexpectedly terminated")
+  );
+  // Some Chrome runtimes do not invoke assignment-style onprocessorerror
+  // handlers for synthetic or host-level processorerror events. Use the
+  // EventTarget listener contract for the actual processor lifecycle.
+  node.addEventListener("processorerror",onProcessorError);
+  const submit=(data,transfers=[])=>{
+    if(closed)return Promise.reject(Error("PCM bridge disposed"));
+    const id=++requestId;
+    return new Promise((resolve,reject)=>{
+      const timer=setTimeout(()=>failProcessor(
+        Error("AudioWorklet command response timed out: "+(data.op||data.type))
+      ),commandTimeoutMs);
+      pending.set(id,{resolve,reject,timer});
+      try{node.port.postMessage({...data,requestId:id},transfers);}
+      catch(error){
+        clearTimeout(timer);pending.delete(id);
+        reject(error);
+      }
+    });
+  };
   const windowSlice=(requested,direction=currentSpeed)=>{
     const frame=Math.max(0,Math.min(frames-1,Math.floor(requested)));
     const start=chooseSourceWindowStart(frame,frames,SOURCE_WINDOW_FRAMES,direction);
@@ -74,6 +117,7 @@ export async function createSourcePCMBridge({
     sendWindow(B-1,"B",-1);
   };
   node.port.onmessage=event=>{
+    if(closed)return;
     const data=event.data||{};
     if(data.type==="need-window"){
       sendWindow(data.frame,null,currentSpeed,data.refillId);
@@ -81,6 +125,7 @@ export async function createSourcePCMBridge({
       const ticket=pending.get(data.requestId);
       if(ticket){
         pending.delete(data.requestId);
+        clearTimeout(ticket.timer);
         if(data.type==="error")ticket.reject(Error(data.message));
         else ticket.resolve(data);
       }
@@ -92,14 +137,7 @@ export async function createSourcePCMBridge({
   // The renderer bounds its cache to four windows by default.
   primeLoop();
   sendWindow(startFrame===frames?frames-1:startFrame);
-  const command=(op,params={})=>{
-    if(closed)return Promise.reject(Error("PCM bridge disposed"));
-    const id=++requestId;
-    return new Promise((resolve,reject)=>{
-      pending.set(id,{resolve,reject});
-      node.port.postMessage({type:"command",op,...params,requestId:id});
-    });
-  };
+  const command=(op,params={})=>submit({type:"command",op,...params});
   const updateLoop=(a,b,enabled,op)=>{
     if(closed)return Promise.reject(Error("PCM bridge disposed"));
     // Transfer both endpoint PCM windows and target loop configuration as
@@ -107,13 +145,8 @@ export async function createSourcePCMBridge({
     const endpoints=enabled?[
       windowSlice(a,1),windowSlice(b-1,-1)
     ]:[];
-    const id=++requestId;
-    return new Promise((resolve,reject)=>{
-      pending.set(id,{resolve,reject});
-      node.port.postMessage({type:"loop-config",op,a,b,enabled,
-        endpoints,requestId:id},
-        endpoints.flatMap(w=>w.channels.map(ch=>ch.buffer)));
-    });
+    return submit({type:"loop-config",op,a,b,enabled,endpoints},
+      endpoints.flatMap(w=>w.channels.map(ch=>ch.buffer)));
   };
   const api={
     node,
@@ -125,14 +158,10 @@ export async function createSourcePCMBridge({
         return Promise.reject(RangeError("invalid source-frame seek"));
       if(closed)return Promise.reject(Error("PCM bridge disposed"));
       const {start,channels}=windowSlice(frame===frames?frames-1:frame);
-      const id=++requestId;
       // The source window and seek become one Worklet message, so prefetch
       // eviction cannot discard the target while protecting the old cursor.
-      return new Promise((resolve,reject)=>{
-        pending.set(id,{resolve,reject});
-        node.port.postMessage({type:"seek-window",
-          start,channels,frame,requestId:id},channels.map(x=>x.buffer));
-      });
+      return submit({type:"seek-window",start,channels,frame,op:"seek"},
+        channels.map(x=>x.buffer));
     },
     setSpeed(next){
       try{currentSpeed=validatePlaybackSpeed(next);}
@@ -159,9 +188,9 @@ export async function createSourcePCMBridge({
       // stop its render loop and release its WorkletGlobalScope PCM windows.
       node.port.postMessage({type:"dispose"});
       node.port.onmessage=null;
+      node.removeEventListener("processorerror",onProcessorError);
       node.disconnect();
-      for(const ticket of pending.values())ticket.reject(Error("PCM bridge disposed"));
-      pending.clear();
+      rejectPending(Error("PCM bridge disposed"));
     }
   };
   return api;

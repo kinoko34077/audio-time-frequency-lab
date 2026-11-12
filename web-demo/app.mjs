@@ -804,6 +804,20 @@ async function play(mode="wet",offset=null){
           if(data.type==="progress"&&state.player?.pcmBridge===bridge){
             $("#rt-telemetry").textContent="PCM実験経路 · 元音源時刻 "+
               (data.sourceFrame/sourceRate).toFixed(3)+"s · cache不足 "+data.missingFrames;
+          }else if(data.type==="fatal-error"&&state.player?.pcmBridge===bridge){
+            // Unexpected termination is not a normal Pause. Clear stale
+            // "playing" state but preserve the successfully decoded source.
+            const failedEpoch=state.transportEpoch;
+            void stop().then(()=>{
+              if(state.player||state.transportEpoch!==failedEpoch+1)return;
+              // A processor can fail before await bridge.play() settles, while
+              // the launch has temporarily disabled both playback buttons.
+              controls.dry.disabled=!state.dry;
+              controls.wet.disabled=!state.dry;
+              indicator("PCM実験再生エンジンの異常終了");
+              message("PCM実験再生を停止しました。音源は保持されています: "+
+                data.message,"error");
+            });
           }
         }
       });
