@@ -1,6 +1,6 @@
 # Audio Lab — Source-time transport contract (#36)
 
-Status: R0/R1 implementation boundary, 2026-11-12. The pure source-time mapper is implemented in web-demo/source-timeline.mjs and tested in web-demo/source-timeline.test.mjs. It is NOT connected to the current playback engine, DSP, UI, AudioWorklet, or export. **It does not demonstrate audible negative/zero speed or gapless output.**
+Status: R0/R1 accepted in main via PR #37; R2 experimental PCM AudioWorklet via PR #38 and original-audio opt-in integration via PR #39, followed by cache/seek fixes in PR #40 (2026-11-12). The time mapper is used by the experimental Worklet only at `?pcmTransport=1` + original play. Normal music DSP/UI/export are not migrated. **These changes do not demonstrate independent-pitch negative/zero speed or complete gapless output.**
 
 ## Purpose and priority
 
@@ -44,7 +44,7 @@ Pitch remains independent, current accepted range ±12 semitones unless separate
 - Measure UI event -> requested -> applied -> rendered -> audible latency separately. Do not report a zero-ms physical response merely because a 128-frame callback exists.
 - Physical iPhone Safari waveform gesture, source picker, background/resume, CPU/underrun and real recordings remain independent acceptance; emulated Chromium is not sufficient.
 
-**Next:** R1 implementation must be reviewed and merged independently. R2 is the first stage that can provide actual continuous real-time audio; keep gapless and zero/negative sonic acceptance OPEN until measured.
+**Next:** R2 must establish real-time PCM continuity under source-window underruns, loop changes, long recordings and audio-thread load. R1 was already reviewed and merged. Keep gapless and zero/negative musical sonic acceptance OPEN until measured.
 
 ## R2 bounded experimental source-PCM slice (not full R2 acceptance)
 
@@ -63,3 +63,11 @@ Source files added for the bounded first step:
 - Test the actual `index.html` with a synthetic native WAV loaded through `#audio-file`, start `#play-dry`, confirm raw source AudioWorklet progress and 0 reported cache misses, drag waveform while playing and prove no node restart, then stop with state cleanup; this tests the actual route rather than only the isolated Worklet fixture.
 - The opt-in raw session intentionally uses speed **+1** and whole-file looping to preserve previous original-audio semantics. User-facing signed ±8 and independent pitch are **not** enabled or claimed. Do not present this query flag as a completed AudioStretch player.
 - The seek test proves *node reuse*, not zero output silence, imperceptible audio discontinuity, sample-accurate audible latency, sustained 0 speed, or iPhone Safari operation; those remain open R2/R3/R5 acceptance. Never silently fall back to a different pitch/transport DSP when an explicit opt-in raw backend fails.
+
+
+## R2 F1/F2 audit fixes — render clock and atomic A/B changes
+
+- **F1 (source-cache miss):** Rendered output advances the source clock for the entire output quantum **even if some frames are zero-filled due to missing PCM**. Missing output frames are still counted and the first missing source frame is requested. Previously the renderer emitted a valid prefix but held the entire source clock, replaying audible samples after refilling the cache. The revised contract deliberately **drops the unavailable source interval** instead of replaying already rendered samples; this is recoverable real-time behavior, **not** a guarantee of no audible dropout. Explicit loop time and no-loop EOF follow the same time rule.
+- **F2 (A/B or loop-on change):** Source-frame bounds, loop enablement and both endpoint PCM cache windows are transferred in a single `loop-config` AudioWorklet message and validated **before** mutation. The synchronous processor handler applies the new transport interval and its endpoint caches without a process quantum between them. Explicit seek already uses an independent atomic `seek-window` message. Loop-off releases the old endpoint pins so unlooped playback can use the bounded cache.
+- **Evidence boundaries:** Dedicated deterministic unit tests reproduce the former partial-underrun replay and stale-A/B PCM pin state. Native Chrome Worklet regression tests change loop bounds while the Worklet is playing and inspect the applied source-frame interval and missing-frame count. Device-level audible discontinuities, filter/DSP effects, and physical iPhone Safari remain open R2/R5 acceptance.
+
