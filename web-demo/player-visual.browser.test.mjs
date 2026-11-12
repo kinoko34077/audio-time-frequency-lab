@@ -74,17 +74,20 @@ test("R4 usability visual captures: desktop and mobile player and folded researc
     assert.equal(await page.$eval(".model-legacy-fold",el=>el.open),true);
     assert.equal(await page.$eval(".quick-panel",el=>getComputedStyle(el).display==="none"),false,
       "old transform features are explicitly available instead of deleted");
-    await page.click("#main-tab-player");
-    await page.setViewport({width:390,height:844,deviceScaleFactor:2,isMobile:true,hasTouch:true});
-    await layoutEvidence(page,"mobile-loaded");
-    await page.screenshot({path:path.join(captureDir,"03-player-mobile.png"),fullPage:true});
-    console.log("UI_REVIEW_JPEG_MOBILE:"+Buffer.from(await page.screenshot({type:"jpeg",quality:32})).toString("base64"));
-    await page.click("#main-tab-model");
-    // Research settings retain their open state across tabs; close the fold
-    // for the actual model-default presentation capture.
-    await page.click(".model-legacy-fold > summary");
-    assert.equal(await page.$eval(".model-legacy-fold",el=>el.open),false);
-    await page.screenshot({path:path.join(captureDir,"04-model-mobile.png")});
+    // Puppeteer's setViewport({isMobile:true,hasTouch:true}) can reload a
+    // desktop page. Open a fresh mobile page instead; load the WAV there.
+    const mobile=await browser.newPage();
+    mobile.on("pageerror",e=>errors.push(e.message));
+    await mobile.setViewport({width:390,height:844,deviceScaleFactor:2,isMobile:true,hasTouch:true});
+    await mobile.goto("http://127.0.0.1:"+port+"/",{waitUntil:"domcontentloaded",timeout:20000});
+    await mobile.waitForFunction(()=>document.documentElement.dataset.fwBoot==="ready",{timeout:20000});
+    await waitForFile(mobile);
+    await layoutEvidence(mobile,"mobile-loaded");
+    await mobile.screenshot({path:path.join(captureDir,"03-player-mobile.png"),fullPage:true});
+    console.log("UI_REVIEW_JPEG_MOBILE:"+Buffer.from(await mobile.screenshot({type:"jpeg",quality:32})).toString("base64"));
+    await mobile.click("#main-tab-model");
+    assert.equal(await mobile.$eval(".model-legacy-fold",el=>el.open),false);
+    await mobile.screenshot({path:path.join(captureDir,"04-model-mobile.png")});
     assert.deepEqual(errors,[],"no console page exceptions");
   }finally{
     await browser?.close();
