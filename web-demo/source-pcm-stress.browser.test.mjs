@@ -305,6 +305,11 @@ test("native Chrome content-audio stereo output matches independent source-time 
       if(!applied)throw Error("seek ACK never reached an output quantum");
       const renderReceiptMs=applied.observedAt-t0;
       await long.setSpeed(1);
+      // The source keeps advancing at +8 while render feedback crosses the
+      // port/main-thread boundary. After observing that receipt, establish a
+      // NEW source coordinate for the +1 reference capture; don't let a
+      // finite alignment search hide elapsed playback as a PCM failure.
+      await long.seek(600000);
       const recovery=await observe(600000,1,null,80);
       const recoveredMiss=long.latest?.missingFrames||0;
       await long.pause();long.dispose();probe.disconnect();await ctx.close();
