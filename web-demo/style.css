@@ -816,7 +816,20 @@ body.model-lab[data-main-tab="model"] .workspace-grid{
   display:grid!important;grid-template-columns:minmax(0,1fr) minmax(310px,.92fr)!important;
   max-width:none
 }
-body.model-lab[data-main-tab="model"] .workspace-left{display:grid}
+/* Legacy responsive grid-area declarations were designed for
+   .workspace-left{display:contents}; R4 keeps a real nested container.
+   Remove those named slots so its player and controls cannot overlap. */
+body.model-lab[data-main-tab="model"] .workspace-left{
+  display:flex!important;flex-direction:column;gap:12px;
+}
+body.model-lab[data-main-tab="model"] .workspace-left>.player,
+body.model-lab[data-main-tab="model"] .workspace-left>.quick-panel,
+body.model-lab[data-main-tab="model"] .workspace-left>.sine-monitor{
+  grid-area:auto!important;flex:0 0 auto;position:relative;
+}
+body.model-lab[data-main-tab="model"] .workspace-right{
+  grid-area:auto!important;
+}
 body.model-lab[data-main-tab="model"] #settings-dialog[open]{display:block!important}
 body.model-lab .player-pitch-speed .lab-grid{
   display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px
