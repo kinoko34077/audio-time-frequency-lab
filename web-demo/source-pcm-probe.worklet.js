@@ -1,8 +1,6 @@
-/** #36 R2 test-only worklet: independent post-render PCM observer.
- * This Worklet records actual audio graph samples; it does not use
- * source-pcm-renderer missing counters or synthesize the measured signal.
- * The test's source is nonzero constant PCM; measured zeros are therefore
- * unexpected once the graph is armed and warmed up.
+/** #36 R2 test-only worklet: independent stereo post-render PCM observer.
+ * Captures EACH input channel from the real audio graph, independent of
+ * source-pcm-renderer telemetry. Nonzero constant source is the known oracle.
  */
 class AudioLabPCMProbe extends AudioWorkletProcessor {
   constructor(){
@@ -19,16 +17,20 @@ class AudioLabPCMProbe extends AudioWorkletProcessor {
     };
   }
   reset(){
-    this.frames=0;this.nonzero=0;this.zero=0;this.blocks=0;
-    this.maxStep=0;this.maxAbs=0;this.previous=0;this.hasPrevious=false;
-    this.squared=0;this.peakChannels=0;
+    this.channels=[];
+    this.blocks=0;
+    this.peakChannels=0;
   }
   stats(){
-    return {frames:this.frames,nonzeroFrames:this.nonzero,
-      zeroFrames:this.zero,blocks:this.blocks,maxStep:this.maxStep,
-      maxAbs:this.maxAbs,rms:this.frames?
-        Math.sqrt(this.squared/this.frames):0,
-      inputChannels:this.peakChannels};
+    const channels=this.channels.map(c=>({
+      frames:c.frames,zeroFrames:c.zero,nonzeroFrames:c.nonzero,
+      maxStep:c.maxStep,maxAbs:c.maxAbs,
+      rms:c.frames?Math.sqrt(c.squared/c.frames):0
+    }));
+    const first=channels[0]||{frames:0,zeroFrames:0,nonzeroFrames:0,
+      maxStep:0,maxAbs:0,rms:0};
+    return {...first,blocks:this.blocks,inputChannels:this.peakChannels,
+      channels};
   }
   process(inputs,outputs){
     const incoming=inputs[0]||[],outgoing=outputs[0]||[];
@@ -38,17 +40,25 @@ class AudioLabPCMProbe extends AudioWorkletProcessor {
       else outgoing[ch].fill(0);
     }
     if(!this.active||!incoming.length)return true;
-    const first=incoming[0];
     this.peakChannels=Math.max(this.peakChannels,incoming.length);
-    for(let i=0;i<first.length;i++){
-      const value=first[i];
-      if(Math.abs(value)<1e-7)this.zero++;
-      else this.nonzero++;
-      const abs=Math.abs(value);
-      if(abs>this.maxAbs)this.maxAbs=abs;
-      if(this.hasPrevious)this.maxStep=Math.max(this.maxStep,Math.abs(value-this.previous));
-      this.previous=value;this.hasPrevious=true;
-      this.squared+=value*value;this.frames++;
+    for(let channel=0;channel<incoming.length;channel++){
+      const samples=incoming[channel];
+      let c=this.channels[channel];
+      if(!c){
+        c={frames:0,nonzero:0,zero:0,maxStep:0,maxAbs:0,
+          previous:0,hasPrevious:false,squared:0};
+        this.channels[channel]=c;
+      }
+      for(let i=0;i<samples.length;i++){
+        const value=samples[i],abs=Math.abs(value);
+        if(abs<1e-7)c.zero++;
+        else c.nonzero++;
+        if(abs>c.maxAbs)c.maxAbs=abs;
+        if(c.hasPrevious)c.maxStep=Math.max(c.maxStep,
+          Math.abs(value-c.previous));
+        c.previous=value;c.hasPrevious=true;
+        c.squared+=value*value;c.frames++;
+      }
     }
     this.blocks++;
     return true;
