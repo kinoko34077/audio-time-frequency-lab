@@ -283,16 +283,19 @@ test("native Chrome content-audio stereo output matches independent source-time 
       const after=long.latest?.missingFrames||0;
 
       const t0=performance.now();
+      // Request IDs are local to each bridge instance. Older receipts from
+      // the already disposed short source may reuse the same numeric ID.
+      const receiptStart=renderEvents.length;
       const ack=await long.seek(600000);
       const ackMs=performance.now()-t0;
       // A command-accepted ACK is not sufficient proof of audible render.
       // Wait for the separate Worklet process() output-quantum receipt.
-      let applied=renderEvents.find(e=>
+      let applied=renderEvents.slice(receiptStart).find(e=>
         e.type==="render-applied"&&e.requestId===ack.requestId);
       const deadline=performance.now()+1000;
       while(!applied&&performance.now()<deadline){
         await sleep(4);
-        applied=renderEvents.find(e=>
+        applied=renderEvents.slice(receiptStart).find(e=>
           e.type==="render-applied"&&e.requestId===ack.requestId);
       }
       if(!applied)throw Error("seek ACK never reached an output quantum");
