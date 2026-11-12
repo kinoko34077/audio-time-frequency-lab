@@ -884,3 +884,245 @@ body[data-main-tab="model"] .wave-editor #wave{height:41px!important}
  .wave-editor #wave{height:43px!important}
  .wave-zoom-actions button{min-width:42px;height:40px}
 }
+
+
+/* #36 UX correction (2026-11-13): the player is a waveform-first tool,
+   not a relabeled Frequency Warp settings dashboard. Existing DSP IDs and
+   state remain mounted; this is presentation-only and reversible. */
+body.model-lab[data-main-tab="player"] .model-legacy-fold{display:none!important}
+body.model-lab[data-main-tab="model"] .model-legacy-fold{
+  display:block;min-width:0;border:1px solid #35545c;border-radius:11px;
+  padding:8px 12px;background:#101f26
+}
+.model-legacy-fold>summary{
+  cursor:pointer;font-size:13px;line-height:1.5;padding:8px 3px;
+  color:#c0ddd9;font-weight:650
+}
+.model-legacy-fold>summary:focus-visible{outline:2px solid #8ce9d2;outline-offset:3px}
+body.model-lab[data-main-tab="model"] .model-legacy-fold>.quick-panel{
+  display:block!important;margin:8px 0 0;min-width:0
+}
+body.model-lab[data-main-tab="player"] .main-workspace-tabs{
+  width:min(100%,680px);max-width:none;margin:0 auto 9px
+}
+body.model-lab[data-main-tab="player"] .header{margin-bottom:7px}
+body.model-lab[data-main-tab="player"] .header .brand p{display:none}
+body.model-lab[data-main-tab="player"] .header h1{font-size:clamp(15px,3.5vw,22px)}
+body.model-lab[data-main-tab="player"] .workspace-grid{max-width:910px}
+body.model-lab[data-main-tab="player"] #main-player-panel{
+  display:flex;flex-direction:column;gap:7px;
+  padding:clamp(10px,2.4vw,20px);
+}
+body.model-lab[data-main-tab="player"] #main-player-panel>.section-header{margin:0}
+body.model-lab[data-main-tab="player"] #main-player-panel>.section-header .micro-hint{font-size:10px}
+body.model-lab[data-main-tab="player"] #main-player-panel>.wave-editor{margin:0;gap:6px}
+body.model-lab[data-main-tab="player"] #main-player-panel>.transport{margin:0;font-size:13px}
+body.model-lab[data-main-tab="player"] #main-player-panel>.transport #wave-hint{
+  max-width:46%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  font-size:10px
+}
+body.model-lab[data-main-tab="player"] #drop{
+  min-height:49px;padding:8px 12px;gap:4px 10px;
+  background:transparent;border-style:solid;border-color:#335960;
+}
+body.model-lab[data-main-tab="player"] #drop span{font-size:20px}
+body.model-lab[data-main-tab="player"] #drop small{
+  flex-basis:auto;padding:0;margin-left:auto;font-size:10px
+}
+body.model-lab[data-main-tab="player"]:has(#play-main:not(:disabled)) #drop{
+  min-height:36px;padding:5px 9px;border-color:#315159
+}
+body.model-lab[data-main-tab="player"]:has(#play-main:not(:disabled)) #drop span,
+body.model-lab[data-main-tab="player"]:has(#play-main:not(:disabled)) #drop small{display:none}
+body.model-lab[data-main-tab="player"]:has(#play-main:not(:disabled)) #drop strong{font-size:11px;font-weight:500}
+body.model-lab[data-main-tab="player"] #file-meta{
+  margin:0;color:#9dbbb9;overflow-wrap:anywhere;font-size:11px
+}
+body.model-lab[data-main-tab="player"] #main-player-panel>.actions{
+  display:grid;grid-template-columns:minmax(0,1.5fr) repeat(2,minmax(0,1fr));
+  gap:8px;margin:1px 0 0
+}
+body.model-lab[data-main-tab="player"] #main-player-panel>.actions button{
+  min-width:0;min-height:46px;padding:8px 6px;font-size:13px
+}
+body.model-lab[data-main-tab="player"] #play-main{
+  font-size:15px!important;border-radius:10px
+}
+.player-tune{
+  display:grid;gap:7px;margin:4px 0 0;padding:10px 0 6px;
+  border-top:1px solid #355159
+}
+.player-tune-grid{
+  display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px
+}
+.player-tune-control{min-width:0;display:grid;gap:7px}
+.player-tune-heading{display:flex;justify-content:space-between;align-items:center;gap:6px;font-size:13px}
+.player-tune-heading label{font-weight:650;color:#e8f4ef}
+.player-tune-heading output{font-variant-numeric:tabular-nums;color:#91e8c7;font-size:13px}
+.player-tune-inputs{display:flex;align-items:center;gap:8px;min-width:0}
+.player-tune-inputs input[type=range]{
+  min-width:0;flex:1;touch-action:pan-y;accent-color:#70e6bb;min-height:38px
+}
+.player-tune-inputs input[type=number]{
+  flex:none;width:clamp(64px,22%,96px);min-height:39px;
+  border:1px solid #496e68;border-radius:7px;background:#112a30;
+  color:#e9fff8;text-align:right;font:13px ui-monospace,monospace;padding:5px
+}
+.player-tune-inputs input:focus-visible{outline:2px solid #95f1d0;outline-offset:2px}
+.player-tune-advanced,.player-loop-precision{font-size:11px;color:#a6c1c3}
+.player-tune-advanced>summary,.player-loop-precision>summary{
+  width:max-content;max-width:100%;padding:5px 0;cursor:pointer;color:#acd5cf;
+  font-weight:550;font-size:11px
+}
+.player-tune-advanced>summary:focus-visible,
+.player-loop-precision>summary:focus-visible{outline:2px solid #a0ebd5}
+.player-rail-setting{display:flex;align-items:center;gap:10px;margin-top:6px;font-size:12px}
+.player-rail-setting select{padding:6px;border:1px solid #456b68;color:#e2f7f1;background:#0e2830;border-radius:6px}
+.player-tune-advanced .player-quality-note{margin:7px 0 0}
+.player-tune #granular-rail-note:empty{display:none}
+.player-tune .player-processing-status{font-size:10px;margin:0;line-height:1.3;color:#91b7b3}
+body.model-lab[data-main-tab="player"] #player-loop-controls{
+  gap:3px;margin:1px 0 0;padding:9px 12px;border:1px solid #305158;
+  border-radius:9px;background:transparent
+}
+body.model-lab[data-main-tab="player"] .player-loop-top strong{font-size:12px}
+body.model-lab[data-main-tab="player"] .player-loop-top label{font-size:12px}
+body.model-lab[data-main-tab="player"] .player-loop-top input{width:20px;height:20px}
+.player-loop-precision[open] .player-loop-fields{margin-top:7px}
+body.model-lab[data-main-tab="player"] #player-loop-hint{
+  font-size:10px;margin:0;color:#9cb8bb;line-height:1.35
+}
+body.model-lab[data-main-tab="player"] .wave-editor-footer span:nth-child(2){
+  font-size:10px
+}
+@media(max-width:600px){
+  body.model-lab[data-main-tab="player"] .studio{padding:6px 7px 14px}
+  body.model-lab[data-main-tab="player"] .main-workspace-tabs{margin-bottom:6px}
+  body.model-lab[data-main-tab="player"] .main-workspace-tabs button{min-height:40px;padding:7px}
+  body.model-lab[data-main-tab="player"] #main-player-panel{gap:6px}
+  body.model-lab[data-main-tab="player"] #main-player-panel>.actions{
+    grid-template-columns:repeat(2,minmax(0,1fr));gap:6px
+  }
+  body.model-lab[data-main-tab="player"] #play-dry{grid-column:1/-1}
+  body.model-lab[data-main-tab="player"] #main-player-panel>.actions button{min-height:44px}
+  .player-tune-grid{grid-template-columns:1fr;gap:9px}
+  .player-tune-control{gap:3px}
+  body.model-lab[data-main-tab="player"] #drop small{display:none}
+  body.model-lab[data-main-tab="player"] .wave-editor-footer span:nth-child(2){
+    font-size:9px;max-width:46%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap
+  }
+}
+
+
+/* User-facing player must never have a floating legacy diagnostics widget
+   covering the waveform, transport or tuning fields. Keep it accessible
+   in normal document flow; model tab retains its specialist floating HUD. */
+body.model-lab[data-main-tab="player"] .runtime-hud{
+  position:static!important;top:auto!important;right:auto!important;
+  bottom:auto!important;left:auto!important;transform:none!important;
+  width:min(calc(100% - 18px),910px)!important;max-width:none!important;
+  max-height:none!important;margin:8px auto 16px;box-shadow:none!important;
+}
+body.model-lab[data-main-tab="player"] .runtime-hud-body{
+  max-height:none!important;overflow:visible!important
+}
+
+
+/* Screenshot feedback: model selection is the default, research is optional.
+   No controls are deleted: widening the original Frequency Warp workbench
+   requires explicit disclosure within the processing-model workspace. */
+body.model-lab[data-main-tab="model"] .model-essential-grid{
+  display:grid;grid-template-columns:minmax(250px,1.8fr) minmax(130px,1fr) minmax(130px,1fr);
+  align-items:end;gap:13px
+}
+body.model-lab[data-main-tab="model"] .model-essential-grid .lab-field:first-child{
+  grid-column:auto
+}
+.model-extra-controls{margin-top:12px;border-top:1px solid #31545b;padding:8px 0 3px}
+.model-extra-controls>summary{cursor:pointer;font-size:12px;font-weight:650;color:#b6dfd5;padding:7px 3px}
+.model-extra-controls>summary:focus-visible{outline:2px solid #93eed1}
+body.model-lab[data-main-tab="model"] .model-extra-grid{
+  display:grid;grid-template-columns:repeat(3,minmax(0,1fr));margin-top:9px;gap:12px
+}
+body.model-lab[data-main-tab="model"] .model-extra-grid .lab-field:first-child{grid-column:auto}
+body.model-lab[data-main-tab="model"] .audio-lab-panel .model-summary{
+  margin-top:10px;line-height:1.35
+}
+body.model-lab[data-main-tab="model"] .audio-lab-panel .model-unobtrusive-note{
+  margin-top:4px;font-size:10px
+}
+body.model-lab[data-main-tab="model"] .workspace-grid:has(.model-legacy-fold:not([open])){
+  display:block!important;max-width:850px;margin:0 auto
+}
+body.model-lab[data-main-tab="model"] .workspace-grid:has(.model-legacy-fold:not([open])) .workspace-right,
+body.model-lab[data-main-tab="model"] .workspace-grid:has(.model-legacy-fold:not([open])) .sine-monitor{
+  display:none!important
+}
+body.model-lab[data-main-tab="model"] .workspace-grid:has(.model-legacy-fold:not([open])) .workspace-left{
+  display:flex!important;flex-direction:column;gap:8px
+}
+/* Small-screen entry should expose both speed and pitch without scrolling
+   on a common 390x844 phone. Model research remains accessible by disclosure. */
+@media(max-width:600px){
+  body.model-lab .header{align-items:center;gap:5px;margin-bottom:5px}
+  body.model-lab .header .brand{min-width:0;gap:7px}
+  body.model-lab .header .brand h1{
+    font-size:clamp(13px,3.8vw,17px);letter-spacing:-.035em;
+    line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis
+  }
+  body.model-lab[data-main-tab="model"] .header .brand p{display:none}
+  body.model-lab[data-main-tab="model"] .gear{
+    flex:none;min-width:46px;width:46px;min-height:40px;padding:5px;gap:1px;font-size:11px
+  }
+  body.model-lab[data-main-tab="model"] .gear span:first-child{font-size:17px}
+  body.model-lab[data-main-tab="model"] .gear span:last-child{display:none}
+  body.model-lab[data-main-tab="model"] .audio-lab-panel{padding:10px 11px}
+  body.model-lab[data-main-tab="model"] .audio-lab-panel .section-header{margin-bottom:9px}
+  body.model-lab[data-main-tab="model"] .audio-lab-panel .section-header .micro-hint{display:none}
+  body.model-lab[data-main-tab="model"] .model-essential-grid,
+  body.model-lab[data-main-tab="model"] .model-extra-grid{
+    grid-template-columns:minmax(0,1fr);gap:6px
+  }
+  body.model-lab[data-main-tab="model"] .model-essential-grid .lab-field{
+    gap:2px;font-size:12px
+  }
+  body.model-lab[data-main-tab="model"] .model-essential-grid .lab-field input[type=range]{min-height:22px}
+  body.model-lab[data-main-tab="model"] .model-extra-controls{margin-top:7px;padding-top:3px}
+  body.model-lab[data-main-tab="model"] .audio-lab-panel .lab-bottom{min-height:0;margin-top:5px}
+  body.model-lab[data-main-tab="model"] .runtime-hud{
+    position:static!important;top:auto!important;right:auto!important;bottom:auto!important;
+    left:auto!important;transform:none!important;max-height:none!important;
+    margin:8px auto;width:calc(100% - 18px)!important
+  }
+  body.model-lab[data-main-tab="player"] #main-player-panel>.section-header{
+    display:none
+  }
+  body.model-lab[data-main-tab="player"] #main-player-panel>.wave-editor{gap:3px}
+  body.model-lab[data-main-tab="player"] #main-player-panel>.wave-editor .wave-detail-wrap{
+    height:min(24dvh,205px)!important;min-height:172px
+  }
+  body.model-lab[data-main-tab="player"] #main-player-panel .wave-editor .wave-wrap{
+    height:43px!important
+  }
+  body.model-lab[data-main-tab="player"] #main-player-panel #wave{height:33px!important}
+  body.model-lab[data-main-tab="player"] #main-player-panel .wave-editor-footer span:nth-child(2){
+    display:none
+  }
+  body.model-lab[data-main-tab="player"] #main-player-panel .transport #wave-hint{display:none}
+  body.model-lab[data-main-tab="player"] #main-player-panel>.actions{
+    grid-template-columns:1.25fr .85fr 1.15fr;gap:4px
+  }
+  body.model-lab[data-main-tab="player"] #main-player-panel>.actions #play-dry{
+    grid-column:auto;font-size:11px
+  }
+  body.model-lab[data-main-tab="player"] #main-player-panel>.actions button{
+    min-height:43px;padding:7px 3px;font-size:12px
+  }
+  body.model-lab[data-main-tab="player"] .player-tune{
+    padding-top:6px;padding-bottom:2px;margin-top:1px
+  }
+  body.model-lab[data-main-tab="player"] .player-tune-grid{gap:5px}
+  body.model-lab[data-main-tab="player"] .player-tune-control{gap:1px}
+  body.model-lab[data-main-tab="player"] .player-tune-inputs input[type=range]{min-height:31px}
+  body.model-lab[data-main-tab="player"] .player-tune-inputs input[type=number]{min-height:33px}
+}

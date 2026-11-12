@@ -48,8 +48,15 @@ try:
       # remains reachable through the explicit processing-model tab.
       page.locator("#main-tab-model").click()
       assert page.locator("#audio-lab").is_visible()
+      # Legacy Frequency Warp processing is retained but no longer occupies
+      # the default model-comparison view; it is expanded only on demand.
+      assert not page.locator(".quick-panel").is_visible()
+      page.locator(".model-legacy-fold > summary").click()
       assert page.locator(".quick-panel").is_visible()
       assert page.locator("#settings-open").is_visible()
+      # Advanced window sliders are disclosed on demand in the compact model UI.
+      page.locator(".model-extra-controls > summary").click()
+      assert page.locator("#lab-short").is_visible()
 
       page.locator("#lab-short").evaluate("(e)=>{e.value='8';e.dispatchEvent(new Event('change',{bubbles:true}));}")
       page.locator("#lab-long").evaluate("(e)=>{e.value='10';e.dispatchEvent(new Event('change',{bubbles:true}));}")

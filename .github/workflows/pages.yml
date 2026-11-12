@@ -47,6 +47,11 @@ jobs:
         run: |
           npm install --no-save --no-package-lock puppeteer-core@24
           command -v google-chrome
+      - name: Install Japanese glyphs for actual UI screenshot review
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq fonts-noto-cjk
+          fc-match 'Noto Sans CJK JP'
       - name: Native Chrome real Rust AudioWorklet with Lab live factors
         run: |
           WARP_WEB_ROOT=_site node --test web-demo/lab-live-smoke.test.mjs
@@ -62,6 +67,18 @@ jobs:
       - name: Native Chrome R4 playback-first real-file and A/B/tab-state regression
         run: |
           node --test web-demo/player-first.browser.test.mjs
+      - name: Native Chrome UI visual audit with desktop and mobile screenshots
+        if: always()
+        run: |
+          node --test web-demo/player-visual.browser.test.mjs
+      - name: Preserve UI screenshots for human visual review
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: audio-lab-ui-review-${{ github.run_number }}
+          path: ui-review-screenshots/*.png
+          if-no-files-found: warn
+          retention-days: 14
       - name: Native Chrome opt-in granular controls with precise signed speed and pitch (R3)
         run: |
           node --test web-demo/source-granular-player.browser.test.mjs

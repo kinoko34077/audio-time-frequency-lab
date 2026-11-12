@@ -152,16 +152,38 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, swit
       touchPoints:[point(.22,21),point(.78,22)]});
     const frameAfterZoomMove=Number(await page.$eval("#wave-detail",
       el=>el.getAttribute("aria-valuenow")));
+    // Snapshot emitted audible-seek commands after the intended pinch move.
+    // A stale UI repaint can differ by subpixel sample rounding without
+    // causing an audible seek, so verify the actual Worklet protocol.
+    const beforePinchReleaseSeeks=await page.evaluate(()=>{
+      window.__pinchReleaseSeeks=0;
+      window.__pinchOriginalPost=MessagePort.prototype.postMessage;
+      MessagePort.prototype.postMessage=function(msg,...args){
+        if(msg?.type==="seek-window")window.__pinchReleaseSeeks++;
+        return window.__pinchOriginalPost.call(this,msg,...args);
+      };
+      return window.__pinchReleaseSeeks;
+    });
     await touch.send("Input.dispatchTouchEvent",{type:"touchEnd",touchPoints:[]});
     await touch.send("Emulation.setTouchEmulationEnabled",{enabled:false});
+    const pinchReleaseSeeks=await page.evaluate(()=>{
+      MessagePort.prototype.postMessage=window.__pinchOriginalPost;
+      return window.__pinchReleaseSeeks;
+    });
+    assert.equal(pinchReleaseSeeks,beforePinchReleaseSeeks,
+      "pinch finger release must not command an additional audible seek");
     const afterPinchSpan=asSeconds(await page.$eval("#wave-zoom-label",
       el=>el.textContent));
     assert.ok(afterPinchSpan<beforePinchSpan,{beforePinchSpan,afterPinchSpan});
     const afterPinchFrame=Number(await page.$eval("#wave-detail",
       el=>el.getAttribute("aria-valuenow")));
-    assert.ok(Math.abs(afterPinchFrame-frameAfterZoomMove)<=2,
-      "lifting a remaining pinch contact must not issue a second tap seek: "+
-      JSON.stringify({frameAfterZoomMove,afterPinchFrame,beforePinchSpan,afterPinchSpan}));
+    // The canvas reports a center frame rounded to an integer. A repaint
+    // may shift under one displayed pixel while the Worklet seek count stays
+    // identical. Do not confuse display quantization with an audio jump.
+    const onePixelFrames=Math.ceil(afterPinchSpan*sourceRate/editingWave.width);
+    assert.ok(Math.abs(afterPinchFrame-frameAfterZoomMove)<=Math.max(2,onePixelFrames),
+      "pinch release must not jump by a visible pixel: "+
+      JSON.stringify({frameAfterZoomMove,afterPinchFrame,beforePinchSpan,afterPinchSpan,onePixelFrames}));
     assert.equal(await page.$eval("#player-loop-b",el=>el.value),String(draggedB));
     assert.equal(await page.$eval("#rt-telemetry",el=>Number(el.dataset.pcmNodeStarts)),starts,
       "pinch may not restart the audio engine");
@@ -183,8 +205,22 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, swit
       speed.dispatchEvent(new Event("change",{bubbles:true}));
       document.getElementById("player-loop-enabled").click();
     });
-    await page.waitForFunction(()=>document.querySelector("#player-loop-hint")
-      ?.textContent.includes("反映が完了"),{timeout:20000});
+    try{
+      await page.waitForFunction(()=>document.querySelector("#player-loop-hint")
+        ?.textContent.includes("反映が完了"),{timeout:20000});
+    }catch(error){
+      const state=await page.evaluate(()=>({
+        hint:document.querySelector("#player-loop-hint")?.textContent,
+        loopSectionHidden:document.querySelector("#player-loop-controls")?.hidden,
+        loopChecked:document.querySelector("#player-loop-enabled")?.checked,
+        selectedTab:document.body.dataset.mainTab,
+        speed:document.querySelector("#granular-speed-value")?.value,
+        playerStatus:document.querySelector("#granular-optin-status")?.textContent,
+        telemetry:{...document.querySelector("#rt-telemetry")?.dataset}
+      }));
+      console.log("R4_LOOP_SYNC_FAILURE "+JSON.stringify(state));
+      throw error;
+    }
     assert.equal(await page.$eval("#granular-speed-value",el=>el.value),"-1.125");
     assert.equal(await page.$eval("#player-loop-enabled",el=>el.checked),false);
     assert.equal(await page.$eval("#rt-telemetry",el=>Number(el.dataset.pcmNodeStarts)),starts);

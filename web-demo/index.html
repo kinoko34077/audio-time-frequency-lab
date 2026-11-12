@@ -24,7 +24,7 @@
   </nav>
   <section id="audio-lab" class="panel audio-lab-panel" aria-label="再生速度と解析モデルの比較">
     <div class="section-header"><div><p class="eyebrow">TIME / PITCH / MODEL LAB</p><h2>モデル別の音声比較</h2></div><span class="micro-hint">処理は再生操作で自動開始</span></div>
-    <div class="lab-grid">
+    <div class="lab-grid model-essential-grid">
       <label class="lab-field">処理モデル
         <select id="lab-model" aria-label="再生モデル">
           <option value="live">Rust/WASM 部分音 · リアルタイム</option>
@@ -40,6 +40,11 @@
       <label class="lab-field">音程 <output id="lab-pitch-output" for="lab-pitch">0 半音</output>
         <input id="lab-pitch" type="range" min="-12" max="12" step="1" value="0">
       </label>
+    </div>
+    <p id="lab-model-description" class="lab-note model-summary" aria-live="polite">部分音：再生しながら速度と音程を変更します。</p>
+    <details class="model-extra-controls">
+      <summary>処理モデルの詳細設定・解析</summary>
+      <div class="lab-grid model-extra-grid">
       <label class="lab-field">短窓 <output id="lab-short-output" for="lab-short">512 samples</output>
         <input id="lab-short" type="range" min="8" max="11" step="1" value="9" aria-label="短窓の長さ">
       </label>
@@ -49,7 +54,7 @@
       <label class="lab-field">参照窓数 <output id="lab-windows-output" for="lab-windows">8 窓</output>
         <input id="lab-windows" type="range" min="2" max="16" step="2" value="8" aria-label="前後参照窓数">
       </label>
-    </div>
+      </div>
     <label class="lab-note" for="lab-individual-periods"><input id="lab-individual-periods" type="checkbox" aria-describedby="lab-individual-note"> <strong>周波数ごとの個別波長</strong></label>
     <label class="lab-field lab-period-field" id="lab-period-cycles-field" for="lab-period-cycles" hidden>解析窓の長さ <output id="lab-period-cycles-output" for="lab-period-cycles">8周期</output>
       <input id="lab-period-cycles" type="range" min="-1" max="5" step="1" value="3" aria-label="周波数別の解析に使う周期数（0.5から32周期）" disabled>
@@ -57,16 +62,16 @@
     </label>
     <p id="lab-individual-note" class="lab-note">オン：各周波数の周期窓から共通部分音を推定し、残差を上で選択したPV・WSOLA・短長複合・AMで処理します。Rust/WASMリアルタイムとの同時使用は未対応（オン時はPVへ明示的に切替）。オフ：各モデルを元音声に直接適用します。</p>
     <p id="lab-window-note" class="lab-note">複合窓では短窓が音の立ち上がり、長窓が音程の識別を担当します。</p>
-    <p id="lab-model-description" class="lab-note" aria-live="polite">部分音：音の中の周波数を追って、再生しながら速度と音程を変更します。複雑な音では揺れや濁りが出ることがあります。</p>
+    </details>
     <div class="lab-bottom">
       <p id="lab-status" role="status" aria-live="polite">音源を読み込んで「モデルで再生」を押してください。</p>
     </div>
-    <p class="lab-note">全モデルとも再生時に処理を開始します。部分音方式はRust/WASMによる音声処理、ほかのモデルは先読み区間を順次計算して再生します。音源は端末内で処理します。</p>
+    <p class="lab-note model-unobtrusive-note">音源は端末内で処理します。</p>
   </section>
   <div class="workspace-grid">
     <div class="workspace-left">
       <section id="main-player-panel" class="panel player" aria-labelledby="player-title">
-        <div class="section-header"><div><p class="eyebrow">AUDIO SOURCE</p><h2 id="player-title">音源を再生</h2></div><span class="micro-hint">先頭600秒まで</span></div>
+        <div class="section-header"><div><p class="eyebrow">PLAYER</p><h2 id="player-title">再生</h2></div><span class="micro-hint">先頭600秒まで</span></div>
         <label id="drop" class="drop" for="audio-file" role="button" tabindex="0" aria-label="音声ファイルを選ぶ">
           <span aria-hidden="true">♫</span><strong>ここを押して音声を選ぶ</strong>
           <small>WAV / MP3 / M4A など · 75MBまで · ドロップ可</small>
@@ -75,7 +80,7 @@
         <p id="file-meta" class="meta">音声未選択</p>
         <section class="wave-editor" aria-label="拡大波形の操作">
           <div class="wave-editor-toolbar">
-            <span class="wave-editor-caption">拡大波形 · 中央ヘッド</span>
+            <span class="wave-editor-caption">波形</span>
             <div class="wave-zoom-actions" aria-label="波形表示倍率">
               <button type="button" id="wave-zoom-out" aria-label="波形を縮小">−</button>
               <output id="wave-zoom-label" aria-live="off">—</output>
@@ -88,61 +93,69 @@
             <span id="wave-a-marker" class="wave-marker wave-marker-a" aria-hidden="true">A</span>
             <span id="wave-b-marker" class="wave-marker wave-marker-b" aria-hidden="true">B</span>
           </div>
-          <div class="wave-editor-footer"><span id="wave-visible-start">0:00.0</span><span>ドラッグで移動 · ピンチで拡大 · A/Bをドラッグ</span><span id="wave-visible-end">0:00.0</span></div>
-          <div class="wave-overview-header">全体波形 · タップで移動</div>
+          <div class="wave-editor-footer"><span id="wave-visible-start">0:00.0</span><span>左右に動かす · ピンチで拡大</span><span id="wave-visible-end">0:00.0</span></div>
+          <div class="wave-overview-header">全体</div>
           <div class="wave-wrap"><canvas id="wave" role="button" tabindex="0" aria-label="全体波形をタップして位置を移動"></canvas><div id="wave-overview-selection" class="wave-overview-selection" aria-hidden="true"></div><div id="playhead" class="playhead"></div></div>
         </section>
         <div class="transport"><span id="elapsed">0:00.0</span><span id="wave-hint">波形を押して移動</span><span id="duration">0:00.0</span></div>
-        <section class="player-loop" id="player-loop-controls" aria-label="再生区間を指定してループ" hidden>
-          <div class="player-loop-top"><strong>再生区間 A–B</strong>
-            <label for="player-loop-enabled"><input id="player-loop-enabled" type="checkbox" checked> 区間をループ</label>
-          </div>
-          <div class="player-loop-fields">
-            <label for="player-loop-a">開始 A（サンプル）
-              <input id="player-loop-a" type="number" min="0" step="1" value="0" inputmode="numeric">
-              <button id="player-loop-a-now" type="button">ここをAに</button>
-            </label>
-            <label for="player-loop-b">終端 B（サンプル、含まない）
-              <input id="player-loop-b" type="number" min="1" step="1" value="1" inputmode="numeric">
-              <button id="player-loop-b-now" type="button">ここをBに</button>
-            </label>
-          </div>
-          <p id="player-loop-hint" class="lab-note" aria-live="polite">A と B を決め、ループをONにするとその区間を繰り返します。</p>
-        </section>
-        <section id="granular-optin-controls" class="lab-bottom player-pitch-speed" aria-label="再生速度と音程" hidden>
-          <p class="lab-note player-quality-note">速度は−8〜+8倍、0倍でも発音します。独立音程±12半音。音質・極短ループのクリック・実機での遅延は検証中です。</p>
-          <div class="lab-grid">
-            <label class="lab-field" for="granular-speed">速度 <output id="granular-speed-output" for="granular-speed">1.00×</output>
-              <input id="granular-speed" type="range" min="-8" max="8" step=".01" value="1">
-            </label>
-            <label class="lab-field" for="granular-speed-value">速度直接入力
-              <input id="granular-speed-value" type="number" min="-8" max="8" step="any" value="1" inputmode="decimal">
-            </label>
-            <label class="lab-field" for="granular-pitch">音程 <output id="granular-pitch-output" for="granular-pitch">0.0 半音</output>
-              <input id="granular-pitch" type="range" min="-12" max="12" step=".1" value="0">
-            </label>
-            <label class="lab-field" for="granular-pitch-value">音程直接入力（半音）
-              <input id="granular-pitch-value" type="number" min="-12" max="12" step="any" value="0" inputmode="decimal">
-            </label>
-            <label class="lab-field" for="granular-range">速度レール表示幅
-              <select id="granular-range">
-                <option value="1">±1倍</option><option value="2">±2倍</option>
-                <option value="4">±4倍</option><option value="8" selected>±8倍</option>
-              </select>
-            </label>
-          </div>
-          <p id="granular-rail-note" class="lab-note"></p>
-          <p id="granular-optin-status" class="lab-note" role="status" aria-live="polite">再生時に実験DSPへ適用します。</p>
-        </section>
         <div class="actions">
           <button id="play-main" class="primary" disabled>▶ 再生</button>
-          <button id="play-wet" disabled>▶ モデルで再生</button>
-          <button id="play-dry" disabled>原音で聴く</button>
           <button id="stop" disabled>■ 停止</button>
+          <button id="play-dry" disabled>原音を聴く</button>
+          <button id="play-wet" disabled>▶ モデルで再生</button>
         </div>
+        <section id="granular-optin-controls" class="player-tune" aria-label="速度と音程" hidden>
+          <div class="player-tune-grid">
+            <div class="player-tune-control">
+              <div class="player-tune-heading"><label for="granular-speed">速度</label><output id="granular-speed-output" for="granular-speed">1.00×</output></div>
+              <div class="player-tune-inputs">
+                <input id="granular-speed" type="range" min="-8" max="8" step=".01" value="1" aria-label="再生速度">
+                <input id="granular-speed-value" type="number" min="-8" max="8" step="any" value="1" inputmode="decimal" aria-label="再生速度の精密入力（倍）">
+              </div>
+            </div>
+            <div class="player-tune-control">
+              <div class="player-tune-heading"><label for="granular-pitch">音程</label><output id="granular-pitch-output" for="granular-pitch">0.0 半音</output></div>
+              <div class="player-tune-inputs">
+                <input id="granular-pitch" type="range" min="-12" max="12" step=".1" value="0" aria-label="音程の変更">
+                <input id="granular-pitch-value" type="number" min="-12" max="12" step="any" value="0" inputmode="decimal" aria-label="音程の精密入力（半音）">
+              </div>
+            </div>
+          </div>
+          <details class="player-tune-advanced">
+            <summary>再生の詳細</summary>
+            <label class="player-rail-setting" for="granular-range">速度レール表示幅
+              <select id="granular-range"><option value="1">±1倍</option><option value="2">±2倍</option><option value="4">±4倍</option><option value="8" selected>±8倍</option></select>
+            </label>
+            <p class="lab-note player-quality-note">速度−8〜+8倍、0倍も発音。音程±12半音。極短ループのクリックや実機音質は検証中です。</p>
+          </details>
+          <p id="granular-rail-note" class="lab-note" aria-live="polite"></p>
+          <p id="granular-optin-status" class="lab-note player-processing-status" role="status" aria-live="polite">再生時に処理条件を適用します。</p>
+        </section>
+        <section class="player-loop" id="player-loop-controls" aria-label="A/B区間のループ" hidden>
+          <div class="player-loop-top">
+            <strong>A–B区間</strong>
+            <label for="player-loop-enabled"><input id="player-loop-enabled" type="checkbox" checked> ループ</label>
+          </div>
+          <details class="player-loop-precision">
+            <summary>区間の端点を数値で編集</summary>
+            <div class="player-loop-fields">
+              <label for="player-loop-a">開始 A（元音源サンプル）
+                <input id="player-loop-a" type="number" min="0" step="1" value="0" inputmode="numeric">
+                <button id="player-loop-a-now" type="button">現在位置をAに</button>
+              </label>
+              <label for="player-loop-b">終端 B（元音源サンプル・含まない）
+                <input id="player-loop-b" type="number" min="1" step="1" value="1" inputmode="numeric">
+                <button id="player-loop-b-now" type="button">現在位置をBに</button>
+              </label>
+            </div>
+          </details>
+          <p id="player-loop-hint" class="lab-note" aria-live="polite">波形上のA・Bをドラッグして区間を変更できます。</p>
+        </section>
+        
         <audio id="background-output" playsinline preload="none" aria-hidden="true" hidden></audio>
       </section>
 
+      <details class="model-legacy-fold"><summary>旧Frequency Warpの変換・解析設定</summary>
       <section class="panel quick-panel" aria-labelledby="control-title">
         <div class="section-header"><div><p class="eyebrow">PERFORMANCE</p><h2 id="control-title">変換する</h2></div><span class="micro-hint">動かすと音に反映</span></div>
         <details class="panel-fold" open><summary>変換パラメータ・追加加工</summary>
@@ -234,6 +247,7 @@
         </div></details>
         </details>
       </section>
+      </details>
       <section class="panel sine-monitor" aria-labelledby="sine-heading">
         <details class="panel-fold" open><summary>補助音</summary>
         <div class="section-header"><div><p class="eyebrow">AUXILIARY TONE</p><h2 id="sine-heading">補助音</h2></div>
