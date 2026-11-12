@@ -322,7 +322,7 @@ test("native Chrome content-audio stereo output matches independent source-time 
       const grain=await createSourcePCMBridge({
         ctx,sourceChannels:source,sourceSampleRate:sourceRate,
         processingMode:"granular",pitchSemitones:0,
-        speed:0,startFrame:500000,loopEnabled:false,
+        speed:0,startFrame:280000,loopEnabled:false,
         onEvent:e=>grainEvents.push(e)
       });
       grain.connect(probe);
@@ -341,7 +341,7 @@ test("native Chrome content-audio stereo output matches independent source-time 
         for(const pitch of [0,7]){
           const speedAck=await grain.setSpeed(speed);
           const pitchAck=await grain.setPitch(pitch);
-          const seekAck=await grain.seek(500000);
+          const seekAck=await grain.seek(280000);
           await measure("arm",2048);
           await sleep(105);
           const observed=await measure("snapshot");
@@ -468,13 +468,14 @@ test("native Chrome content-audio stereo output matches independent source-time 
       "render observation must not precede command acceptance");
     assert.ok(evidence.recovery.commandToRenderReceiptMs<1000,
       "render-thread application must not stall for an entire second");
+    console.log("R3_GRANULAR_EVIDENCE "+JSON.stringify(evidence.granular));
     assert.deepEqual(evidence.granular.events,[]);
     assert.equal(evidence.granular.precisionApplied,7.1234,
       "canonical pitch input must not be rounded to display precision");
     assert.equal(evidence.granular.cases.length,6);
     for(const c of evidence.granular.cases){
       assert.equal(c.processingMode,"granular");
-      assert.equal(c.seekFrame,500000);
+      assert.equal(c.seekFrame,280000);
       assert.equal(c.pitchAck,c.pitch);
       assert.equal(c.channels.length,2);
       assert.ok(c.channels.every(ch=>
@@ -488,7 +489,7 @@ test("native Chrome content-audio stereo output matches independent source-time 
       if(c.pitch===0)
         assert.ok(c.spectral.fundamental>1.1*c.spectral.shifted,c);
       else assert.ok(c.spectral.shifted>1.25*c.spectral.fundamental,c);
-      if(c.speed===0)assert.equal(c.sourceFrameAfter,500000,
+      if(c.speed===0)assert.equal(c.sourceFrameAfter,280000,
         "0x source time must remain frozen while audio remains non-DC");
     }
     // Host starvation beyond a finite cache is a documented limit;
