@@ -24,6 +24,9 @@ test("live Audio Lab opt-in original playback uses a persistent PCM node across 
     await page.goto(`http://127.0.0.1:${port}/?pcmTransport=1`,{
       waitUntil:"domcontentloaded",timeout:20000
     });
+    // The actual module and input listeners must be ready before file change.
+    await page.waitForFunction(()=>document.documentElement.dataset.fwBoot==="ready",
+      {timeout:20000});
     // The same input path as the end user, no test-only audio engine hook.
     await page.evaluate(()=>{
       const sampleRate=48000,count=sampleRate*2;
