@@ -1,0 +1,113 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import {spawn} from "node:child_process";
+import path from "node:path";
+import puppeteer from "puppeteer-core";
+
+const recording=path.resolve("web-demo/test-fixtures/meta-piano-a0-cc0-3s-48khz.wav");
+
+test("R4 default page: play recorded song, set precise A/B and speed/pitch, switch tabs without reset",async()=>{
+  const port=18771;
+  const server=spawn("python3",["-m","http.server",String(port),"--bind","127.0.0.1"],{
+    cwd:path.resolve("_site"),stdio:"ignore"
+  });
+  let browser;
+  try{
+    browser=await puppeteer.launch({
+      executablePath:process.env.CHROME_BIN||"/usr/bin/google-chrome",
+      headless:true,args:["--no-sandbox","--disable-dev-shm-usage",
+        "--autoplay-policy=no-user-gesture-required"]
+    });
+    const page=await browser.newPage(),errors=[];
+    page.on("pageerror",err=>errors.push(err.message));
+    await page.goto("http://127.0.0.1:"+port+"/",{waitUntil:"domcontentloaded",timeout:20000});
+    await page.waitForFunction(()=>document.documentElement.dataset.fwBoot==="ready",{timeout:20000});
+    assert.equal(await page.$eval("body",el=>el.dataset.mainTab),"player");
+    assert.equal(await page.$eval("#main-tab-player",el=>el.getAttribute("aria-selected")),"true");
+    assert.equal(await page.$eval("#granular-optin-controls",el=>el.hidden),false);
+    assert.equal(await page.$eval("#audio-lab",el=>getComputedStyle(el).display),"none");
+    await (await page.$("#audio-file")).uploadFile(recording);
+    await page.waitForFunction(()=>document.querySelector("#file-meta")?.textContent
+      .includes("meta-piano-a0-cc0-3s-48khz.wav · 3.0秒"),{timeout:20000});
+    await page.waitForSelector("#play-main:not([disabled])",{timeout:10000});
+    assert.equal(await page.$eval("#player-loop-controls",el=>el.hidden),false);
+    const sourceRate=Number((await page.$eval("#file-meta",el=>el.textContent)).match(/(\d+)Hz/)?.[1]);
+    assert.ok(sourceRate>=8000);
+    await page.evaluate(()=>{
+      const set=(id,value)=>{
+        const el=document.getElementById(id);
+        el.value=value;el.dispatchEvent(new Event("change",{bubbles:true}));
+      };
+      set("granular-speed-value","0");
+      set("granular-pitch-value","7.1234");
+      set("player-loop-a","1000");
+      set("player-loop-b","3000");
+    });
+    assert.equal(await page.$eval("#player-loop-a",el=>el.value),"1000");
+    assert.equal(await page.$eval("#player-loop-b",el=>el.value),"3000");
+    assert.equal(await page.$eval("#granular-pitch-value",el=>el.value),"7.1234");
+    await page.click("#play-main");
+    await page.waitForFunction(()=>document.querySelector("#rt-telemetry")?.dataset.pcmTransport
+      ==="granular-experimental",{timeout:20000});
+    await page.waitForFunction(()=>document.querySelector("#granular-optin-status")
+      ?.dataset.renderPitch==="7.1234"&&document.querySelector("#granular-optin-status")
+      ?.dataset.renderRunning==="true",{timeout:20000});
+    const starts=await page.$eval("#rt-telemetry",el=>Number(el.dataset.pcmNodeStarts));
+    assert.equal(starts,1);
+    await page.evaluate(()=>{
+      const a=document.getElementById("player-loop-a");
+      a.value="8000";a.dispatchEvent(new Event("change",{bubbles:true}));
+      const b=document.getElementById("player-loop-b");
+      b.value="12000";b.dispatchEvent(new Event("change",{bubbles:true}));
+    });
+    await page.waitForFunction(()=>document.querySelector("#player-loop-hint")
+      ?.textContent.includes("反映が完了"),{timeout:20000});
+    assert.equal(await page.$eval("#player-loop-a",el=>el.value),"8000");
+    assert.equal(await page.$eval("#player-loop-b",el=>el.value),"12000");
+    await page.click("#main-tab-model");
+    assert.equal(await page.$eval("body",el=>el.dataset.mainTab),"model");
+    assert.notEqual(await page.$eval("#audio-lab",el=>getComputedStyle(el).display),"none");
+    assert.equal(await page.$eval("#lab-model",el=>el.value),"live");
+    await page.click("#main-tab-player");
+    assert.equal(await page.$eval("body",el=>el.dataset.mainTab),"player");
+    assert.equal(await page.$eval("#granular-speed-value",el=>el.value),"0");
+    assert.equal(await page.$eval("#granular-pitch-value",el=>el.value),"7.1234");
+    assert.equal(await page.$eval("#player-loop-a",el=>el.value),"8000");
+    assert.equal(await page.$eval("#player-loop-b",el=>el.value),"12000");
+    assert.equal(await page.$eval("#rt-telemetry",el=>Number(el.dataset.pcmNodeStarts)),starts,
+      "switching tabs may not recreate the Worklet");
+    await page.evaluate(()=>{
+      const speed=document.getElementById("granular-speed-value");
+      speed.value="-1.125";
+      speed.dispatchEvent(new Event("change",{bubbles:true}));
+      document.getElementById("player-loop-enabled").click();
+    });
+    await page.waitForFunction(()=>document.querySelector("#player-loop-hint")
+      ?.textContent.includes("反映が完了"),{timeout:20000});
+    assert.equal(await page.$eval("#granular-speed-value",el=>el.value),"-1.125");
+    assert.equal(await page.$eval("#player-loop-enabled",el=>el.checked),false);
+    assert.equal(await page.$eval("#rt-telemetry",el=>Number(el.dataset.pcmNodeStarts)),starts);
+    await page.click("#stop");
+    await page.waitForFunction(()=>!document.querySelector("#rt-telemetry")
+      ?.dataset.pcmTransport,{timeout:20000});
+    // The original button remains a separate audition path, not an alias
+    // for granular pitch-shifted output on the new default home page.
+    await page.click("#play-dry");
+    await page.waitForFunction(()=>document.querySelector("#rt-indicator")
+      ?.textContent.includes("原音再生中"),{timeout:20000});
+    assert.notEqual(await page.$eval("#rt-telemetry",
+      el=>el.dataset.pcmTransport||""),"granular-experimental");
+    await page.click("#stop");
+    assert.deepEqual(errors,[]);
+    console.log("R4_DEFAULT_PLAYER_REAL_RECORDING "+JSON.stringify({
+      source:"Meta Open Sound recorded piano A0 CC0",decodedRate:sourceRate,
+      mainTab:"player",controls:"±8/0 exact typed speed; independent ±12 pitch",
+      loop:"source sample A/B 8000..12000 and OFF while playing",
+      tabs:"model and player without reset or node reinit",
+      rawRoute:"preserved as separate original playback",nodeStarts:starts,
+      note:"browser functional route; no iPhone / subjective audio fidelity proof"
+    }));
+  }finally{
+    await browser?.close();server.kill();
+  }
+});
