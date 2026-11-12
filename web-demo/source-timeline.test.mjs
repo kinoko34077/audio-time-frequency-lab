@@ -89,8 +89,13 @@ test("no-op commands and render clock never send a new revision",()=>{
   t.setLoopBounds(16,127);assert.equal(t.state.revision,2);
   t.setLoopEnabled(true);assert.equal(t.state.revision,3);
   t.seek(500);assert.equal(t.state.sourceFrame,16);
+  // The effective position was already 16, so this seek is a no-op.
+  assert.equal(t.state.revision,3);
+  t.seek(50);assert.equal(t.state.sourceFrame,50);
   assert.equal(t.state.revision,4);
-  t.seek(500);assert.equal(t.state.revision,4);
+  t.seek(500);assert.equal(t.state.sourceFrame,16);
+  assert.equal(t.state.revision,5);
+  t.seek(500);assert.equal(t.state.revision,5);
 });
 
 test("source/sample rate conversion and malformed inputs",()=>{
