@@ -52,12 +52,23 @@ test('full Chrome: inherited Rust AudioWorklet live independent speed/pitch UI',
   await page.waitForFunction(()=>document.querySelector('#lab-model').value==='live');
   await page.$eval('#lab-speed',e=>{e.value='1.5';e.dispatchEvent(new Event('change',{bubbles:true}));});
   await page.$eval('#lab-pitch',e=>{e.value='5';e.dispatchEvent(new Event('change',{bubbles:true}));});
+  const beforeWet=await page.evaluate(()=>{
+    const wet=document.querySelector('#play-wet'),main=document.querySelector('#play-main');
+    window.__wetNativeClicks=0;wet.addEventListener('click',()=>window.__wetNativeClicks++);
+    return {wetDisabled:wet.disabled,mainDisabled:main.disabled,
+      wetDisplay:getComputedStyle(wet).display,tab:document.body.dataset.mainTab,
+      file:document.querySelector('#file-meta')?.textContent,
+      labModel:document.querySelector('#lab-model')?.value,
+      individual:document.querySelector('#lab-individual-periods')?.checked,
+      status:document.querySelector('#status')?.textContent};
+  });
+  assert.equal(beforeWet.wetDisabled,false,'Rust wet play must remain enabled: '+JSON.stringify(beforeWet));
   await (await page.$('#play-wet')).click();
   try{
     await page.waitForFunction(()=>document.querySelector('#rt-indicator')?.textContent.includes('稼働中 · Rust/WASM AudioWorklet'),{timeout:20000});
   }catch(error){
     const info=await page.evaluate(()=>({status:document.querySelector('#status')?.textContent,indicator:document.querySelector('#rt-indicator')?.textContent,lab:document.querySelector('#lab-status')?.textContent}));
-    throw Error('Rust Worklet failed: '+JSON.stringify(info)+' / '+error.message);
+    throw Error('Rust Worklet failed: '+JSON.stringify({beforeWet,clicks:await page.evaluate(()=>window.__wetNativeClicks),...info})+' / '+error.message);
   }
   assert.equal(await page.$eval('#lab-speed',e=>e.value),'1.5');
   assert.equal(await page.$eval('#lab-pitch',e=>e.value),'5');
