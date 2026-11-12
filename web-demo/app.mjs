@@ -24,11 +24,22 @@ const MAX_PREVIEW_SECONDS=600;
 const PCM_EXPERIMENT=new URLSearchParams(location.search).get("pcmTransport");
 const RAW_PCM_EXPERIMENT=PCM_EXPERIMENT==="1"||PCM_EXPERIMENT==="granular";
 const GRANULAR_EXPERIMENT=PCM_EXPERIMENT==="granular";
+// R4 main playback is a named mode, NOT a stealth rewrite of original audio.
+// The existing ?pcmTransport=1 (raw) and ?pcmTransport=granular (prototype)
+// remain compatible, and old wet/Rust/models are still explicitly selectable.
+const PLAYER_GRANULAR_AVAILABLE=true;
 const granular={speed:1,pitch:0,railMax:8};
+const ab={a:0,b:0,enabled:true};
+function mainTab(){
+  return document.body.dataset.mainTab==="model"?"model":"player";
+}
+function preferredWaveMode(){
+  return mainTab()==="player"?"player":GRANULAR_EXPERIMENT?"dry":"wet";
+}
 let graphMax=2000;
 let graphAlphaBeforeZoom=0;
 const controls={
-  dry:$("#play-dry"),wet:$("#play-wet"),stop:$("#stop"),
+  main:$("#play-main"),dry:$("#play-dry"),wet:$("#play-wet"),stop:$("#stop"),
   render:$("#render"),download:$("#download")
 };
 const dualControls={};
@@ -113,7 +124,7 @@ const duration=()=>state.dry?.length?state.dry[0].length/state.decoded.sampleRat
 // #36 R3: thin UI over source-timeline + existing granular bridge contracts.
 // Presentation rounding and rail visibility must not rewrite canonical values.
 function refreshGranular(){
-  if(!GRANULAR_EXPERIMENT)return;
+  if(!PLAYER_GRANULAR_AVAILABLE)return;
   const s=$("#granular-speed"),p=$("#granular-pitch");
   const st=$("#granular-speed-value"),pt=$("#granular-pitch-value");
   s.min=String(-granular.railMax);s.max=String(granular.railMax);
@@ -156,10 +167,12 @@ function editGranular(kind,raw){
       message("実験音声設定の反映失敗: "+error.message,"error");
     });
 }
-if(GRANULAR_EXPERIMENT){
+if(PLAYER_GRANULAR_AVAILABLE){
   $("#granular-optin-controls").hidden=false;
-  controls.dry.textContent="▶ 粒状音程（実験）";
-  controls.dry.title="独立音程・±8/0倍再生。音質は未受入。";
+  if(GRANULAR_EXPERIMENT){
+    controls.dry.textContent="▶ 粒状音程（実験）";
+    controls.dry.title="以前の実験ルートと同一の独立音程再生。";
+  }
   for(const k of ["speed","pitch"]){
     const slider=$("#granular-"+k),input=$("#granular-"+k+"-value");
     slider.addEventListener("input",()=>editGranular(k,slider.value));
@@ -570,7 +583,7 @@ function playheadFromPointer(e,startIfStopped=true){
     // A drag beginning while stopped launches exactly one player. Moves that
     // occur during async AudioWorklet registration merely replace state.seek.
     const launchAt=state.seek;
-    void play(GRANULAR_EXPERIMENT?"dry":"wet",launchAt)
+    void play(preferredWaveMode(),launchAt)
       .catch(err=>message("再生失敗: "+err.message,"error"));
   }
   refreshStatusSeek();
@@ -586,13 +599,13 @@ const waveSurface=$("#wave");
 waveSurface.addEventListener("pointerdown",e=>{
   if(e.pointerType==="mouse"&&e.button!==0)return;
   if(activeWavePointer!==null)return;
-  if(GRANULAR_EXPERIMENT&&e.isTrusted){
+  if((GRANULAR_EXPERIMENT||mainTab()==="player")&&e.isTrusted){
     activeWavePointer=e.pointerId;
     try{waveSurface.setPointerCapture(e.pointerId);}catch{}
   }
   playheadFromPointer(e);
 });
-if(GRANULAR_EXPERIMENT){
+if(PLAYER_GRANULAR_AVAILABLE){
   waveSurface.style.touchAction="none";
   $("#wave-hint").textContent="波形を押したまま動かしてスクラブ";
   waveSurface.setAttribute("aria-label",
@@ -617,7 +630,7 @@ if(GRANULAR_EXPERIMENT){
 $("#wave").addEventListener("keydown",e=>{
   if(!state.dry)return;
   if(e.key==="Enter"||e.key===" "){
-    e.preventDefault();play(GRANULAR_EXPERIMENT?"dry":"wet",state.seek).catch(err=>message(err.message,"error"));
+    e.preventDefault();play(preferredWaveMode(),state.seek).catch(err=>message(err.message,"error"));
   }else if(e.key==="ArrowLeft"||e.key==="ArrowRight"){
     e.preventDefault();const diff=e.key==="ArrowLeft"?-2:2;
     const pos=clamp(playPosition()+diff,0,Math.max(0,duration()-.01));
@@ -848,7 +861,7 @@ async function stop(){
     $("#rt-telemetry").textContent="";
     delete $("#rt-telemetry").dataset.pcmTransport;
     indicator("停止中 · PCM実験経路を終了");
-    if(GRANULAR_EXPERIMENT)$("#granular-optin-status").textContent="停止中・設定保持";
+    if(p.granular)$("#granular-optin-status").textContent="停止中・設定保持";
     refreshStatusSeek();return;
   }
   try{p.source?.stop();}catch{}
@@ -1489,6 +1502,7 @@ for(const id of ["crusher-enabled","crusher-bits","crusher-hold"]){
   });
 }
 
+controls.main.addEventListener("click",()=>play("player"));
 controls.dry.addEventListener("click",()=>play("dry"));
 controls.wet.addEventListener("click",()=>play("wet"));
 controls.stop.addEventListener("click",()=>stop());
@@ -1563,7 +1577,7 @@ async function load(file){
     state.fileMeta=file.name+" · "+duration().toFixed(1)+"秒 · "+data.sampleRate+"Hz · "+count+"ch";
     $("#file-meta").textContent=state.fileMeta;
     labels("high");drawCurve();drawAudio();refreshStatusSeek();
-    controls.dry.disabled=false;controls.wet.disabled=false;
+    controls.main.disabled=false;controls.dry.disabled=false;controls.wet.disabled=false;
     controls.stop.disabled=true;
     controls.render.disabled=false;controls.download.disabled=true;
     $("#progress").value=0;
