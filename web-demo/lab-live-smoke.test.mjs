@@ -52,10 +52,15 @@ test('full Chrome: inherited Rust AudioWorklet live independent speed/pitch UI',
   await page.waitForFunction(()=>document.querySelector('#lab-model').value==='live');
   await page.$eval('#lab-speed',e=>{e.value='1.5';e.dispatchEvent(new Event('change',{bubbles:true}));});
   await page.$eval('#lab-pitch',e=>{e.value='5';e.dispatchEvent(new Event('change',{bubbles:true}));});
+  await page.$eval('#play-wet',el=>el.scrollIntoView({block:'center',inline:'nearest'}));
   const beforeWet=await page.evaluate(()=>{
     const wet=document.querySelector('#play-wet'),main=document.querySelector('#play-main');
     window.__wetNativeClicks=0;wet.addEventListener('click',()=>window.__wetNativeClicks++);
-    return {wetDisabled:wet.disabled,mainDisabled:main.disabled,
+    const rect=wet.getBoundingClientRect(),cx=rect.left+rect.width/2,cy=rect.top+rect.height/2;
+    const hit=document.elementFromPoint(cx,cy);
+    return {wetCenter:{x:Math.round(cx),y:Math.round(cy)},hit:{id:hit?.id,
+      tag:hit?.tagName,cls:String(hit?.className||'').slice(0,110)},
+      wetDisabled:wet.disabled,mainDisabled:main.disabled,
       wetDisplay:getComputedStyle(wet).display,tab:document.body.dataset.mainTab,
       file:document.querySelector('#file-meta')?.textContent,
       labModel:document.querySelector('#lab-model')?.value,
