@@ -49,8 +49,9 @@ export function createSourcePCMRenderer({
       missingFrames,renderedFrames,windowCount:windows.length
     });},
     hasFrame(index){return Number.isInteger(index)&&!!find(index);},
-    installWindow(start,channels){
-      if(!Number.isSafeInteger(start)||start<0||
+    installWindow(start,channels,pin=null){
+      if((pin!==null&&pin!=="A"&&pin!=="B")||
+         !Number.isSafeInteger(start)||start<0||
          !Array.isArray(channels)||channels.length!==channelCount||
          channels.some(ch=>!(ch instanceof Float32Array))||
          channels[0].length<1||channels[0].length>maxWindowFrames||
@@ -58,12 +59,17 @@ export function createSourcePCMRenderer({
          start+channels[0].length>sourceFrames)
         throw RangeError("invalid PCM window");
       const end=start+channels[0].length;
-      // Replace an old covering range with the newly transferred snapshot.
+      // Keep one endpoint cache for A and one for B, plus a moving window.
+      // Evict unpinned windows first. Pin labels are replaced atomically.
       for(let i=windows.length-1;i>=0;i--){
-        if(windows[i].start===start)windows.splice(i,1);
+        if(windows[i].start===start||pin!==null&&windows[i].pin===pin)
+          windows.splice(i,1);
       }
-      windows.push({start,end,channels});
-      while(windows.length>maxWindows)windows.shift();
+      windows.push({start,end,channels,pin});
+      while(windows.length>maxWindows){
+        const victim=windows.findIndex(w=>w.pin===null);
+        windows.splice(victim<0?0:victim,1);
+      }
       return windows.length;
     },
     /**
