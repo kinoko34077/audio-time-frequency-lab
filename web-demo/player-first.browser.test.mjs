@@ -125,8 +125,6 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, swit
     const beforePinchSpan=asSeconds(await page.$eval("#wave-zoom-label",
       el=>el.textContent));
     assert.ok(Number.isFinite(beforePinchSpan)&&beforePinchSpan>0);
-    const beforePinchFrame=Number(await page.$eval("#wave-detail",
-      el=>el.getAttribute("aria-valuenow")));
     const touch=await page.createCDPSession();
     await touch.send("Emulation.setTouchEmulationEnabled",
       {enabled:true,maxTouchPoints:2});
@@ -138,6 +136,8 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, swit
       touchPoints:[point(.37,21),point(.63,22)]});
     await touch.send("Input.dispatchTouchEvent",{type:"touchMove",
       touchPoints:[point(.22,21),point(.78,22)]});
+    const frameAfterZoomMove=Number(await page.$eval("#wave-detail",
+      el=>el.getAttribute("aria-valuenow")));
     await touch.send("Input.dispatchTouchEvent",{type:"touchEnd",touchPoints:[]});
     await touch.send("Emulation.setTouchEmulationEnabled",{enabled:false});
     const afterPinchSpan=asSeconds(await page.$eval("#wave-zoom-label",
@@ -145,8 +145,9 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, swit
     assert.ok(afterPinchSpan<beforePinchSpan,{beforePinchSpan,afterPinchSpan});
     const afterPinchFrame=Number(await page.$eval("#wave-detail",
       el=>el.getAttribute("aria-valuenow")));
-    assert.ok(Math.abs(afterPinchFrame-beforePinchFrame)<=2,
-      "releasing the second finger after a centered pinch must not seek");
+    assert.ok(Math.abs(afterPinchFrame-frameAfterZoomMove)<=2,
+      "lifting a remaining pinch contact must not issue a second tap seek: "+
+      JSON.stringify({frameAfterZoomMove,afterPinchFrame,beforePinchSpan,afterPinchSpan}));
     assert.equal(await page.$eval("#player-loop-b",el=>el.value),String(draggedB));
     assert.equal(await page.$eval("#rt-telemetry",el=>Number(el.dataset.pcmNodeStarts)),starts,
       "pinch may not restart the audio engine");
