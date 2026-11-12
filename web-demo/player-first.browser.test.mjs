@@ -56,9 +56,10 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, swit
     assert.equal(starts,1);
     await page.evaluate(()=>{
       const a=document.getElementById("player-loop-a");
-      a.value="8000";a.dispatchEvent(new Event("change",{bubbles:true}));
+      // Grow the interval's end first; a transient A>=B is invalid by contract.
       const b=document.getElementById("player-loop-b");
       b.value="12000";b.dispatchEvent(new Event("change",{bubbles:true}));
+      a.value="8000";a.dispatchEvent(new Event("change",{bubbles:true}));
     });
     await page.waitForFunction(()=>document.querySelector("#player-loop-hint")
       ?.textContent.includes("反映が完了"),{timeout:20000});
