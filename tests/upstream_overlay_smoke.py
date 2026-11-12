@@ -44,6 +44,13 @@ try:
       assert not page.locator(".workspace-right").is_visible()
       assert not page.locator("#settings-open").is_visible()
       assert page.locator("#lab-render").count()==0
+      # R4 default is the simple player; the inherited research workbench
+      # remains reachable through the explicit processing-model tab.
+      page.locator("#main-tab-model").click()
+      assert page.locator("#audio-lab").is_visible()
+      assert page.locator(".quick-panel").is_visible()
+      assert page.locator("#settings-open").is_visible()
+
       page.locator("#lab-short").evaluate("(e)=>{e.value='8';e.dispatchEvent(new Event('change',{bubbles:true}));}")
       page.locator("#lab-long").evaluate("(e)=>{e.value='10';e.dispatchEvent(new Event('change',{bubbles:true}));}")
       page.locator("#lab-windows").evaluate("(e)=>{e.value='2';e.dispatchEvent(new Event('change',{bubbles:true}));}")
