@@ -63,6 +63,7 @@ jobs:
         run: |
           node --test web-demo/player-first.browser.test.mjs
       - name: Native Chrome UI visual audit with desktop and mobile screenshots
+        if: always()
         run: |
           node --test web-demo/player-visual.browser.test.mjs
       - name: Preserve UI screenshots for human visual review
