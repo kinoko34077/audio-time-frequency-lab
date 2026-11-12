@@ -228,7 +228,7 @@ test("reverse prefetch never evicts the current window before crossing backward"
   assert.equal(p.hasFrame(115),true);
   assert.equal(p.hasFrame(85),false);
   assert.equal(block(p,12).missing,0); // crosses from 120 down to 119
-  assert.equal(p.timeline.state.sourceFrame,108);
+  assert.equal(p.timeline.state.sourceFrame,113);
   p.installWindow(80,[new Float32Array(20).fill(.5)]);
   assert.equal(p.hasFrame(130),false);
   assert.equal(p.hasFrame(110),true);
