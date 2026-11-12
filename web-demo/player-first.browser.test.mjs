@@ -67,8 +67,11 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, swit
     assert.equal(await page.$eval("#player-loop-b",el=>el.value),"12000");
     // Voice Memos / AudioStretch interaction: a stationary central head,
     // a separately navigable overview, and zoomed sound under the finger.
-    assert.equal(await page.$eval("#wave-center-head",el=>getComputedStyle(el).left),
-      "50%"); // DOM center line is CSS-owned and cannot drift with playback.
+    const centerAlignment=await page.$eval("#wave-center-head",el=>{
+      const head=el.getBoundingClientRect(),wrap=el.parentElement.getBoundingClientRect();
+      return Math.abs(head.left+head.width/2-(wrap.left+wrap.width/2));
+    });
+    assert.ok(centerAlignment<=2,"central playhead must remain stationary and centered");
     assert.equal(await page.$eval("#wave-detail",el=>getComputedStyle(el).touchAction),"none");
     const wave=await page.$eval("#wave-detail",el=>{
       const r=el.getBoundingClientRect();
