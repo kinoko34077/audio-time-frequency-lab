@@ -312,7 +312,65 @@ test("native Chrome content-audio stereo output matches independent source-time 
       await long.seek(600000);
       const recovery=await observe(600000,1,null,80);
       const recoveredMiss=long.latest?.missingFrames||0;
-      await long.pause();long.dispose();probe.disconnect();await ctx.close();
+      await long.pause();long.dispose();
+
+      // R3: do not create another fixture or a constant-PCM preflight.
+      // Use the SAME content-rich stereo source and post-render probe to
+      // verify experimental signed-time, independent pitch and zero-speed
+      // audible synthesis in the REAL Chrome AudioWorklet.
+      const grainEvents=[];
+      const grain=await createSourcePCMBridge({
+        ctx,sourceChannels:source,sourceSampleRate:sourceRate,
+        processingMode:"granular",pitchSemitones:0,
+        speed:0,startFrame:280000,loopEnabled:false,
+        onEvent:e=>grainEvents.push(e)
+      });
+      grain.connect(probe);
+      await grain.play();
+      const spectralEnergy=(samples,hz)=>{
+        let re=0,im=0;
+        for(let i=0;i<samples.length;i++){
+          const theta=2*Math.PI*hz*i/ctx.sampleRate;
+          re+=samples[i]*Math.cos(theta);
+          im+=samples[i]*Math.sin(theta);
+        }
+        return Math.hypot(re,im);
+      };
+      const granularCases=[];
+      for(const speed of [-8,0,8]){
+        for(const pitch of [0,7]){
+          const speedAck=await grain.setSpeed(speed);
+          const pitchAck=await grain.setPitch(pitch);
+          const seekAck=await grain.seek(280000);
+          await measure("arm",2048);
+          await sleep(105);
+          const observed=await measure("snapshot");
+          const first=observed.channels[0].captured;
+          const fundamental=spectralEnergy(first,174.61);
+          const shifted=spectralEnergy(first,174.61*2**(7/12));
+          granularCases.push({speed,pitch,processingMode:grain.processingMode,
+            seekFrame:seekAck.sourceFrame,
+            sourceFrameAfter:grain.latest?.sourceFrame,
+            pitchAck:pitchAck.pitchSemitones,
+            pitchRevision:pitchAck.pitchRevision,
+            sourceMisses:grain.latest?.missingFrames,
+            channels:observed.channels.map(ch=>({
+              frames:ch.frames,rms:ch.rms,maxStep:ch.maxStep,
+              maxZeroRun:ch.maxZeroRun,
+              captured:ch.captured.length
+            })),
+            spectral:{fundamental,shifted},
+            recentRender:grainEvents.filter(x=>x.type==="render-applied")
+              .slice(-1).map(x=>({processingMode:x.processingMode,
+                pitchRevision:x.pitchRevision,
+                missingFramesInBlock:x.missingFramesInBlock}))
+          });
+        }
+      }
+      const precisionAck=await grain.setPitch(7.1234);
+      const precisionApplied=precisionAck.pitchSemitones;
+      await grain.pause();grain.dispose();
+      probe.disconnect();await ctx.close();
 
       return {sourceRate,outputRate:48000,fixture:{
         frames,channels:2,silence:[145000,146500],
@@ -336,7 +394,11 @@ test("native Chrome content-audio stereo output matches independent source-time 
         firstRenderMissing:applied.missingFramesInBlock,
         firstRenderRevision:applied.revision,
         ackRevision:ack.revision,
-        cumulativeMissing:recoveredMiss},errors};
+        cumulativeMissing:recoveredMiss},
+        granular:{cases:granularCases,precisionApplied,
+          events:grainEvents.filter(e=>e.type==="fatal-error"||
+            e.type==="error").map(e=>({type:e.type,message:e.message}))},
+        errors};
     });
     assert.deepEqual(errors,[]);
     assert.deepEqual(evidence.errors,[]);
@@ -406,6 +468,30 @@ test("native Chrome content-audio stereo output matches independent source-time 
       "render observation must not precede command acceptance");
     assert.ok(evidence.recovery.commandToRenderReceiptMs<1000,
       "render-thread application must not stall for an entire second");
+    console.log("R3_GRANULAR_EVIDENCE "+JSON.stringify(evidence.granular));
+    assert.deepEqual(evidence.granular.events,[]);
+    assert.equal(evidence.granular.precisionApplied,7.1234,
+      "canonical pitch input must not be rounded to display precision");
+    assert.equal(evidence.granular.cases.length,6);
+    for(const c of evidence.granular.cases){
+      assert.equal(c.processingMode,"granular");
+      assert.equal(c.seekFrame,280000);
+      assert.equal(c.pitchAck,c.pitch);
+      assert.equal(c.channels.length,2);
+      assert.ok(c.channels.every(ch=>
+        ch.frames>=2048&&ch.rms>.012&&ch.maxStep>.00005&&
+        ch.maxZeroRun<128&&ch.captured===2048),c);
+      assert.ok(c.recentRender.some(e=>
+        e.processingMode==="granular"&&
+        e.pitchRevision===c.pitchRevision),c);
+      // A content-bearing chord's fundamental must follow pitch, not
+      // signed source speed. Source speed=0 must emit evolving audio.
+      if(c.pitch===0)
+        assert.ok(c.spectral.fundamental>1.1*c.spectral.shifted,c);
+      else assert.ok(c.spectral.shifted>1.25*c.spectral.fundamental,c);
+      if(c.speed===0)assert.equal(c.sourceFrameAfter,280000,
+        "0x source time must remain frozen while audio remains non-DC");
+    }
     // Host starvation beyond a finite cache is a documented limit;
     // measure, do not demand impossible arbitrary-duration gaplessness.
     console.log("R2_CONTENT_AUDIO_EVIDENCE "+JSON.stringify(evidence));

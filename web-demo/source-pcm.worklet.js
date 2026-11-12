@@ -1,15 +1,26 @@
-/** #36 R2 experimental raw-source AudioWorklet (NOT the player default).
- * Sound comes from bounded Float32Array source windows, not a 1.5s Worker.
- * Negative speed changes pitch; speed zero holds a PCM sample (DC).
- * A later DSP stage must provide independent musical pitch/frozen-time tone.
+/** #36 R2/R3 experimental AudioWorklet (NOT the default player).
+ * Raw mode: bounded source frames; negative speed shifts pitch and 0x is DC.
+ * Granular mode: provisional independent grain pitch and audible 0x;
+ * formal music/transient/CPU/mobile quality acceptance is still OPEN.
  */
 import {createSourcePCMRenderer} from "./source-pcm-renderer.mjs";
+import {createGranularTimePitch} from "./source-granular.mjs";
 
 class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
   constructor(options){
     super();
     const props=options.processorOptions||{};
     this.renderer=createSourcePCMRenderer({...props,outputSampleRate:sampleRate});
+    const mode=props.processingMode??"raw";
+    if(mode!=="raw"&&mode!=="granular")
+      throw RangeError("unknown PCM processing mode");
+    this.processingMode=mode;
+    this.granular=mode==="granular"?createGranularTimePitch({
+      sourceSampleRate:props.sourceSampleRate,
+      outputSampleRate:sampleRate,
+      channelCount:props.channelCount,
+      pitchSemitones:props.pitchSemitones??0
+    }):null;
     this.running=false;
     this.disposed=false;
     this.blocks=0;
@@ -42,11 +53,15 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
           // changing source time, without a render quantum between commands.
           this.renderer.installWindow(m.start,m.channels,null,"seek");
           const st=this.renderer.timeline.seek(m.frame);
+          this.granular?.reset();
           this.pendingRequest=null;
           this.queueRenderReceipt(m.requestId,st);
           this.port.postMessage({type:"command-accepted",
             requestId:m.requestId,op:"seek",sourceFrame:st.sourceFrame,
-            revision:st.revision,rawPCM:true});
+            revision:st.revision,
+            processingMode:this.processingMode,
+            pitchRevision:this.granular?.state.pitchRevision??null,
+            rawPCM:this.processingMode==="raw"});
           return;
         }
         if(m.type==="loop-config"){
@@ -55,12 +70,16 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
           const st=this.renderer.applyLoopConfiguration(
             m.a,m.b,m.enabled,m.endpoints
           );
+          this.granular?.reset();
           this.pendingRequest=null;
           this.queueRenderReceipt(m.requestId,st);
           this.port.postMessage({type:"command-accepted",requestId:m.requestId,
             op:m.op,sourceFrame:st.sourceFrame,revision:st.revision,
             loopStartFrame:st.loopStartFrame,loopEndFrame:st.loopEndFrame,
-            loopEnabled:st.loopEnabled,rawPCM:true});
+            loopEnabled:st.loopEnabled,
+            processingMode:this.processingMode,
+            pitchRevision:this.granular?.state.pitchRevision??null,
+            rawPCM:this.processingMode==="raw"});
           return;
         }
         if(m.type!=="command")return;
@@ -68,18 +87,33 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
         switch(m.op){
           case "play":this.running=true;break;
           case "pause":this.running=false;break;
-          case "seek":t.seek(m.frame);break;
-          case "speed":t.setSpeed(m.speed);break;
-          case "bounds":t.setLoopBounds(m.a,m.b);break;
-          case "loop":t.setLoopEnabled(m.enabled);break;
+          case "seek":t.seek(m.frame);this.granular?.reset();break;
+          case "speed":
+            t.setSpeed(m.speed);
+            this.granular?.reset();
+            break;
+          case "pitch":
+            if(!this.granular)
+              throw RangeError("independent pitch requires granular mode");
+            this.granular.setPitch(m.semitones);
+            break;
+          case "bounds":t.setLoopBounds(m.a,m.b);
+            this.granular?.reset();break;
+          case "loop":t.setLoopEnabled(m.enabled);
+            this.granular?.reset();break;
           default:throw RangeError("unknown source PCM worklet command");
         }
-        if(m.op==="seek"||m.op==="speed"||m.op==="bounds"||m.op==="loop")
+        if(m.op==="seek"||m.op==="speed"||m.op==="bounds"||
+           m.op==="loop"||m.op==="pitch")
           this.pendingRequest=null;
         const st=t.state;
         this.queueRenderReceipt(m.requestId,st);
         this.port.postMessage({type:"command-accepted",requestId:m.requestId,op:m.op,
-          sourceFrame:st.sourceFrame,revision:st.revision,rawPCM:true});
+          sourceFrame:st.sourceFrame,revision:st.revision,
+          processingMode:this.processingMode,
+          pitchRevision:this.granular?.state.pitchRevision??null,
+          pitchSemitones:this.granular?.state.pitchSemitones??null,
+          rawPCM:this.processingMode==="raw"});
       }catch(error){
         this.port.postMessage({type:"error",requestId:m.requestId,
           message:error?.message||String(error)});
@@ -94,9 +128,11 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
       this.port.postMessage({type:"render-superseded",
         requestId:this.renderPending.requestId,
         revision:this.renderPending.revision,
+        pitchRevision:this.renderPending.pitchRevision,
         supersededBy:requestId});
     }
-    this.renderPending={requestId,revision:state.revision};
+    this.renderPending={requestId,revision:state.revision,
+      pitchRevision:this.granular?.state.pitchRevision??null};
   }
   emitRenderReceipt(sourceFrame,missingInBlock){
     const pending=this.renderPending;
@@ -107,10 +143,12 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
     // NOT the speaker/DAC presentation time.
     this.port.postMessage({type:"render-applied",
       requestId:pending.requestId,revision:pending.revision,
+      pitchRevision:pending.pitchRevision,
+      processingMode:this.processingMode,
       outputFrame:typeof currentFrame==="number"?currentFrame:null,
       outputTime:typeof currentTime==="number"?currentTime:null,
       sourceFrame,missingFramesInBlock:missingInBlock,
-      running:this.running,rawPCM:true});
+      running:this.running,rawPCM:this.processingMode==="raw"});
   }
   request(frame){
     if(frame===null||this.pendingRequest!==null)return;
@@ -130,7 +168,9 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
       this.emitRenderReceipt(sourceFrame,0);
       return true;
     }
-    const missing=this.renderer.render(out);
+    const missing=this.granular?
+      this.renderer.renderGranular(out,this.granular):
+      this.renderer.render(out);
     this.emitRenderReceipt(sourceFrame,missing);
     this.blocks++;
     // Host window cache refill is outside the audio callback and never
@@ -150,7 +190,10 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
         revision:state.revision,ended:state.ended,
         renderedFrames:stats.renderedFrames,
         missingFrames:stats.missingFrames,
-        rawPCM:true
+        processingMode:this.processingMode,
+        pitchSemitones:this.granular?.state.pitchSemitones??null,
+        pitchRevision:this.granular?.state.pitchRevision??null,
+        rawPCM:this.processingMode==="raw"
       });
     }
     return true;
