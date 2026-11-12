@@ -339,6 +339,7 @@ test("rejected atomic bounds update leaves source time, loop and cache unchanged
   p.applyLoopConfiguration(0,990,false,[]);
   assert.equal(p.timeline.state.loopEnabled,false);
   assert.equal(p.statistics.windowCount,2);
+  p.timeline.seek(300); // old A is now behind playback, not protected
   p.installWindow(300,[new Float32Array(20)]);
   p.installWindow(400,[new Float32Array(20)]);
   p.installWindow(500,[new Float32Array(20)]);
