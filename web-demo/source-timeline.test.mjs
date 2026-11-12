@@ -101,6 +101,41 @@ test("no-op commands and render clock never send a new revision",()=>{
   t.seek(500);assert.equal(t.state.revision,5);
 });
 
+test("reverse exhaustion persists across render quanta until an intentional transport command",()=>{
+  const t=make({startFrame:1,speed:-1});
+  const read=[];
+  for(let i=0;i<5;i++){
+    read.push(t.sampleIndexAt(0));
+    t.advance(1);
+  }
+  assert.deepEqual(read,[1,0,null,null,null]);
+  assert.equal(t.state.sourceFrame,0);
+  assert.equal(t.state.ended,true);
+  const before=t.state.revision;
+  t.seek(0); // same coordinate, but explicitly re-arms exhausted playback
+  assert.equal(t.state.revision,before+1);
+  assert.equal(t.sampleIndexAt(0),0);
+  t.advance(1);
+  assert.equal(t.sampleIndexAt(0),null);
+  t.setSpeed(1);
+  assert.equal(t.sampleIndexAt(0),0);
+  t.setLoopBounds(3,4);
+  t.setLoopEnabled(true);
+  assert.equal(t.sampleIndexAt(0),3);
+  assert.equal(t.state.ended,false);
+});
+
+test("forward exhaustion also persists and direction reversal restores the last frame",()=>{
+  const t=make({startFrame:47999,speed:1});
+  assert.equal(t.sampleIndexAt(0),47999);
+  t.advance(1);assert.equal(t.sampleIndexAt(0),null);
+  assert.equal(t.state.ended,true);
+  t.advance(128);assert.equal(t.sampleIndexAt(0),null);
+  t.setSpeed(-1);
+  assert.equal(t.sampleIndexAt(0),47999);
+  assert.equal(t.state.ended,false);
+});
+
 test("source/sample rate conversion and malformed inputs",()=>{
   const t=createSourceTimeline({sourceFrames:48000,sourceSampleRate:48000,
     outputSampleRate:44100,speed:1});
