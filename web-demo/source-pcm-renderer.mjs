@@ -62,11 +62,19 @@ export function createSourcePCMRenderer({
       const end=start+channels[0].length;
       // Keep one endpoint cache for A and one for B, plus a moving window.
       // Evict unpinned windows first. Pin labels are replaced atomically.
+      // Updating a cached window must not silently erase an existing A/B
+      // pin when the moving reader requests that same source range.
+      let resolvedPin=pin;
+      if(resolvedPin===null){
+        const previous=windows.find(w=>w.start===start);
+        if(previous)resolvedPin=previous.pin;
+      }
       for(let i=windows.length-1;i>=0;i--){
-        if(windows[i].start===start||pin!==null&&windows[i].pin===pin)
+        if(windows[i].start===start||
+           resolvedPin!==null&&windows[i].pin===resolvedPin)
           windows.splice(i,1);
       }
-      windows.push({start,end,channels,pin});
+      windows.push({start,end,channels,pin:resolvedPin});
       while(windows.length>maxWindows){
         const victim=windows.findIndex(w=>w.pin===null);
         windows.splice(victim<0?0:victim,1);
