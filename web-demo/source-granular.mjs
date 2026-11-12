@@ -6,7 +6,7 @@
  */
 export function createGranularTimePitch({
   sourceSampleRate,outputSampleRate,channelCount=1,
-  grainFrames=2048,hopFrames=512,pitchSemitones=0
+  grainFrames=2048,hopFrames=1024,pitchSemitones=0
 }={}){
   if(![sourceSampleRate,outputSampleRate].every(x=>Number.isFinite(x)&&x>0)||
     !Number.isInteger(channelCount)||channelCount<1||channelCount>2||
