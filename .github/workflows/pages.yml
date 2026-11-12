@@ -56,6 +56,9 @@ jobs:
       - name: Native Chrome real-page raw PCM opt-in and seek without node restart
         run: |
           node --test web-demo/source-pcm-player.browser.test.mjs
+      - name: Native Chrome post-render PCM stress evidence (R2, not gapless acceptance)
+        run: |
+          node --test web-demo/source-pcm-stress.browser.test.mjs
       - name: Browser tooling (test runtime only)
         run: |
           python3 -m pip install --user playwright==1.56.0
