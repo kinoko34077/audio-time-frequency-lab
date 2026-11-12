@@ -67,14 +67,18 @@ export async function createSourcePCMBridge({
     if(closed)return;
     closed=true;
     node.port.onmessage=null;
-    node.onprocessorerror=null;
+    node.removeEventListener("processorerror",onProcessorError);
     try{node.disconnect();}catch{}
     rejectPending(error);
     onEvent({type:"fatal-error",message:error.message});
   };
-  node.onprocessorerror=()=>failProcessor(
+  const onProcessorError=()=>failProcessor(
     Error("AudioWorklet processor unexpectedly terminated")
   );
+  // Some Chrome runtimes do not invoke assignment-style onprocessorerror
+  // handlers for synthetic or host-level processorerror events. Use the
+  // EventTarget listener contract for the actual processor lifecycle.
+  node.addEventListener("processorerror",onProcessorError);
   const submit=(data,transfers=[])=>{
     if(closed)return Promise.reject(Error("PCM bridge disposed"));
     const id=++requestId;
@@ -181,7 +185,7 @@ export async function createSourcePCMBridge({
       // stop its render loop and release its WorkletGlobalScope PCM windows.
       node.port.postMessage({type:"dispose"});
       node.port.onmessage=null;
-      node.onprocessorerror=null;
+      node.removeEventListener("processorerror",onProcessorError);
       node.disconnect();
       rejectPending(Error("PCM bridge disposed"));
     }
