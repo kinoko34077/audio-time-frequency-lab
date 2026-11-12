@@ -45,3 +45,13 @@ Pitch remains independent, current accepted range ±12 semitones unless separate
 - Physical iPhone Safari waveform gesture, source picker, background/resume, CPU/underrun and real recordings remain independent acceptance; emulated Chromium is not sufficient.
 
 **Next:** R1 implementation must be reviewed and merged independently. R2 is the first stage that can provide actual continuous real-time audio; keep gapless and zero/negative sonic acceptance OPEN until measured.
+
+## R2 bounded experimental source-PCM slice (not full R2 acceptance)
+
+Source files added for the bounded first step:
+- `web-demo/source-pcm-renderer.mjs` provides a persistent raw-PCM block renderer, linear source-frame interpolation, source-time loop wrap and bounded source-window cache (max 65,536 source frames/window, three windows; mono/stereo). A/B endpoint windows can be pinned while a third moving window is refilled. `missingFrames` is an explicit source-cache underrun count; normal source EOF silence is not mislabeled as a cache underrun.
+- `web-demo/source-pcm.worklet.js` is a distinct experimental AudioWorkletProcessor, named `audio-lab-source-pcm`, with one persistent node and commands for seek/speed/bounds/loop/play/pause. It reports **command accepted** separately from audio-render progress and cache misses.
+- `web-demo/source-pcm-bridge.mjs` sends bounded slices of local decoded PCM to the worklet. It does not send the whole track. Worklet cache refill requests are message-driven and may be delayed by the browser main thread.
+- `web-demo/source-pcm-renderer.test.mjs` plus `web-demo/source-pcm-worklet.browser.test.mjs` test source-frame order, tiny A/B loops, reverse, sample-rate conversion, stereo, cache bounds, underruns and live Chrome callback activity.
+
+**R2 completion remains OPEN:** This raw source renderer is deliberately *not wired to the current player UI* and is not pitch-preserving for non-unit speed. At speed 0 it outputs a held PCM sample (DC) instead of a useful stationary sound. A cache miss still produces zero output frames and is counted; therefore the architecture must be strengthened and stress-tested before **no underrun / no buffering sensation** may be accepted. Loop audio clicks, interpolation anti-aliasing, independent pitch at ±8, real-time scrubbing, and physical iOS Safari remain unverified. An all-green Node test only proves the bounded deterministic fixture, not device performance. The existing Rust live and 1.5-second model-preview implementation remains the unchanged user-facing path during this slice.
