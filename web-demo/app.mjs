@@ -670,7 +670,14 @@ function playPosition(){
   if(!state.player||!state.ctx||!duration())return state.seek;
   if(state.player.labStream)return state.player.stream.sourcePositionAt(state.ctx.currentTime);
   if(state.player.rawPCM){
-    const samples=state.player.pcmBridge.latest?.sourceFrame;
+    const progress=state.player.pcmBridge.latest;
+    // Worklet render receipts can arrive before its next 8-quantum progress
+    // event. Never repaint the head at an OLD progress frame after a precise
+    // seek has already been applied by the audio processor.
+    const applied=state.player.lastAppliedFrame;
+    const samples=applied&&(!progress||!Number.isSafeInteger(progress.revision)||
+      progress.revision<applied.revision)?
+      applied.frame:progress?.sourceFrame;
     return Number.isFinite(samples)?samples/state.decoded.sampleRate:state.player.offset;
   }
   return (state.player.offset+Math.max(0,state.ctx.currentTime-state.player.at)*(state.player.sourceTimeRate||1))%duration();
@@ -1116,6 +1123,12 @@ async function play(mode="wet",offset=null){
         startFrame:Math.round(at*sourceRate),loopEnabled:initialLoop.enabled,
         loopStartFrame:initialLoop.a,loopEndFrame:initialLoop.b||state.dry[0].length,
         onEvent:data=>{
+          if(data.type==="render-applied"&&state.player?.pcmBridge===bridge&&
+             Number.isSafeInteger(data.revision)&&Number.isFinite(data.sourceFrame)){
+            const player=state.player;
+            if(!player.lastAppliedFrame||data.revision>=player.lastAppliedFrame.revision)
+              player.lastAppliedFrame={revision:data.revision,frame:data.sourceFrame};
+          }
           if(granularActive&&state.player?.pcmBridge===bridge){
             const status=$("#granular-optin-status");
             if(data.type==="command-accepted"){
