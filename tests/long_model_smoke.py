@@ -33,6 +33,10 @@ try:
         page.locator('html[data-fw-boot=ready]').wait_for(timeout=15000)
         page.locator('#audio-file').set_input_files(path)
         page.get_by_text('読み込み完了。再生できます。',exact=False).wait_for(timeout=25000)
+        # R4: existing models are in the explicit model tab, not the
+        # default playback-first workspace.
+        page.locator('#main-tab-model').click()
+        assert page.locator('#audio-lab').is_visible()
         page.locator('#lab-speed').evaluate("(e)=>{e.value='0.5';e.dispatchEvent(new Event('change',{bubbles:true}));}")
         page.locator('#lab-pitch').evaluate("(e)=>{e.value='3';e.dispatchEvent(new Event('change',{bubbles:true}));}")
         page.locator('#lab-short').evaluate("(e)=>{e.value='8';e.dispatchEvent(new Event('change',{bubbles:true}));}")
