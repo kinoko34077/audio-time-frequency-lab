@@ -120,8 +120,10 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, swit
       "zoom/handle scrub may not create extra worklet nodes");
     // Native Chrome touchscreen injection: two simultaneous active contacts
     // must zoom the waveform without changing canonical A/B or Worklet count.
-    const beforePinchSpan=Number((await page.$eval("#wave-zoom-label",
-      el=>el.textContent)).replace("秒",""));
+    const asSeconds=label=>label.startsWith("ms ")?Number(label.slice(3))/1000:
+      Number(label.replace("秒",""));
+    const beforePinchSpan=asSeconds(await page.$eval("#wave-zoom-label",
+      el=>el.textContent));
     assert.ok(Number.isFinite(beforePinchSpan)&&beforePinchSpan>0);
     const touch=await page.createCDPSession();
     await touch.send("Emulation.setTouchEmulationEnabled",
@@ -136,8 +138,8 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, swit
       touchPoints:[point(.22,21),point(.78,22)]});
     await touch.send("Input.dispatchTouchEvent",{type:"touchEnd",touchPoints:[]});
     await touch.send("Emulation.setTouchEmulationEnabled",{enabled:false});
-    const afterPinchSpan=Number((await page.$eval("#wave-zoom-label",
-      el=>el.textContent)).replace("秒",""));
+    const afterPinchSpan=asSeconds(await page.$eval("#wave-zoom-label",
+      el=>el.textContent));
     assert.ok(afterPinchSpan<beforePinchSpan,{beforePinchSpan,afterPinchSpan});
     assert.equal(await page.$eval("#player-loop-b",el=>el.value),String(draggedB));
     assert.equal(await page.$eval("#rt-telemetry",el=>Number(el.dataset.pcmNodeStarts)),starts,
