@@ -2103,7 +2103,10 @@ async function labSettingsChanged(){
   // +/- context windows are part of Rust's existing DSP API.
   $("#quality").value=lab.fftSize===1024?"eco":lab.fftSize===2048?"standard":"high";
   labInvalidate();
-  if(state.player){
+  // Editing research/model options must not switch an actively playing
+  // R4 granular track back to the unprocessed original. The independent
+  // player is controlled exclusively by its own signed-speed/pitch/AB UI.
+  if(state.player&&state.player.mode!=="player"){
     if(previous==="live"&&lab.mode==="live"&&!previousIndividual&&!lab.individual&&state.player.labRealtime){
       const p=state.player;p.offset=currentTime;p.at=state.ctx.currentTime;
       p.sourceTimeRate=lab.speed;
