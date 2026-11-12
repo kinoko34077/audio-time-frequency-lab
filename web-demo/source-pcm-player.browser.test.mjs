@@ -82,6 +82,57 @@ test("live Audio Lab opt-in original playback uses a persistent PCM node across 
     assert.equal(after.starts,initial.starts,"seek restarted source Worklet");
     assert.match(after.telemetry,/cache不足 0/);
     assert.match(after.elapsed,/0:01/);
+
+    // Rejected wet parameters must not stop/recreate the currently audible
+    // original. Force a preflight-only invalid quality without changing DSP.
+    await page.evaluate(()=>{
+      const quality=document.querySelector("#quality");
+      window.__originalQuality=quality.value;
+      quality.add(new Option("Invalid test only","invalid-for-test"));
+      quality.value="invalid-for-test";
+    });
+    await page.click("#play-wet");
+    await page.waitForFunction(()=>document.querySelector("#status")
+      ?.textContent.includes("変換設定は未反映"),{timeout:10000});
+    const unchanged=await page.evaluate(()=>({
+      raw:document.querySelector("#rt-telemetry").dataset.pcmTransport,
+      nodes:Number(document.querySelector("#rt-telemetry").dataset.pcmNodeStarts)
+    }));
+    assert.equal(unchanged.raw,"raw-experimental");
+    assert.equal(unchanged.nodes,initial.starts);
+    await page.evaluate(()=>{
+      const quality=document.querySelector("#quality");
+      quality.value=window.__originalQuality;
+      quality.querySelector('[value="invalid-for-test"]').remove();
+    });
+
+    await page.click("#stop");
+    await page.waitForFunction(()=>!document.querySelector("#rt-telemetry")
+      ?.dataset.pcmTransport,{timeout:10000});
+
+    // A startup failure must never strand the original/wet playback controls.
+    await page.evaluate(()=>{
+      window.__nativeAudioWorkletNode=window.AudioWorkletNode;
+      window.AudioWorkletNode=function(ctx,name,options){
+        if(name==="audio-lab-source-pcm")throw Error("simulated raw backend failure");
+        return new window.__nativeAudioWorkletNode(ctx,name,options);
+      };
+    });
+    await page.click("#play-dry");
+    await page.waitForFunction(()=>document.querySelector("#status")
+      ?.textContent.includes("PCM実験経路の起動失敗"),{timeout:10000});
+    const recovered=await page.evaluate(()=>({
+      dry:!document.querySelector("#play-dry").disabled,
+      wet:!document.querySelector("#play-wet").disabled,
+      pcm:document.querySelector("#rt-telemetry").dataset.pcmTransport
+    }));
+    assert.equal(recovered.dry,true,"failed raw start disabled dry retry");
+    assert.equal(recovered.wet,true,"failed raw start disabled wet fallback option");
+    assert.equal(recovered.pcm,undefined);
+    await page.evaluate(()=>{window.AudioWorkletNode=window.__nativeAudioWorkletNode;});
+    await page.click("#play-dry");
+    await page.waitForFunction(()=>document.querySelector("#rt-telemetry")
+      ?.dataset.pcmTransport==="raw-experimental",{timeout:12000});
     await page.click("#stop");
     await page.waitForFunction(()=>!document.querySelector("#rt-telemetry")
       ?.dataset.pcmTransport,{timeout:10000});
