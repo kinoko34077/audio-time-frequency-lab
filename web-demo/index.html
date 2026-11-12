@@ -99,26 +99,6 @@
           <button id="play-dry" disabled>原音を聴く</button>
           <button id="play-wet" disabled>▶ モデルで再生</button>
         </div>
-        <section class="player-loop" id="player-loop-controls" aria-label="A/B区間のループ" hidden>
-          <div class="player-loop-top">
-            <strong>A–B区間</strong>
-            <label for="player-loop-enabled"><input id="player-loop-enabled" type="checkbox" checked> ループ</label>
-          </div>
-          <details class="player-loop-precision">
-            <summary>区間の端点を数値で編集</summary>
-            <div class="player-loop-fields">
-              <label for="player-loop-a">開始 A（元音源サンプル）
-                <input id="player-loop-a" type="number" min="0" step="1" value="0" inputmode="numeric">
-                <button id="player-loop-a-now" type="button">現在位置をAに</button>
-              </label>
-              <label for="player-loop-b">終端 B（元音源サンプル・含まない）
-                <input id="player-loop-b" type="number" min="1" step="1" value="1" inputmode="numeric">
-                <button id="player-loop-b-now" type="button">現在位置をBに</button>
-              </label>
-            </div>
-          </details>
-          <p id="player-loop-hint" class="lab-note" aria-live="polite">波形上のA・Bをドラッグして区間を変更できます。</p>
-        </section>
         <section id="granular-optin-controls" class="player-tune" aria-label="速度と音程" hidden>
           <div class="player-tune-grid">
             <div class="player-tune-control">
@@ -145,6 +125,26 @@
           </details>
           <p id="granular-rail-note" class="lab-note" aria-live="polite"></p>
           <p id="granular-optin-status" class="lab-note player-processing-status" role="status" aria-live="polite">再生時に処理条件を適用します。</p>
+        </section>
+        <section class="player-loop" id="player-loop-controls" aria-label="A/B区間のループ" hidden>
+          <div class="player-loop-top">
+            <strong>A–B区間</strong>
+            <label for="player-loop-enabled"><input id="player-loop-enabled" type="checkbox" checked> ループ</label>
+          </div>
+          <details class="player-loop-precision">
+            <summary>区間の端点を数値で編集</summary>
+            <div class="player-loop-fields">
+              <label for="player-loop-a">開始 A（元音源サンプル）
+                <input id="player-loop-a" type="number" min="0" step="1" value="0" inputmode="numeric">
+                <button id="player-loop-a-now" type="button">現在位置をAに</button>
+              </label>
+              <label for="player-loop-b">終端 B（元音源サンプル・含まない）
+                <input id="player-loop-b" type="number" min="1" step="1" value="1" inputmode="numeric">
+                <button id="player-loop-b-now" type="button">現在位置をBに</button>
+              </label>
+            </div>
+          </details>
+          <p id="player-loop-hint" class="lab-note" aria-live="polite">波形上のA・Bをドラッグして区間を変更できます。</p>
         </section>
         
         <audio id="background-output" playsinline preload="none" aria-hidden="true" hidden></audio>
