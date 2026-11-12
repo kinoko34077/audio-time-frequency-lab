@@ -42,7 +42,7 @@ export async function createSourcePCMBridge({
     outputChannelCount:[sourceChannels.length],
     processorOptions:{
       sourceFrames:frames,sourceSampleRate,
-      channelCount:sourceChannels.length,speed:startFrame===frames&&speed>0?0:speed,
+      channelCount:sourceChannels.length,speed,
       startFrame,loopStartFrame:A,loopEndFrame:B,loopEnabled:loop
     }
   });
