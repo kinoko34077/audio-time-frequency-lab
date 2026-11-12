@@ -25,7 +25,10 @@ export function createGranularTimePitch({
       semitones<-12||semitones>12)
       throw RangeError("pitch must be finite and within -12..12 semitones");
     if(pitch!==semitones){
-      pitch=semitones;factor=2**(pitch/12);revision++;grains.clear();
+      pitch=semitones;factor=2**(pitch/12);revision++;
+      // A new grain configuration is a new synthesis epoch, but not a new
+      // AudioWorklet node or source-time coordinate.
+      grains.clear();outputFrames=0;
     }
     return {pitchSemitones:pitch,pitchRatio:factor,pitchRevision:revision};
   }
@@ -36,7 +39,7 @@ export function createGranularTimePitch({
       pitchRevision:revision,outputFrames
     };},
     setPitch,
-    reset(){grains.clear();},
+    reset(){grains.clear();outputFrames=0;},
     render(output,state,read,sourceFrames){
       if(!Array.isArray(output)||output.length!==channelCount||
         output.some(ch=>!(ch instanceof Float32Array)||
