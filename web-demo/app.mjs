@@ -185,6 +185,110 @@ if(PLAYER_GRANULAR_AVAILABLE){
   });
   refreshGranular();
 }
+// Playback / model tab navigation owns presentation only. Existing song,
+// transport, output node, typed edits, research settings stay mounted.
+function selectWorkspaceTab(target){
+  if(target!=="player"&&target!=="model")return;
+  document.body.dataset.mainTab=target;
+  for(const mode of ["player","model"]){
+    const btn=$("#main-tab-"+mode);
+    btn.setAttribute("aria-selected",String(target===mode));
+    btn.tabIndex=target===mode?0:-1;
+  }
+  requestAnimationFrame(()=>{drawAudio();drawCurve();});
+}
+for(const mode of ["player","model"]){
+  $("#main-tab-"+mode).addEventListener("click",()=>selectWorkspaceTab(mode));
+  $("#main-tab-"+mode).addEventListener("keydown",event=>{
+    if(event.key!=="ArrowLeft"&&event.key!=="ArrowRight"&&
+       event.key!=="Home"&&event.key!=="End")return;
+    event.preventDefault();
+    const next=event.key==="Home"?"player":event.key==="End"?"model":
+      event.key==="ArrowLeft"?"player":"model";
+    selectWorkspaceTab(next);$("#main-tab-"+next).focus();
+  });
+}
+selectWorkspaceTab(mainTab());
+
+function refreshAB(){
+  const present=Boolean(state.dry&&state.decoded);
+  const panel=$("#player-loop-controls");
+  panel.hidden=!present;
+  if(!present)return;
+  const frames=state.dry[0].length;
+  for(const [id,value] of [["a",ab.a],["b",ab.b]]){
+    const input=$("#player-loop-"+id);
+    input.max=String(id==="a"?frames-1:frames);
+    if(document.activeElement!==input)input.value=String(value);
+  }
+  $("#player-loop-enabled").checked=ab.enabled;
+}
+function syncLoopToPlayer(player=state.player){
+  if(!player?.pcmBridge||player.pcmBridge.processingMode!=="granular"||
+     player.initializing)return;
+  player.pendingLoop={a:ab.a,b:ab.b,enabled:ab.enabled};
+  if(player.loopBusy)return;
+  player.loopBusy=true;
+  void (async()=>{
+    while(state.player===player&&player.pendingLoop){
+      const requested=player.pendingLoop;
+      player.pendingLoop=null;
+      // setLoopBounds delivers an atomic endpoint+transport change. Keep
+      // loop enabled/disabled consistent without restarting the Worklet.
+      await player.pcmBridge.setLoopBounds(requested.a,requested.b);
+      if(state.player!==player)return;
+      await player.pcmBridge.setLoopEnabled(requested.enabled);
+    }
+    if(state.player===player)
+      $("#player-loop-hint").textContent="区間の音声処理への反映が完了しました。";
+  })().catch(error=>{
+    if(state.player===player){
+      $("#player-loop-hint").textContent="区間変更が反映されません: "+error.message;
+      message("区間ループ設定の反映失敗: "+error.message,"error");
+    }
+  }).finally(()=>{
+    player.loopBusy=false;
+    if(state.player===player&&player.pendingLoop)syncLoopToPlayer(player);
+  });
+}
+function editAB(edge,raw){
+  const input=$("#player-loop-"+edge),other=edge==="a"?ab.b:ab.a;
+  const frames=state.dry?.[0].length||0;
+  const value=Number(raw);
+  const valid=String(raw).trim()!==""&&Number.isSafeInteger(value)&&
+    (edge==="a"?value>=0&&value<other:value>other&&value<=frames);
+  if(!valid){
+    input.setCustomValidity(edge==="a"?
+      "開始Aは0以上・B未満の整数サンプルです":
+      "終端BはAより大きく・音源長以下の整数サンプルです");
+    input.reportValidity();
+    $("#player-loop-hint").textContent="A は B より小さくしてください（1サンプル区間可）。";
+    return;
+  }
+  input.setCustomValidity("");
+  if(ab[edge]===value){refreshAB();return;}
+  ab[edge]=value;
+  $("#player-loop-hint").textContent="区間の反映を要求しました。";
+  refreshAB();syncLoopToPlayer();
+}
+for(const edge of ["a","b"]){
+  const input=$("#player-loop-"+edge);
+  input.addEventListener("input",()=>input.setCustomValidity(""));
+  input.addEventListener("change",()=>editAB(edge,input.value));
+  input.addEventListener("keydown",e=>{if(e.key==="Enter")input.blur();});
+  $("#player-loop-"+edge+"-now").addEventListener("click",()=>{
+    if(!state.dry)return;
+    const frame=Math.round(playPosition()*state.decoded.sampleRate);
+    editAB(edge,String(Math.min(state.dry[0].length,Math.max(0,frame))));
+  });
+}
+$("#player-loop-enabled").addEventListener("change",event=>{
+  if(!state.dry)return;
+  ab.enabled=event.target.checked;
+  $("#player-loop-hint").textContent=ab.enabled?
+    "区間をループします（最短1サンプル）。":"区間ループをOFFにしました。";
+  syncLoopToPlayer();
+});
 function message(text,type="info"){
   const node=$("#status");
   if(node.textContent!==text)node.textContent=text;
@@ -1590,6 +1694,10 @@ async function load(file){
     state.offline=null;state.decoded={sampleRate:data.sampleRate};
     lab.job++;lab.worker?.terminate();lab.worker=null;lab.processed=null;
     state.dry=dry;state.seek=0;
+    // Preserve the last playable song on decode failure; a successful new
+    // source starts with its own valid exact-sample A/B boundaries.
+    ab.a=0;ab.b=dry[0].length;ab.enabled=true;
+    refreshAB();
     labRefresh();state.lastStats=null;
     state.name=file.name.replace(/\.[^.]+$/,"");
     mediaStatus(false);
