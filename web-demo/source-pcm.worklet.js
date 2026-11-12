@@ -18,7 +18,7 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
       const m=event.data||{};
       try{
         if(m.type==="window"){
-          this.renderer.installWindow(m.start,m.channels);
+          this.renderer.installWindow(m.start,m.channels,m.pin??null);
           this.pendingRequest=null;
           this.port.postMessage({type:"window-accepted",requestId:m.requestId,start:m.start});
           return;
