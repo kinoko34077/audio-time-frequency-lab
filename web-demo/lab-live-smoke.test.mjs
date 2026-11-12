@@ -24,6 +24,9 @@ test('full Chrome: inherited Rust AudioWorklet live independent speed/pitch UI',
   page.on('pageerror',error=>errors.push(error.message));
   await page.goto('http://127.0.0.1:8769/',{waitUntil:'domcontentloaded'});
   await page.waitForSelector('html[data-fw-boot="ready"]');
+  // The research/model controls now live on their explicit top-level tab.
+  await page.click('#main-tab-model');
+  assert.equal(await page.$eval('body',e=>e.dataset.mainTab),'model');
   await (await page.$('#audio-file')).uploadFile(audioFile);
   await page.waitForFunction(()=>!document.querySelector('#play-wet').disabled,{timeout:20000});
   // Native Chrome UI contract: opt-in controls a real slider; log2 positions
