@@ -94,20 +94,20 @@ test("0 speed freezes sample position but does NOT claim audible pitch-preservin
   assert.equal(p.statistics.missingFrames,0);
 });
 
-test("cache misses are counted and never advance source clock silently",()=>{
+test("cache misses are counted while output time advances without replay",()=>{
   const p=createSourcePCMRenderer({
     sourceFrames:1000,sourceSampleRate:48000,outputSampleRate:48000,
     channelCount:1,speed:1,startFrame:100
   });
   let r=block(p,128);
   assert.equal(r.missing,128);
-  assert.equal(p.timeline.state.sourceFrame,100);
+  assert.equal(p.timeline.state.sourceFrame,228);
   assert.equal(p.statistics.missingFrames,128);
-  assert.equal(p.needsSourceWindow(0),100);
+  assert.equal(p.needsSourceWindow(0),228);
   p.installWindow(0,[Float32Array.from({length:500},()=>.25)]);
   r=block(p,128);
   assert.equal(r.missing,0);
-  assert.equal(p.timeline.state.sourceFrame,228);
+  assert.equal(p.timeline.state.sourceFrame,356);
   assert.ok(r.output[0].every(x=>x===.25));
 });
 
@@ -152,14 +152,50 @@ test("crossing a cached chunk reports the real missing frame, not the cached hea
   const first=block(player,128);
   assert.ok(first.missing>0);
   assert.ok(player.firstMissingFrame>=65536);
-  assert.equal(player.timeline.state.sourceFrame,65408);
+  assert.equal(player.timeline.state.sourceFrame,65408+128*7);
   const from=chooseSourceWindowStart(player.firstMissingFrame,total,65536,7);
   player.installWindow(from,[Float32Array.from({length:total-from},()=>.5)]);
   const retry=block(player,128);
   assert.equal(retry.missing,0);
   assert.ok(retry.output[0].every(x=>x===.5));
-  assert.ok(player.timeline.state.sourceFrame>65408);
+  assert.ok(player.timeline.state.sourceFrame>65408+128*7);
   assert.equal(player.firstMissingFrame,null);
+});
+
+test("partial cache miss never replays emitted PCM after refill",()=>{
+  const p=createSourcePCMRenderer({
+    sourceFrames:256,sourceSampleRate:48000,outputSampleRate:48000,
+    startFrame:60,speed:1
+  });
+  p.installWindow(0,[new Float32Array(64).fill(.25)]);
+  const first=block(p,8);
+  assert.equal(first.missing,4);
+  assert.deepEqual(Array.from(first.output[0]),[.25,.25,.25,.25,0,0,0,0]);
+  assert.equal(p.firstMissingFrame,64);
+  assert.equal(p.timeline.state.sourceFrame,68);
+  p.installWindow(64,[new Float32Array(64).fill(.5)]);
+  const second=block(p,8);
+  assert.equal(second.missing,0);
+  assert.deepEqual(Array.from(second.output[0]),Array(8).fill(.5));
+  assert.equal(p.timeline.state.sourceFrame,76);
+  assert.equal(p.statistics.missingFrames,4);
+});
+
+test("reverse and loop cache misses never rewind committed source time",()=>{
+  const p=createSourcePCMRenderer({
+    sourceFrames:300,sourceSampleRate:48000,outputSampleRate:48000,
+    startFrame:132,speed:-1,loopStartFrame:0,loopEndFrame:300,
+    loopEnabled:true
+  });
+  p.installWindow(125,[new Float32Array(8).fill(.75)]);
+  const first=block(p,12);
+  assert.equal(first.missing,4);
+  assert.equal(p.timeline.state.sourceFrame,120);
+  p.installWindow(112,[new Float32Array(13).fill(.6)]);
+  const second=block(p,8);
+  assert.equal(second.missing,0);
+  assert.ok(second.output[0].every(x=>Math.abs(x-.6)<1e-5));
+  assert.equal(p.timeline.state.sourceFrame,112);
 });
 
 test("A/B endpoint windows remain pinned while the moving source cache advances",()=>{
