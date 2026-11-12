@@ -135,3 +135,31 @@ test("bounded-source misses are measured, not hidden as successful DSP",()=>{
   assert.ok(renderer.firstMissingFrame>=0);
   assert.equal(renderer.statistics.missingFrames,128);
 });
+
+test("unlooped granular EOF silences instead of pretending speed-zero freeze",()=>{
+  const frames=8192;
+  const renderer=createSourcePCMRenderer({
+    sourceFrames:frames,sourceSampleRate:SR,outputSampleRate:SR,
+    channelCount:1,startFrame:frames-256,speed:1
+  });
+  renderer.installWindow(0,[source[0].slice(0,frames)]);
+  const g=createGranularTimePitch({sourceSampleRate:SR,outputSampleRate:SR});
+  const pcm=[new Float32Array(128)];
+  for(let i=0;i<4;i++)renderer.renderGranular(pcm,g);
+  assert.equal(renderer.timeline.state.ended,true);
+  pcm[0].fill(.5);
+  assert.equal(renderer.renderGranular(pcm,g),0);
+  assert.ok(pcm[0].every(x=>x===0),"EOF must not be endless last-grain replay");
+  renderer.timeline.setSpeed(0);
+  pcm[0].fill(.5);
+  renderer.renderGranular(pcm,g);
+  assert.equal(renderer.timeline.state.ended,true);
+  assert.ok(pcm[0].every(x=>x===0),
+    "changing an exhausted stream to 0x must not resurrect a held note");
+  renderer.timeline.setSpeed(-1);
+  g.reset();
+  assert.equal(renderer.timeline.state.ended,false);
+  renderer.renderGranular(pcm,g);
+  assert.ok(pcm[0].some(x=>Math.abs(x)>.001),
+    "genuine reversal from EOF may re-arm finite source playback");
+});
