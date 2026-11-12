@@ -60,11 +60,11 @@ export async function createSourcePCMBridge({
     const end=Math.min(frames,start+SOURCE_WINDOW_FRAMES);
     return {start,channels:sourceChannels.map(x=>x.slice(start,end))};
   };
-  const sendWindow=(requested,pin=null,direction=currentSpeed)=>{
+  const sendWindow=(requested,pin=null,direction=currentSpeed,refillId=null)=>{
     if(closed)return;
     const {start,channels}=windowSlice(requested,direction);
     node.port.postMessage({
-      type:"window",start,channels,pin,
+      type:"window",start,channels,pin,refillId,
       requestId:++requestId
     },channels.map(x=>x.buffer));
   };
@@ -76,7 +76,7 @@ export async function createSourcePCMBridge({
   node.port.onmessage=event=>{
     const data=event.data||{};
     if(data.type==="need-window"){
-      sendWindow(data.frame,null,currentSpeed);
+      sendWindow(data.frame,null,currentSpeed,data.refillId);
     }else if(data.type==="command-accepted"||data.type==="error"){
       const ticket=pending.get(data.requestId);
       if(ticket){
