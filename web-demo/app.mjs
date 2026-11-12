@@ -594,6 +594,7 @@ waveSurface.addEventListener("pointerdown",e=>{
 });
 if(GRANULAR_EXPERIMENT){
   waveSurface.style.touchAction="none";
+  $("#wave-hint").textContent="波形を押したまま動かしてスクラブ";
   waveSurface.setAttribute("aria-label",
     "波形をタップまたはドラッグして音源位置を移動");
   waveSurface.addEventListener("pointermove",e=>{
