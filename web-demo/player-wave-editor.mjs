@@ -166,7 +166,10 @@ export function createPlayerWaveEditor({
       if(active){active=false;onScrubState(false);}
     }else if(pointers.size===1){
       const [firstId,p]=pointers.entries().next().value;
-      gesture={type:"pan",id:firstId,x:p.x,frame:center()};
+      // A remaining finger after pinch is not a new tap on the waveform.
+      // It may begin a deliberate pan, but lifting without movement must
+      // never accidentally seek to that finger's horizontal position.
+      gesture={type:"pan",id:firstId,x:p.x,frame:center(),moved:false,suppressTap:true};
       wrap.dataset.interaction="pan";
     }
     refresh(true);
@@ -222,7 +225,8 @@ export function createPlayerWaveEditor({
   });
   canvas.addEventListener("pointerup",e=>{
     if(!pointers.has(e.pointerId))return;
-    if(gesture?.id===e.pointerId&&gesture.type==="pan"&&!gesture.moved){
+    if(gesture?.id===e.pointerId&&gesture.type==="pan"&&
+       !gesture.moved&&!gesture.suppressTap){
       const x=pos(e),where=center()+(x/canvas.clientWidth-.5)*spanFrames;
       onPosition(clamp(where,0,frames-1)/rate,{start:false});
     }
