@@ -68,6 +68,8 @@ test("R4 usability visual captures: desktop and mobile player and folded researc
     console.log("UI_REVIEW_JPEG_DESKTOP:"+Buffer.from(await page.screenshot({type:"jpeg",quality:30})).toString("base64"));
     await page.click("#main-tab-model");
     assert.equal(await page.$eval(".model-legacy-fold",el=>el.open),false);
+    assert.equal(await page.$eval(".model-extra-controls",el=>el.open),false);
+    assert.equal(await page.$eval(".workspace-right",el=>getComputedStyle(el).display==="none"),true);
     assert.equal(await page.$eval("#audio-lab",el=>getComputedStyle(el).display==="none"),false);
     await page.screenshot({path:path.join(captureDir,"02-model-desktop.png")});
     console.log("UI_REVIEW_JPEG_MODEL_DESKTOP:"+Buffer.from(await page.screenshot({type:"jpeg",quality:28})).toString("base64"));
@@ -75,6 +77,8 @@ test("R4 usability visual captures: desktop and mobile player and folded researc
     assert.equal(await page.$eval(".model-legacy-fold",el=>el.open),true);
     assert.equal(await page.$eval(".quick-panel",el=>getComputedStyle(el).display==="none"),false,
       "old transform features are explicitly available instead of deleted");
+    assert.equal(await page.$eval(".workspace-right",el=>getComputedStyle(el).display==="none"),false,
+      "old research graphs become reachable when legacy controls are expanded");
     // Puppeteer's setViewport({isMobile:true,hasTouch:true}) can reload a
     // desktop page. Open a fresh mobile page instead; load the WAV there.
     const mobile=await browser.newPage();
@@ -84,6 +88,13 @@ test("R4 usability visual captures: desktop and mobile player and folded researc
     await mobile.waitForFunction(()=>document.documentElement.dataset.fwBoot==="ready",{timeout:20000});
     await waitForFile(mobile);
     await layoutEvidence(mobile,"mobile-loaded");
+    const firstViewportPitch=await mobile.evaluate(()=>{
+      const pitch=document.querySelector("#granular-pitch-value").getBoundingClientRect();
+      return {pitchBottom:pitch.bottom,viewportHeight:innerHeight};
+    });
+    console.log("UI_FIRST_VIEWPORT_PITCH "+JSON.stringify(firstViewportPitch));
+    assert.ok(firstViewportPitch.pitchBottom<=firstViewportPitch.viewportHeight,
+      "pitch editing must be reachable before first vertical scroll at 390x844");
     await mobile.screenshot({path:path.join(captureDir,"03-player-mobile.png"),fullPage:true});
     console.log("UI_REVIEW_JPEG_MOBILE:"+Buffer.from(await mobile.screenshot({type:"jpeg",quality:32})).toString("base64"));
     await mobile.click("#main-tab-model");
