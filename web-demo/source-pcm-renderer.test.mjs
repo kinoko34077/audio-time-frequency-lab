@@ -167,6 +167,7 @@ test("A/B endpoint windows remain pinned while the moving source cache advances"
     maxWindowFrames:20,maxWindows:3});
   p.installWindow(100,[new Float32Array(20)],"A");
   p.installWindow(199900,[new Float32Array(20)],"B");
+  p.installWindow(100,[new Float32Array(20)]); // same range, no pin arg
   p.installWindow(50000,[new Float32Array(20)]);
   p.installWindow(50020,[new Float32Array(20)]);
   assert.equal(p.statistics.windowCount,3);
