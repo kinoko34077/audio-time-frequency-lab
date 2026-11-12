@@ -110,7 +110,7 @@ test("R3 opt-in real page applies precise signed speed/pitch without replacing t
     await page.waitForFunction(()=>document.querySelector("#rt-telemetry")
       ?.dataset.pcmTransport==="granular-experimental",{timeout:20000});
     await page.waitForFunction(()=>document.querySelector("#granular-optin-status")
-      ?.dataset.renderPitch==="7.1234",{timeout:20000});
+      ?.dataset.renderPitch==="-3.456",{timeout:20000});
     assert.equal(await page.$eval("#granular-speed-value",e=>e.value),"1.237");
     assert.equal(await page.$eval("#granular-pitch-value",e=>e.value),"-3.456");
     const starts=await page.$eval("#rt-telemetry",
@@ -129,7 +129,7 @@ test("R3 opt-in real page applies precise signed speed/pitch without replacing t
       input.dispatchEvent(new Event("change",{bubbles:true}));
     });
     await page.waitForFunction(()=>document.querySelector("#granular-optin-status")
-      ?.dataset.renderPitch==="-3.456",{timeout:20000});
+      ?.dataset.renderPitch==="7.1234",{timeout:20000});
     await page.evaluate(()=>{
       const wave=document.querySelector("#wave"),r=wave.getBoundingClientRect();
       wave.dispatchEvent(new PointerEvent("pointerdown",{
