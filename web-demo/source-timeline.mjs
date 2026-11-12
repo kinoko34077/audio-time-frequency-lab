@@ -41,15 +41,15 @@ export function createSourceTimeline({
   if(!valid(loopStartFrame,loopEndFrame))throw RangeError("invalid A/B source-frame interval");
   if(typeof loopEnabled!=="boolean")throw TypeError("loopEnabled must be boolean");
   let position=startFrame,rate=validatePlaybackSpeed(speed),
-      A=loopStartFrame,B=loopEndFrame,loop=loopEnabled,revision=0,ended=false;
+      A=loopStartFrame,B=loopEndFrame,loop=loopEnabled,revision=0,ended=false,endedDirection=0;
   const reconcile=()=>{
     if(loop){
-      ended=false;
+      ended=false;endedDirection=0;
       if(position<A||position>=B)position=rate<0?B-1:A;
     }else if(rate<0&&position===sourceFrames){
       position=sourceFrames-1;
     }else if(rate>0&&position===sourceFrames){
-      ended=true;
+      ended=true;endedDirection=1;
     }
   };
   const state=()=>Object.freeze({
@@ -79,33 +79,40 @@ export function createSourceTimeline({
       if(loop)position=wrap(p,A,B);
       else{
         position=clamp(p,0,sourceFrames);
-        if(rate<0&&p<0 || rate>0&&p>=sourceFrames)ended=true;
+        if(rate<0&&p<0){ended=true;endedDirection=-1;}
+        else if(rate>0&&p>=sourceFrames){ended=true;endedDirection=1;}
       }
       return state();
     },
     seek(p){
       if(!frame(p)||p>sourceFrames)throw RangeError("invalid seek frame");
       const old=position,wasEnded=ended;
-      position=p;ended=false;reconcile();
+      position=p;ended=false;endedDirection=0;reconcile();
       if(!Object.is(old,position)||wasEnded!==ended)revision++;
       return state();
     },
     setSpeed(s){
       const next=validatePlaybackSpeed(s);
       if(Object.is(rate,next))return state();
-      rate=next;ended=false;reconcile();revision++;
+      rate=next;
+      // Magnitude edits or freezing time must not re-arm an exhausted stream.
+      // A genuine reversal back into the source is allowed to re-arm it.
+      if(!(ended&&!loop&&(next===0||Math.sign(next)===endedDirection))){
+        ended=false;endedDirection=0;reconcile();
+      }
+      revision++;
       return state();
     },
     setLoopBounds(a,b){
       if(!valid(a,b))throw RangeError("invalid A/B source-frame interval");
       if(A===a&&B===b)return state();
-      A=a;B=b;if(loop){ended=false;reconcile();}revision++;
+      A=a;B=b;if(loop){ended=false;endedDirection=0;reconcile();}revision++;
       return state();
     },
     setLoopEnabled(enabled){
       if(typeof enabled!=="boolean")throw TypeError("loopEnabled must be boolean");
       if(loop===enabled)return state();
-      loop=enabled;ended=false;reconcile();revision++;
+      loop=enabled;ended=false;endedDirection=0;reconcile();revision++;
       return state();
     }
   };
