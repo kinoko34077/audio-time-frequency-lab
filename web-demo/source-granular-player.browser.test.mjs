@@ -77,11 +77,42 @@ test("R3 opt-in real page applies precise signed speed/pitch without replacing t
     assert.equal(before.railMax,"2");
     assert.match(before.output,/7\.1/);
     assert.match(before.note,/保持/);
+    // Delay first registration after bridge options were captured. User edits
+    // made before state.player assignment must still reach the actual Worklet.
+    await page.evaluate(()=>{
+      const NativeContext=window.AudioContext;
+      window.__granularInitPending=false;
+      window.AudioContext=class extends NativeContext{
+        constructor(...args){
+          super(...args);
+          const worklet=this.audioWorklet;
+          const original=worklet.addModule.bind(worklet);
+          worklet.addModule=async (...args)=>{
+            if(String(args[0]).includes("source-pcm.worklet.js")){
+              window.__granularInitPending=true;
+              await new Promise(resolve=>setTimeout(resolve,350));
+            }
+            return original(...args);
+          };
+        }
+      };
+    });
     await page.click("#play-dry");
+    await page.waitForFunction(()=>window.__granularInitPending,{timeout:10000});
+    await page.evaluate(()=>{
+      const set=(id,value)=>{
+        const el=document.getElementById(id);
+        el.value=value;el.dispatchEvent(new Event("change",{bubbles:true}));
+      };
+      set("granular-speed-value","1.237");
+      set("granular-pitch-value","-3.456");
+    });
     await page.waitForFunction(()=>document.querySelector("#rt-telemetry")
       ?.dataset.pcmTransport==="granular-experimental",{timeout:20000});
     await page.waitForFunction(()=>document.querySelector("#granular-optin-status")
       ?.dataset.renderPitch==="7.1234",{timeout:20000});
+    assert.equal(await page.$eval("#granular-speed-value",e=>e.value),"1.237");
+    assert.equal(await page.$eval("#granular-pitch-value",e=>e.value),"-3.456");
     const starts=await page.$eval("#rt-telemetry",
       e=>Number(e.dataset.pcmNodeStarts));
     assert.equal(starts,1);
@@ -94,7 +125,7 @@ test("R3 opt-in real page applies precise signed speed/pitch without replacing t
       .textContent==="0.00×",{timeout:20000});
     await page.evaluate(()=>{
       const input=document.querySelector("#granular-pitch-value");
-      input.value="-3.456";
+      input.value="7.1234";
       input.dispatchEvent(new Event("change",{bubbles:true}));
     });
     await page.waitForFunction(()=>document.querySelector("#granular-optin-status")
@@ -117,7 +148,7 @@ test("R3 opt-in real page applies precise signed speed/pitch without replacing t
     }));
     assert.equal(after.starts,starts,"changing speed, pitch or seek restarted the node");
     assert.equal(after.transport,"granular-experimental");
-    assert.equal(after.pitch,"-3.456");
+    assert.equal(after.pitch,"7.1234");
     assert.equal(after.speed,"0");
     assert.ok(Number.isFinite(Number(after.renderRevision)));
     assert.match(after.note,/音声処理済み|音声反映前に上書き/);
