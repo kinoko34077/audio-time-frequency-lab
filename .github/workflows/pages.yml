@@ -53,7 +53,7 @@ jobs:
       - name: Native Chrome AudioWorklet raw PCM and short-loop smoke (R2 staging)
         run: |
           node --test web-demo/source-pcm-worklet.browser.test.mjs
-      - name: Native Chrome production-page raw PCM opt-in and seamless seek
+      - name: Native Chrome real-page raw PCM opt-in and seek without node restart
         run: |
           node --test web-demo/source-pcm-player.browser.test.mjs
       - name: Browser tooling (test runtime only)
