@@ -50,8 +50,9 @@ export function createSourcePCMRenderer({
       missingFrames,renderedFrames,windowCount:windows.length
     });},
     hasFrame(index){return Number.isInteger(index)&&!!find(index);},
-    installWindow(start,channels,pin=null){
-      if((pin!==null&&pin!=="A"&&pin!=="B")||
+    installWindow(start,channels,pin=null,intent="prefetch"){
+      if((intent!=="prefetch"&&intent!=="seek")||
+         (pin!==null&&pin!=="A"&&pin!=="B")||
          !Number.isSafeInteger(start)||start<0||
          !Array.isArray(channels)||channels.length!==channelCount||
          channels.some(ch=>!(ch instanceof Float32Array))||
@@ -88,7 +89,13 @@ export function createSourcePCMRenderer({
         const behind=moving.filter(i=>cursor!==null&&
           (direction>0?windows[i].end<=cursor:windows[i].start>cursor));
         let victim;
-        if(behind.length){
+        if(intent==="seek"){
+          // The host sends an atomic seek-window message: after installing
+          // this target, the worklet moves its source cursor within the same
+          // message handler. Preserve the new target, not the old cursor.
+          const newWindow=windows.length-1;
+          victim=moving.find(i=>i!==newWindow)??newWindow;
+        }else if(behind.length){
           // Prefer discarding PCM already consumed in this direction.
           victim=behind.reduce((a,b)=>direction>0
             ?(windows[a].end<=windows[b].end?a:b)
