@@ -200,6 +200,68 @@ test("native Chrome content-audio stereo output matches independent source-time 
       await long.seek(250000);
       const normal=await observe(250000,8,null,45);
 
+      // Unlike the earlier 45ms smoke, exercise a normally scheduled long
+      // source for 850ms at +8: the playhead crosses several 65536-frame
+      // cache boundaries while the producer and PCM probe run independently.
+      await long.seek(270000);
+      const sustainedMissingBefore=long.latest?.missingFrames||0;
+      await measure("arm",1024);
+      await sleep(850);
+      const sustainedStat=await measure("snapshot");
+      await sleep(28); // allow latest progress message to reach the host
+      const sustainedMissingAfter=long.latest?.missingFrames||0;
+      const sustained={
+        score:score(sustainedStat,270000,8,null),
+        channels:sustainedStat.channels.map(c=>({
+          frames:c.frames,zeroFrames:c.zeroFrames,
+          maxZeroRun:c.maxZeroRun,rms:c.rms,maxStep:c.maxStep
+        })),
+        missingDelta:sustainedMissingAfter-sustainedMissingBefore
+      };
+
+      // Same content source, same output probe: rapid normal-load changes
+      // far across the track. A/B endpoints, direction and seek must change
+      // without old source-window data leaking through the render callback.
+      // Only the final settled state has a single unambiguous source oracle;
+      // intermediate switches are checked for whole-quantum inserted silence.
+      const changes=[
+        {a:340000,b:390001,seek:381234,speed:8},
+        {a:420000,b:450129,seek:450127,speed:-8},
+        {a:500000,b:502000,seek:501999,speed:-1},
+        {a:610000,b:620256,seek:610002,speed:8},
+        {a:720000,b:720129,seek:720128,speed:-8},
+        {a:820000,b:840129,seek:822222,speed:1}
+      ];
+      const burstMissingBefore=long.latest?.missingFrames||0;
+      await measure("arm");
+      const acknowledged=[];
+      for(const change of changes){
+        const bounds=await long.setLoopBounds(change.a,change.b);
+        if(acknowledged.length===0)await long.setLoopEnabled(true);
+        const direction=await long.setSpeed(change.speed);
+        const destination=await long.seek(change.seek);
+        acknowledged.push({
+          expected:change,
+          bounds:[bounds.loopStartFrame,bounds.loopEndFrame],
+          appliedFrame:destination.sourceFrame,
+          speedApplied:direction.op==="speed"
+        });
+      }
+      const burstStat=await measure("snapshot");
+      const last=changes[changes.length-1];
+      const settled=await observe(last.seek,last.speed,[last.a,last.b],55);
+      const burstMissingAfter=long.latest?.missingFrames||0;
+      const burst={
+        acknowledged,measuredFrames:burstStat.frames,
+        channels:burstStat.channels.map(c=>({
+          frames:c.frames,zeroFrames:c.zeroFrames,
+          maxZeroRun:c.maxZeroRun,maxStep:c.maxStep
+        })),
+        missingDelta:burstMissingAfter-burstMissingBefore,
+        settled: settled.score
+      };
+      await long.setLoopEnabled(false);
+
       // The same fixture contains an intentionally silent section:
       // output zero samples there are correct, not a cache underrun.
       await long.setSpeed(1);
@@ -235,7 +297,7 @@ test("native Chrome content-audio stereo output matches independent source-time 
           zeroFrames:c.zeroFrames,maxZeroRun:c.maxZeroRun,
           rms:c.rms,maxStep:c.maxStep
         }))
-      },normal,intendedSilence,
+      },normal,sustained,burst,intendedSilence,
       starved:{frames:starved.frames,channels:starved.channels.map(c=>({
         zeroFrames:c.zeroFrames,maxZeroRun:c.maxZeroRun,
         rms:c.rms,maxStep:c.maxStep
@@ -257,6 +319,27 @@ test("native Chrome content-audio stereo output matches independent source-time 
       assert.ok(score.rmsError<.00012,{name,score});
       assert.ok(score.maxError<.0005,{name,score});
     }
+    assert.ok(evidence.sustained.score.comparedFrames>=512);
+    assert.ok(evidence.sustained.score.rmsError<.00012,evidence.sustained);
+    assert.ok(evidence.sustained.score.maxError<.0005,evidence.sustained);
+    assert.ok(evidence.sustained.channels.every(c=>
+      c.frames>30000&&c.maxZeroRun<128),evidence.sustained);
+    assert.equal(evidence.sustained.missingDelta,0,
+      "normally scheduled long +8 source must not exhaust its cache");
+    assert.equal(evidence.burst.acknowledged.length,6);
+    for(const {expected,bounds,appliedFrame,speedApplied} of
+      evidence.burst.acknowledged){
+      assert.deepEqual(bounds,[expected.a,expected.b]);
+      assert.equal(appliedFrame,expected.seek);
+      assert.equal(speedApplied,true);
+    }
+    assert.ok(evidence.burst.measuredFrames>0,evidence.burst);
+    assert.ok(evidence.burst.channels.every(c=>c.maxZeroRun<128),
+      "rapid source-window changes must not create whole-quanta silence");
+    assert.equal(evidence.burst.missingDelta,0,
+      "rapid A/B and seek commands must prime their destination PCM");
+    assert.ok(evidence.burst.settled.rmsError<.00012,evidence.burst);
+    assert.ok(evidence.burst.settled.maxError<.0005,evidence.burst);
     const transition=evidence.intendedSilence.score;
     assert.ok(transition.leadingRms.every(x=>x>.02),
       "silence test requires genuine stereo audio before the quiet section");
