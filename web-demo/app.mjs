@@ -904,7 +904,12 @@ function schedulePCMSeek(p,frame){
 }
 function seek(seconds){
   const p=state.player;
-  const where=clamp(seconds,0,Math.max(0,duration()-.001));
+  // Legacy source/buffer playback keeps its historical millisecond guard.
+  // PCM sample transport instead accepts the FINAL decoded source frame,
+  // including [N-48..N-1] for 48kHz, without silent 1ms shortening.
+  const rightEdge=p?.rawPCM&&state.decoded?
+    duration()-1/state.decoded.sampleRate:duration()-.001;
+  const where=clamp(seconds,0,Math.max(0,rightEdge));
   state.seek=where;mediaStatus(Boolean(p));
   if(!p)return;
   if(p.labStream){void stop().then(()=>play("wet",where));return;}
