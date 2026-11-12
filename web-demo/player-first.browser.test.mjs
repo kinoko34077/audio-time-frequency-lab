@@ -199,8 +199,11 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, swit
     const finalSample=3*sourceRate-1;
     await page.waitForFunction(frame=>Number(document.querySelector("#granular-optin-status")
       ?.dataset.renderFrame)===frame,{timeout:20000},finalSample);
-    assert.equal(await page.$eval("#wave-detail",
-      el=>Number(el.getAttribute("aria-valuenow"))),finalSample);
+    // The detailed canvas is intentionally repainted at ~30fps, so its
+    // accessible frame label can update one animation frame AFTER the audio
+    // Worklet's render-applied receipt. Require convergence, not same-tick.
+    await page.waitForFunction(frame=>Number(document.querySelector("#wave-detail")
+      ?.getAttribute("aria-valuenow"))===frame,{timeout:10000},finalSample);
     await page.click("#stop");
     await page.waitForFunction(()=>!document.querySelector("#rt-telemetry")
       ?.dataset.pcmTransport,{timeout:20000});
