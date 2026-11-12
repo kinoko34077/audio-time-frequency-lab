@@ -11,12 +11,21 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
     const props=options.processorOptions||{};
     this.renderer=createSourcePCMRenderer({...props,outputSampleRate:sampleRate});
     this.running=false;
+    this.disposed=false;
     this.blocks=0;
     this.pendingRequest=null;
     this.lastMissing=0;
     this.port.onmessage=event=>{
       const m=event.data||{};
       try{
+        if(m.type==="dispose"){
+          this.running=false;
+          this.disposed=true;
+          this.pendingRequest=null;
+          this.port.close();
+          return;
+        }
+        if(this.disposed)return;
         if(m.type==="window"){
           this.renderer.installWindow(m.start,m.channels,m.pin??null);
           this.pendingRequest=null;
@@ -50,6 +59,7 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
   }
   process(_input,outputs){
     const out=outputs[0];
+    if(this.disposed)return false;
     if(!out?.length||!out[0]?.length)return true;
     if(!this.running){
       for(const ch of out)ch.fill(0);
@@ -60,7 +70,9 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
     // Host window cache refill is outside the audio callback and never
     // blocks or starts/stops the AudioWorklet on every loop wrap.
     if(missing){
-      this.request(this.renderer.needsSourceWindow(0));
+      // Request the actual first missing source frame, not the block's
+      // still-cached starting frame (which may never trigger a refill).
+      this.request(this.renderer.firstMissingFrame);
       this.lastMissing=missing;
     }
     if(this.blocks%8===0){
