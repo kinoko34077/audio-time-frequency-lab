@@ -130,6 +130,16 @@ test("window count and size stay bounded; invalid PCM windows fail closed",()=>{
   }),RangeError);
 });
 
+test("integral PCM sample at cache edge never interpolates missing neighbor into NaN",()=>{
+  const p=createSourcePCMRenderer({sourceFrames:10,sourceSampleRate:48000,outputSampleRate:48000});
+  p.installWindow(0,[Float32Array.from([.25,.75])]);
+  p.timeline.seek(1);
+  const out=block(p,1);
+  assert.equal(out.missing,0);
+  assert.equal(out.output[0][0],.75);
+  assert.ok(Number.isFinite(out.output[0][0]));
+});
+
 test("directional window placement is bounded even at original source endpoints",()=>{
   const total=48000*600;
   for(const speed of [-8,-1,0,1,8]){
