@@ -864,11 +864,15 @@ async function play(mode="wet",offset=null){
       if(launchEpoch!==state.transportEpoch)return;
       const sourceRate=state.decoded.sampleRate;
       const at=clamp(offset===null?state.seek:offset,0,Math.max(0,duration()-1/sourceRate));
+      // Preserve the values supplied to an asynchronous Worklet startup; user
+      // edits during addModule() must be replayed before starting playback.
+      const initialSpeed=GRANULAR_EXPERIMENT?granular.speed:1;
+      const initialPitch=GRANULAR_EXPERIMENT?granular.pitch:0;
       bridge=await createSourcePCMBridge({
         ctx,sourceChannels:state.dry,sourceSampleRate:sourceRate,
-        speed:GRANULAR_EXPERIMENT?granular.speed:1,
+        speed:initialSpeed,
         processingMode:GRANULAR_EXPERIMENT?"granular":"raw",
-        pitchSemitones:GRANULAR_EXPERIMENT?granular.pitch:0,
+        pitchSemitones:initialPitch,
         startFrame:Math.round(at*sourceRate),loopEnabled:true,
         loopStartFrame:0,loopEndFrame:state.dry[0].length,
         onEvent:data=>{
@@ -916,6 +920,17 @@ async function play(mode="wet",offset=null){
         labRealtime:false,labProcessed:false,master,directRoute,bridgeRoute:null,
         outputRoute:"direct",offset:at,at:ctx.currentTime};
       state.player=player;
+      if(GRANULAR_EXPERIMENT){
+        // Assign ownership first: later edits now go straight to this bridge.
+        // Commands issued here precede the play command; never silently start
+        // with an obsolete captured speed/pitch while the UI shows new values.
+        if(!Object.is(initialSpeed,granular.speed))
+          await bridge.setSpeed(granular.speed);
+        if(launchEpoch!==state.transportEpoch||state.player!==player)return;
+        if(!Object.is(initialPitch,granular.pitch))
+          await bridge.setPitch(granular.pitch);
+        if(launchEpoch!==state.transportEpoch||state.player!==player)return;
+      }
       await bridge.play();
       if(launchEpoch!==state.transportEpoch||state.player!==player)return;
       mediaStatus(true);void mediaBridge(player);
