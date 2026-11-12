@@ -1,6 +1,7 @@
 import {QUALITY,mixWet} from "./dsp.mjs";
 import {liveFactors,fullBandPartialOptions} from "./lab-contract.mjs";
 import {createModelStream} from "./lab-stream.mjs";
+import {createSourcePCMBridge} from "./source-pcm-bridge.mjs";
 import {frequencyFromSlider,sliderFromFrequency,holdFromFrequency,drawCrusherPreview} from "./crusher-visual.mjs";
 import {drawFrequencyGraph} from "./graph.mjs";
 import {mountDualThumb} from "./dual-thumb.mjs";
@@ -18,6 +19,8 @@ import {axisShiftUnits,axisShiftCanonical,axisShiftView} from "./axis-shift-view
 
 const $=id=>document.querySelector(id);
 const MAX_PREVIEW_SECONDS=600;
+// R2 development-only: never switch the real musical-pitch DSP by default.
+const RAW_PCM_EXPERIMENT=new URLSearchParams(location.search).get("pcmTransport")==="1";
 let graphMax=2000;
 let graphAlphaBeforeZoom=0;
 const controls={
@@ -471,6 +474,10 @@ function drawAudio(){
 function playPosition(){
   if(!state.player||!state.ctx||!duration())return state.seek;
   if(state.player.labStream)return state.player.stream.sourcePositionAt(state.ctx.currentTime);
+  if(state.player.rawPCM){
+    const samples=state.player.pcmBridge.latest?.sourceFrame;
+    return Number.isFinite(samples)?samples/state.decoded.sampleRate:state.player.offset;
+  }
   return (state.player.offset+Math.max(0,state.ctx.currentTime-state.player.at)*(state.player.sourceTimeRate||1))%duration();
 }
 function refreshPlayhead(){
@@ -610,6 +617,13 @@ function seek(seconds){
   state.seek=where;mediaStatus(Boolean(p));
   if(!p)return;
   if(p.labStream){void stop().then(()=>play("wet",where));return;}
+  if(p.rawPCM){
+    p.offset=where;
+    void p.pcmBridge.seek(Math.min(state.dry[0].length-1,
+      Math.max(0,Math.round(where*state.decoded.sampleRate))))
+      .catch(err=>message("PCM実験シーク未反映: "+err.message,"error"));
+    return;
+  }
   // Short host mute covers state reset and rebuffering at the new position.
   const now=state.ctx.currentTime;
   p.master.gain.cancelScheduledValues(now);
@@ -694,6 +708,15 @@ async function stop(){
     p.stream.stop();mediaStatus(false);controls.stop.disabled=true;
     $("#rt-telemetry").textContent="";indicator("停止中");refreshStatusSeek();return;
   }
+  if(p.rawPCM){
+    p.pcmBridge.dispose();
+    try{p.master.disconnect();p.directRoute.disconnect();p.bridgeRoute?.disconnect();}catch{}
+    try{const el=$("#background-output");el.pause();el.srcObject=null;}catch{}
+    mediaStatus(false);controls.stop.disabled=true;
+    $("#rt-telemetry").textContent="";
+    delete $("#rt-telemetry").dataset.pcmTransport;
+    indicator("停止中 · PCM実験経路を終了");refreshStatusSeek();return;
+  }
   try{p.source?.stop();}catch{}
   try{p.source?.disconnect();p.worklet?.disconnect();p.wet?.disconnect();
     p.dry.disconnect();p.master.disconnect();p.directRoute.disconnect();
@@ -711,6 +734,14 @@ async function play(mode="wet",offset=null){
   if(!state.dry)return;
   if(lab.mode!=="live"&&mode==="wet")return startModelPlayback(offset);
   if(state.player?.labStream){const where=offset??playPosition();await stop();return play(mode,where);}
+  if(state.player?.rawPCM){
+    if(mode==="dry"){
+      if(offset!==null)seek(offset);
+      return;
+    }
+    const where=offset??playPosition();
+    await stop();return play(mode,where);
+  }
   const offlineRequest=lab.mode!=="live"&&mode==="wet";
   if(offlineRequest&&!labReady()){
     message("モデルを先に計算してください。原音再生は利用できます。","error");
@@ -749,6 +780,51 @@ async function play(mode="wet",offset=null){
   }
   const launchEpoch=++state.transportEpoch;
   controls.dry.disabled=true;controls.wet.disabled=true;
+  if(mode==="dry"&&RAW_PCM_EXPERIMENT){
+    // Explicit opt-in only. Raw source PCM is not a pitch-preserving model.
+    let bridge=null;
+    try{
+      const ctx=await context();
+      if(launchEpoch!==state.transportEpoch)return;
+      const sourceRate=state.decoded.sampleRate;
+      const at=clamp(offset===null?state.seek:offset,0,Math.max(0,duration()-1/sourceRate));
+      bridge=await createSourcePCMBridge({
+        ctx,sourceChannels:state.dry,sourceSampleRate:sourceRate,
+        speed:1,startFrame:Math.round(at*sourceRate),loopEnabled:true,
+        loopStartFrame:0,loopEndFrame:state.dry[0].length,
+        onEvent:data=>{
+          if(data.type==="progress"&&state.player?.pcmBridge===bridge){
+            $("#rt-telemetry").textContent="PCM実験経路 · 元音源時刻 "+
+              (data.sourceFrame/sourceRate).toFixed(3)+"s · cache不足 "+data.missingFrames;
+          }
+        }
+      });
+      if(launchEpoch!==state.transportEpoch){bridge.dispose();return;}
+      const master=ctx.createGain(),directRoute=ctx.createGain();
+      directRoute.gain.value=1;bridge.connect(master);
+      master.connect(directRoute);directRoute.connect(ctx.destination);
+      const player={rawPCM:true,directDry:true,pcmBridge:bridge,mode:"dry",
+        labRealtime:false,labProcessed:false,master,directRoute,bridgeRoute:null,
+        outputRoute:"direct",offset:at,at:ctx.currentTime};
+      state.player=player;
+      await bridge.play();
+      if(launchEpoch!==state.transportEpoch||state.player!==player)return;
+      mediaStatus(true);void mediaBridge(player);
+      controls.stop.disabled=false;
+      $("#rt-telemetry").dataset.pcmTransport="raw-experimental";
+      indicator("原音再生中 · PCM実験経路（速度と音程は未連動）");
+      message("実験用PCM再生中。音程変更・0倍の音響品質は未実装です。","warning");
+    }catch(err){
+      if(launchEpoch!==state.transportEpoch){bridge?.dispose();return;}
+      await stop();
+      message("PCM実験経路の起動失敗（原音再生に自動置換しません）: "+err.message,"error");
+    }finally{
+      if(launchEpoch===state.transportEpoch){
+        controls.dry.disabled=!state.dry;controls.wet.disabled=!state.dry;
+      }
+    }
+    return;
+  }
   if(mode==="dry"||offlineRequest){
     indicator(offlineRequest?"モデル再生を起動中…":"原音を起動中…");
     try{
