@@ -157,6 +157,38 @@ test("live Audio Lab opt-in original playback uses a persistent PCM node across 
     assert.match(afterFatal.file,/pcm-optin.wav/);
     assert.equal(afterFatal.raw,undefined);
     assert.match(afterFatal.indicator,/異常終了/);
+
+    // A different failure boundary: crash *during* the initial play ACK
+    // while both buttons are disabled. The same loaded file must recover.
+    await page.evaluate(()=>{
+      window.__startupFaultFired=false;
+      window.AudioWorkletNode=function(ctx,name,options){
+        const node=new window.__nativeAudioWorkletNode(ctx,name,options);
+        if(name==="audio-lab-source-pcm"){
+          const nativePost=node.port.postMessage.bind(node.port);
+          node.port.postMessage=(...args)=>{
+            nativePost(...args);
+            if(args[0]?.type==="command"&&args[0]?.op==="play"){
+              window.__startupFaultFired=true;
+              node.dispatchEvent(new Event("processorerror"));
+            }
+          };
+        }
+        return node;
+      };
+    });
+    await page.click("#play-dry");
+    await page.waitForFunction(()=>{
+      const d=document;
+      return window.__startupFaultFired&&
+        !d.querySelector("#play-dry").disabled&&
+        !d.querySelector("#play-wet").disabled&&
+        d.querySelector("#status").textContent.includes("音源は保持されています")&&
+        d.querySelector("#rt-indicator").textContent.includes("異常終了")&&
+        d.querySelector("#rt-telemetry").dataset.pcmTransport===undefined;
+    },{timeout:10000});
+    assert.match(await page.$eval("#file-meta",el=>el.textContent),/pcm-optin.wav/);
+
     await page.evaluate(()=>{window.AudioWorkletNode=window.__nativeAudioWorkletNode;});
     await page.click("#play-dry");
     await page.waitForFunction(()=>document.querySelector("#rt-telemetry")
