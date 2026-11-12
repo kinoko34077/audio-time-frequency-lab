@@ -34,13 +34,13 @@ test("rail operating range cannot mutate accepted speed",()=>{
 test("forward, reverse, and zero source-time advancement",()=>{
   const t=make({startFrame:4,speed:1});
   assert.equal(t.sampleIndexAt(2),6);
-  assert.equal(t.advance(3).sourceFrame,7);
+  assert.equal(t.advance(3),7);
   t.setSpeed(-1);
   assert.equal(t.sampleIndexAt(2),5);
-  assert.equal(t.advance(2).sourceFrame,5);
+  assert.equal(t.advance(2),5);
   t.setSpeed(0);
   assert.equal(t.sampleIndexAt(8192),5);
-  assert.equal(t.advance(8192).sourceFrame,5);
+  assert.equal(t.advance(8192),5);
   assert.equal(t.state.revision,2);
 });
 
@@ -53,13 +53,13 @@ test("unlooped bounds stop; reverse from EOF starts at last source sample",()=>{
   assert.equal(t.state.sourceFrame,0);
   const f=make({startFrame:47999,speed:1});
   assert.equal(f.sampleIndexAt(1),null);
-  assert.equal(f.advance(2).sourceFrame,48000);
+  assert.equal(f.advance(2),48000);
 });
 
 test("ordered A/B sample boundaries including one-sample loops",()=>{
   const t=make({speed:8,loopEnabled:true,loopStartFrame:37,loopEndFrame:38});
   for(let i=0;i<256;i++)assert.equal(t.sampleIndexAt(i),37);
-  assert.equal(t.advance(128).sourceFrame,37);
+  assert.equal(t.advance(128),37);
   t.setSpeed(-8);
   for(let i=0;i<256;i++)assert.equal(t.sampleIndexAt(i),37);
   for(const [a,b] of [[10,10],[11,10],[-1,10],[1,48001],[1.1,2]])
@@ -69,7 +69,7 @@ test("ordered A/B sample boundaries including one-sample loops",()=>{
 test("128-frame quantum can cross many laps in both directions",()=>{
   const t=make({startFrame:2,loopStartFrame:2,loopEndFrame:5,loopEnabled:true,speed:8});
   assert.deepEqual(Array.from({length:6},(_,i)=>t.sampleIndexAt(i)),[2,4,3,2,4,3]);
-  assert.equal(t.advance(128).sourceFrame,3);
+  assert.equal(t.advance(128),3);
   t.setSpeed(-8);
   assert.deepEqual(Array.from({length:6},(_,i)=>t.sampleIndexAt(i)),[3,4,2,3,4,2]);
 });
@@ -165,7 +165,7 @@ test("source/sample rate conversion and malformed inputs",()=>{
   const t=createSourceTimeline({sourceFrames:48000,sourceSampleRate:48000,
     outputSampleRate:44100,speed:1});
   assert.ok(Math.abs(t.sourceFrameAt(441)-480)<1e-9);
-  assert.ok(Math.abs(t.advance(441).sourceFrame-480)<1e-9);
+  assert.ok(Math.abs(t.advance(441)-480)<1e-9);
   assert.throws(()=>make({sourceFrames:0}),RangeError);
   assert.throws(()=>make({loopStartFrame:2,loopEndFrame:2}),RangeError);
   assert.throws(()=>make({speed:9}),RangeError);
