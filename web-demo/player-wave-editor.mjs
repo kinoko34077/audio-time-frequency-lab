@@ -82,7 +82,9 @@ export function createPlayerWaveEditor({
     const next=clamp(spanFrames*factor,2,Math.max(2,frames));
     spanFrames=next;
     const relocated=clamp(anchor-(pivotX-.5)*next,0,frames-1);
-    onPosition(relocated/rate,{start:false});
+    // Zoom centered on the fixed head is a VISUAL change, not a seek.
+    // Avoid resetting active grain synthesis / legacy audio transport.
+    if(Math.abs(relocated-c)>=.5)onPosition(relocated/rate,{start:false});
     lastFrame=NaN;refresh(true);
   }
   function refresh(force=false){
@@ -204,7 +206,8 @@ export function createPlayerWaveEditor({
       const length=Math.max(1,Math.abs(pts[0].x-pts[1].x));
       spanFrames=clamp(gesture.span*gesture.distance/length,2,Math.max(2,frames));
       const newCenter=clamp(gesture.anchor-(mid/canvas.clientWidth-.5)*spanFrames,0,frames-1);
-      onPosition(newCenter/rate,{start:false});
+      if(Math.abs(newCenter-center())>=.5)
+        onPosition(newCenter/rate,{start:false});
       lastFrame=NaN;refresh(true);e.preventDefault();return;
     }
     if(gesture.id!==e.pointerId)return;
