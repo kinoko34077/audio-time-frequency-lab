@@ -62,6 +62,17 @@ jobs:
       - name: Native Chrome R4 playback-first real-file and A/B/tab-state regression
         run: |
           node --test web-demo/player-first.browser.test.mjs
+      - name: Native Chrome UI visual audit with desktop and mobile screenshots
+        run: |
+          node --test web-demo/player-visual.browser.test.mjs
+      - name: Preserve UI screenshots for human visual review
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: audio-lab-ui-review-${{ github.run_number }}
+          path: ui-review-screenshots/*.png
+          if-no-files-found: warn
+          retention-days: 14
       - name: Native Chrome opt-in granular controls with precise signed speed and pitch (R3)
         run: |
           node --test web-demo/source-granular-player.browser.test.mjs
