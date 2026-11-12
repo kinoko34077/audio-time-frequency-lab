@@ -49,12 +49,15 @@ export async function createSourcePCMBridge({
   // Do not copy entire track to the worklet; these small snapshots are moved.
   let requestId=0,closed=false,latest=null;
   const pending=new Map();
-  const sendWindow=(requested,pin=null,direction=currentSpeed)=>{
-    if(closed)return;
+  const windowSlice=(requested,direction=currentSpeed)=>{
     const frame=Math.max(0,Math.min(frames-1,Math.floor(requested)));
     const start=chooseSourceWindowStart(frame,frames,SOURCE_WINDOW_FRAMES,direction);
     const end=Math.min(frames,start+SOURCE_WINDOW_FRAMES);
-    const channels=sourceChannels.map(x=>x.slice(start,end));
+    return {start,channels:sourceChannels.map(x=>x.slice(start,end))};
+  };
+  const sendWindow=(requested,pin=null,direction=currentSpeed)=>{
+    if(closed)return;
+    const {start,channels}=windowSlice(requested,direction);
     node.port.postMessage({
       type:"window",start,channels,pin,
       requestId:++requestId
@@ -99,8 +102,16 @@ export async function createSourcePCMBridge({
     seek(frame){
       if(!Number.isSafeInteger(frame)||frame<0||frame>frames)
         return Promise.reject(RangeError("invalid source-frame seek"));
-      sendWindow(frame===frames?frames-1:frame);
-      return command("seek",{frame});
+      if(closed)return Promise.reject(Error("PCM bridge disposed"));
+      const {start,channels}=windowSlice(frame===frames?frames-1:frame);
+      const id=++requestId;
+      // The source window and seek become one Worklet message, so prefetch
+      // eviction cannot discard the target while protecting the old cursor.
+      return new Promise((resolve,reject)=>{
+        pending.set(id,{resolve,reject});
+        node.port.postMessage({type:"seek-window",
+          start,channels,frame,requestId:id},channels.map(x=>x.buffer));
+      });
     },
     setSpeed(next){
       try{currentSpeed=validatePlaybackSpeed(next);}
