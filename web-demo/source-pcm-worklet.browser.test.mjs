@@ -126,12 +126,21 @@ test("native Chrome experimental source-PCM AudioWorklet renders and loops witho
         timedOut=/command response timed out/.test(err.message);
       }
       const timeoutFatalCount=silent.filter(x=>x.type==="fatal-error").length;
+      const afterTimeout=[];
+      unresponsive.node.port.onmessage=e=>{
+        if(e.data?.type==="command-accepted"&&e.data.requestId===987654)
+          afterTimeout.push(e.data);
+      };
+      unresponsive.node.port.postMessage({
+        type:"command",op:"play",requestId:987654
+      });
+      await new Promise(resolve=>setTimeout(resolve,100));
       unresponsive.dispose();
       await ctx.close();
       return {
         first,loop,rms,stable,loopMissing,transitions,afterDispose,
         failureRecovery:{crashRejected,fatalCount,afterCrashRejected,
-          timedOut,timeoutFatalCount},
+          timedOut,timeoutFatalCount,postTimeoutAck:afterTimeout.length},
         errors:events.filter(x=>x.type==="error"),
         windowAccepts:events.filter(x=>x.type==="window-accepted").length,
         gapReports:events.filter(x=>x.type==="underrun").length,
@@ -166,7 +175,7 @@ test("native Chrome experimental source-PCM AudioWorklet renders and loops witho
     assert.ok(evidence.windowAccepts>=1);
     assert.deepEqual(evidence.failureRecovery,{
       crashRejected:true,fatalCount:1,afterCrashRejected:true,
-      timedOut:true,timeoutFatalCount:1
+      timedOut:true,timeoutFatalCount:1,postTimeoutAck:0
     });
     assert.equal(evidence.farSeek.ack,700000);
     assert.deepEqual(evidence.farSeek.errors,[]);
