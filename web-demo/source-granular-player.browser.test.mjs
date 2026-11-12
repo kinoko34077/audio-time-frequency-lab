@@ -101,7 +101,7 @@ test("R3 opt-in real page applies precise signed speed/pitch without replacing t
     // location DURING delayed Worklet initialization. The first audible
     // render must use the FINAL scrub coordinate, never the stale down point.
     const sourceRate=await page.$eval("#file-meta",e=>
-      Number(e.textContent.match(/(\\d+)Hz/)?.[1]));
+      Number(e.textContent.match(/(\d+)Hz/)?.[1]));
     assert.ok(sourceRate>0,"decoded PCM sample rate must be known");
     await page.$eval("#wave",e=>e.scrollIntoView({block:"center"}));
     const initialBox=await page.$eval("#wave",e=>{
