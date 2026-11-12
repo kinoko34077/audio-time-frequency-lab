@@ -79,3 +79,58 @@ test("atomic loop-config switches source bounds with endpoint PCM in same handle
   assert.deepEqual(Array.from(output[0]),[.5,.5,.5,.5]);
   assert.equal(p.renderer.statistics.missingFrames,0);
 });
+
+test("command ACK alone does not claim a rendered output quantum",()=>{
+  const {p,messages}=processor({sourceFrames:2048,sourceSampleRate:48000,
+    channelCount:1,startFrame:60,speed:1});
+  p.port.onmessage({data:{type:"window",start:0,
+    channels:[new Float32Array(2048).fill(.4)],requestId:1}});
+  p.port.onmessage({data:{type:"command",op:"play",requestId:2}});
+  assert.equal(messages.filter(m=>m.type==="render-applied").length,0,
+    "accepted play must not be reported as rendered before process()");
+  const out=[new Float32Array(128)];
+  p.process([],[out]);
+  const seen=messages.filter(m=>m.type==="render-applied");
+  assert.equal(seen.length,1);
+  assert.equal(seen[0].requestId,2);
+  assert.equal(seen[0].sourceFrame,60);
+  assert.equal(seen[0].missingFramesInBlock,0);
+  assert.equal(seen[0].running,true);
+  assert.ok(out[0].every(x=>Math.abs(x-.4)<1e-6));
+  p.process([],[out]);
+  assert.equal(messages.filter(m=>m.type==="render-applied").length,1,
+    "one control request must have one render disposition");
+});
+
+test("multiple accepted edits before next quantum supersede prior render claims",()=>{
+  const {p,messages}=processor({sourceFrames:4096,sourceSampleRate:48000,
+    channelCount:1,startFrame:40,speed:1});
+  p.port.onmessage({data:{type:"window",start:0,
+    channels:[new Float32Array(4096).fill(.3)],requestId:1}});
+  p.port.onmessage({data:{type:"command",op:"play",requestId:2}});
+  p.port.onmessage({data:{type:"command",op:"speed",speed:2,requestId:3}});
+  p.port.onmessage({data:{type:"seek-window",frame:101,start:0,
+    channels:[new Float32Array(4096).fill(.3)],requestId:4}});
+  assert.deepEqual(messages.filter(m=>m.type==="render-superseded")
+    .map(m=>[m.requestId,m.supersededBy]),[[2,3],[3,4]]);
+  assert.equal(messages.filter(m=>m.type==="render-applied").length,0);
+  p.process([],[[new Float32Array(128)]]);
+  const rendered=messages.filter(m=>m.type==="render-applied");
+  assert.equal(rendered.length,1);
+  assert.equal(rendered[0].requestId,4);
+  assert.equal(rendered[0].sourceFrame,101);
+  assert.equal(rendered[0].running,true);
+});
+
+test("pause receipt reports a silent output quantum without pretending sound played",()=>{
+  const {p,messages}=processor({sourceFrames:1024,sourceSampleRate:48000,
+    channelCount:1,speed:1});
+  p.port.onmessage({data:{type:"command",op:"pause",requestId:19}});
+  const out=[new Float32Array(128).fill(.2)];
+  p.process([],[out]);
+  assert.ok(out[0].every(x=>x===0));
+  const observed=messages.find(m=>m.type==="render-applied");
+  assert.equal(observed.requestId,19);
+  assert.equal(observed.running,false);
+  assert.equal(observed.missingFramesInBlock,0);
+});

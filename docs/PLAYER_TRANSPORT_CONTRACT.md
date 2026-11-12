@@ -88,3 +88,14 @@ Source files added for the bounded first step:
 - The same test session checks source 44.1kHz→48kHz, stereo raw ±8 and ±1, tiny A/B lengths 1/2/16/127/128/129/256, normal unlooped source playback, the **intended silence interval** (must be preserved and not flagged as an underrun), a fully cached loop under bounded main-thread load, a long +8 source under deliberately cache-starving host stall, and a subsequent source seek/speed change. Output PCM, natural zeros, producer missing-frame telemetry and ACK latency are logged separately.
 - Natural silence and intentional A/B wrap jumps are **not classified as faulty solely because there are zeros or large adjacent steps**. A separate pure constant PCM test may be used to isolate an unexplained failure, but is not required as a first pass before the content-audio test. The prior PR #43 constant-PCM stress data remains a historical diagnostic/control, not a duplicate mandatory acceptance stage.
 - A single fitted sample alignment does not establish **device DAC latency**, sample-exact user-interaction latency, arbitrary-stall gaplessness, aliasing-free signed-speed resampling, independent-pitch playback, true time-freeze synthesis or subjective fidelity. Those are separate R2–R5 acceptance conditions and must be reported as such.
+
+
+## R2 source command versus output-render receipt (2026-11-13)
+
+The experimental `audio-lab-source-pcm` Worklet now distinguishes:
+- `command-accepted`: the processor message handler validated and applied the requested **control state** (`requestId`, `revision`), not proof of audio output.
+- `render-applied`: the **first subsequent `process()` output quantum** observed after that control state is installed. Carries the matching `requestId` and `revision`, source frame at the block start, `currentFrame`/`currentTime` for the AudioWorklet output timeline, whether rendering is active, and number of missing PCM frames in this quantum. A pause control can be rendered correctly as silence; `running=false` must not be misrepresented as audible sound.
+- `render-superseded`: a later accepted command arrived before the earlier command reached any output quantum. The earlier `requestId` must **not** be reported as actually rendered; only the last accepted state for that quantum is eligible. These are observational events using existing identifiers, not an alternate source of truth or a duplicate revision authority.
+- `dispose` and processor errors cancel unobserved pending receipts without claiming sound was produced.
+
+The existing **content-audio-first Chrome run** now records the real host issue time, control ACK time, matching Worklet render receipt time and the audio-quantum position for one explicit source seek. This measures command-to-render-thread-notification latency under Chrome, **not** output-to-DAC/speaker timing or guaranteed tactile-to-audible latency on iOS. No additional constant-PCM input pass and no normal UI/DSP behavior change.
