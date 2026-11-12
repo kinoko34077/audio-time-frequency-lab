@@ -123,6 +123,9 @@ export async function createSourcePCMBridge({
     dispose(){
       if(closed)return;
       closed=true;
+      // Disconnecting a node is NOT a processor lifetime command. Explicitly
+      // stop its render loop and release its WorkletGlobalScope PCM windows.
+      node.port.postMessage({type:"dispose"});
       node.port.onmessage=null;
       node.disconnect();
       for(const ticket of pending.values())ticket.reject(Error("PCM bridge disposed"));
