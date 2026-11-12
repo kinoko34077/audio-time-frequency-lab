@@ -140,6 +140,27 @@ test("integral PCM sample at cache edge never interpolates missing neighbor into
   assert.ok(Number.isFinite(out.output[0][0]));
 });
 
+test("crossing a cached chunk reports the real missing frame, not the cached head",()=>{
+  const total=70000;
+  const player=createSourcePCMRenderer({
+    sourceFrames:total,sourceSampleRate:48000,outputSampleRate:48000,
+    speed:7,startFrame:65408
+  });
+  player.installWindow(0,[Float32Array.from({length:65536},()=>.5)]);
+  assert.equal(player.needsSourceWindow(0),null);
+  const first=block(player,128);
+  assert.ok(first.missing>0);
+  assert.ok(player.firstMissingFrame>=65536);
+  assert.equal(player.timeline.state.sourceFrame,65408);
+  const from=chooseSourceWindowStart(player.firstMissingFrame,total,65536,7);
+  player.installWindow(from,[Float32Array.from({length:total-from},()=>.5)]);
+  const retry=block(player,128);
+  assert.equal(retry.missing,0);
+  assert.ok(retry.output[0].every(x=>x===.5));
+  assert.ok(player.timeline.state.sourceFrame>65408);
+  assert.equal(player.firstMissingFrame,null);
+});
+
 test("A/B endpoint windows remain pinned while the moving source cache advances",()=>{
   const p=createSourcePCMRenderer({sourceFrames:200000,
     sourceSampleRate:48000,outputSampleRate:48000,
