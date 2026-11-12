@@ -14,6 +14,7 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
     this.disposed=false;
     this.blocks=0;
     this.pendingRequest=null;
+    this.refillSequence=0;
     this.lastMissing=0;
     this.port.onmessage=event=>{
       const m=event.data||{};
@@ -27,8 +28,10 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
         }
         if(this.disposed)return;
         if(m.type==="window"){
+          // Ignore late source refills from an obsolete seek, loop or speed.
+          if(m.refillId!=null&&m.refillId!==this.pendingRequest)return;
           this.renderer.installWindow(m.start,m.channels,m.pin??null);
-          this.pendingRequest=null;
+          if(m.refillId!=null)this.pendingRequest=null;
           this.port.postMessage({type:"window-accepted",requestId:m.requestId,start:m.start});
           return;
         }
@@ -67,6 +70,8 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
           case "loop":t.setLoopEnabled(m.enabled);break;
           default:throw RangeError("unknown source PCM worklet command");
         }
+        if(m.op==="seek"||m.op==="speed"||m.op==="bounds"||m.op==="loop")
+          this.pendingRequest=null;
         const st=t.state;
         this.port.postMessage({type:"command-accepted",requestId:m.requestId,op:m.op,
           sourceFrame:st.sourceFrame,revision:st.revision,rawPCM:true});
@@ -77,9 +82,12 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
     };
   }
   request(frame){
-    if(frame===null||this.pendingRequest===frame)return;
-    this.pendingRequest=frame;
-    this.port.postMessage({type:"need-window",frame});
+    if(frame===null||this.pendingRequest!==null)return;
+    // Bound outstanding source copies to one request per processor. A stalled
+    // main thread must not accumulate thousands of overlapping PCM windows.
+    const refillId=++this.refillSequence;
+    this.pendingRequest=refillId;
+    this.port.postMessage({type:"need-window",frame,refillId});
   }
   process(_input,outputs){
     const out=outputs[0];
