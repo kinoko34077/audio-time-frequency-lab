@@ -2,6 +2,7 @@ import {QUALITY,mixWet} from "./dsp.mjs";
 import {liveFactors,fullBandPartialOptions} from "./lab-contract.mjs";
 import {createModelStream} from "./lab-stream.mjs";
 import {createSourcePCMBridge} from "./source-pcm-bridge.mjs";
+import {createPlayerWaveEditor} from "./player-wave-editor.mjs";
 import {validatePlaybackSpeed,validateSpeedRailRange,speedOnRail,formatPlaybackSpeed} from "./source-timeline.mjs";
 import {frequencyFromSlider,sliderFromFrequency,holdFromFrequency,drawCrusherPreview} from "./crusher-visual.mjs";
 import {drawFrequencyGraph} from "./graph.mjs";
@@ -24,11 +25,23 @@ const MAX_PREVIEW_SECONDS=600;
 const PCM_EXPERIMENT=new URLSearchParams(location.search).get("pcmTransport");
 const RAW_PCM_EXPERIMENT=PCM_EXPERIMENT==="1"||PCM_EXPERIMENT==="granular";
 const GRANULAR_EXPERIMENT=PCM_EXPERIMENT==="granular";
+// R4 main playback is a named mode, NOT a stealth rewrite of original audio.
+// The existing ?pcmTransport=1 (raw) and ?pcmTransport=granular (prototype)
+// remain compatible, and old wet/Rust/models are still explicitly selectable.
+const PLAYER_GRANULAR_AVAILABLE=true;
 const granular={speed:1,pitch:0,railMax:8};
+let detailWaveEditor=null,detailWaveScrubbing=false;
+const ab={a:0,b:0,enabled:true};
+function mainTab(){
+  return document.body.dataset.mainTab==="model"?"model":"player";
+}
+function preferredWaveMode(){
+  return mainTab()==="player"?"player":GRANULAR_EXPERIMENT?"dry":"wet";
+}
 let graphMax=2000;
 let graphAlphaBeforeZoom=0;
 const controls={
-  dry:$("#play-dry"),wet:$("#play-wet"),stop:$("#stop"),
+  main:$("#play-main"),dry:$("#play-dry"),wet:$("#play-wet"),stop:$("#stop"),
   render:$("#render"),download:$("#download")
 };
 const dualControls={};
@@ -113,7 +126,7 @@ const duration=()=>state.dry?.length?state.dry[0].length/state.decoded.sampleRat
 // #36 R3: thin UI over source-timeline + existing granular bridge contracts.
 // Presentation rounding and rail visibility must not rewrite canonical values.
 function refreshGranular(){
-  if(!GRANULAR_EXPERIMENT)return;
+  if(!PLAYER_GRANULAR_AVAILABLE)return;
   const s=$("#granular-speed"),p=$("#granular-pitch");
   const st=$("#granular-speed-value"),pt=$("#granular-pitch-value");
   s.min=String(-granular.railMax);s.max=String(granular.railMax);
@@ -156,10 +169,12 @@ function editGranular(kind,raw){
       message("実験音声設定の反映失敗: "+error.message,"error");
     });
 }
-if(GRANULAR_EXPERIMENT){
+if(PLAYER_GRANULAR_AVAILABLE){
   $("#granular-optin-controls").hidden=false;
-  controls.dry.textContent="▶ 粒状音程（実験）";
-  controls.dry.title="独立音程・±8/0倍再生。音質は未受入。";
+  if(GRANULAR_EXPERIMENT){
+    controls.dry.textContent="▶ 粒状音程（実験）";
+    controls.dry.title="以前の実験ルートと同一の独立音程再生。";
+  }
   for(const k of ["speed","pitch"]){
     const slider=$("#granular-"+k),input=$("#granular-"+k+"-value");
     slider.addEventListener("input",()=>editGranular(k,slider.value));
@@ -172,6 +187,116 @@ if(GRANULAR_EXPERIMENT){
   });
   refreshGranular();
 }
+// Playback / model tab navigation owns presentation only. Existing song,
+// transport, output node, typed edits, research settings stay mounted.
+function selectWorkspaceTab(target){
+  if(target!=="player"&&target!=="model")return;
+  document.body.dataset.mainTab=target;
+  for(const mode of ["player","model"]){
+    const btn=$("#main-tab-"+mode);
+    btn.setAttribute("aria-selected",String(target===mode));
+    btn.tabIndex=target===mode?0:-1;
+  }
+  requestAnimationFrame(()=>{drawAudio();drawCurve();});
+}
+for(const mode of ["player","model"]){
+  $("#main-tab-"+mode).addEventListener("click",()=>selectWorkspaceTab(mode));
+  $("#main-tab-"+mode).addEventListener("keydown",event=>{
+    if(event.key!=="ArrowLeft"&&event.key!=="ArrowRight"&&
+       event.key!=="Home"&&event.key!=="End")return;
+    event.preventDefault();
+    const next=event.key==="Home"?"player":event.key==="End"?"model":
+      event.key==="ArrowLeft"?"player":"model";
+    selectWorkspaceTab(next);$("#main-tab-"+next).focus();
+  });
+}
+selectWorkspaceTab(mainTab());
+
+function refreshAB(){
+  const present=Boolean(state.dry&&state.decoded);
+  const panel=$("#player-loop-controls");
+  panel.hidden=!present;
+  if(!present)return;
+  const frames=state.dry[0].length;
+  for(const [id,value] of [["a",ab.a],["b",ab.b]]){
+    const input=$("#player-loop-"+id);
+    input.max=String(id==="a"?frames-1:frames);
+    if(document.activeElement!==input)input.value=String(value);
+  }
+  $("#player-loop-enabled").checked=ab.enabled;
+  detailWaveEditor?.refresh(true);
+}
+function syncLoopToPlayer(player=state.player){
+  if(!player?.pcmBridge||player.pcmBridge.processingMode!=="granular"||
+     player.initializing)return;
+  const requested={a:ab.a,b:ab.b,enabled:ab.enabled};
+  if(!player.loopBusy&&!player.pendingLoop&&player.appliedLoop?.a===requested.a&&
+     player.appliedLoop?.b===requested.b&&
+     player.appliedLoop?.enabled===requested.enabled)return;
+  player.pendingLoop=requested;
+  if(player.loopBusy)return;
+  player.loopBusy=true;
+  void (async()=>{
+    while(state.player===player&&player.pendingLoop){
+      const requested=player.pendingLoop;
+      player.pendingLoop=null;
+      // setLoopBounds delivers an atomic endpoint+transport change. Keep
+      // loop enabled/disabled consistent without restarting the Worklet.
+      await player.pcmBridge.setLoopBounds(requested.a,requested.b);
+      if(state.player!==player)return;
+      await player.pcmBridge.setLoopEnabled(requested.enabled);
+      player.appliedLoop=requested;
+    }
+    if(state.player===player)
+      $("#player-loop-hint").textContent="区間の音声処理への反映が完了しました。";
+  })().catch(error=>{
+    if(state.player===player){
+      $("#player-loop-hint").textContent="区間変更が反映されません: "+error.message;
+      message("区間ループ設定の反映失敗: "+error.message,"error");
+    }
+  }).finally(()=>{
+    player.loopBusy=false;
+    if(state.player===player&&player.pendingLoop)syncLoopToPlayer(player);
+  });
+}
+function editAB(edge,raw){
+  const input=$("#player-loop-"+edge),other=edge==="a"?ab.b:ab.a;
+  const frames=state.dry?.[0].length||0;
+  const value=Number(raw);
+  const valid=String(raw).trim()!==""&&Number.isSafeInteger(value)&&
+    (edge==="a"?value>=0&&value<other:value>other&&value<=frames);
+  if(!valid){
+    input.setCustomValidity(edge==="a"?
+      "開始Aは0以上・B未満の整数サンプルです":
+      "終端BはAより大きく・音源長以下の整数サンプルです");
+    input.reportValidity();
+    $("#player-loop-hint").textContent="A は B より小さくしてください（1サンプル区間可）。";
+    return;
+  }
+  input.setCustomValidity("");
+  if(ab[edge]===value){refreshAB();return;}
+  ab[edge]=value;
+  $("#player-loop-hint").textContent="区間の反映を要求しました。";
+  refreshAB();syncLoopToPlayer();
+}
+for(const edge of ["a","b"]){
+  const input=$("#player-loop-"+edge);
+  input.addEventListener("input",()=>input.setCustomValidity(""));
+  input.addEventListener("change",()=>editAB(edge,input.value));
+  input.addEventListener("keydown",e=>{if(e.key==="Enter")input.blur();});
+  $("#player-loop-"+edge+"-now").addEventListener("click",()=>{
+    if(!state.dry)return;
+    const frame=Math.round(playPosition()*state.decoded.sampleRate);
+    editAB(edge,String(Math.min(state.dry[0].length,Math.max(0,frame))));
+  });
+}
+$("#player-loop-enabled").addEventListener("change",event=>{
+  if(!state.dry)return;
+  ab.enabled=event.target.checked;
+  $("#player-loop-hint").textContent=ab.enabled?
+    "区間をループします（最短1サンプル）。":"区間ループをOFFにしました。";
+  syncLoopToPlayer();
+});
 function message(text,type="info"){
   const node=$("#status");
   if(node.textContent!==text)node.textContent=text;
@@ -541,11 +666,18 @@ let activeWavePointer=null;
 function playPosition(){
   // During a native gesture the latest finger/mouse position is the UI source
   // of truth; callback progress/command ACK can lag behind the dragged point.
-  if(activeWavePointer!==null)return state.seek;
+  if(activeWavePointer!==null||detailWaveScrubbing)return state.seek;
   if(!state.player||!state.ctx||!duration())return state.seek;
   if(state.player.labStream)return state.player.stream.sourcePositionAt(state.ctx.currentTime);
   if(state.player.rawPCM){
-    const samples=state.player.pcmBridge.latest?.sourceFrame;
+    const progress=state.player.pcmBridge.latest;
+    // Worklet render receipts can arrive before its next 8-quantum progress
+    // event. Never repaint the head at an OLD progress frame after a precise
+    // seek has already been applied by the audio processor.
+    const applied=state.player.lastAppliedFrame;
+    const samples=applied&&(!progress||!Number.isSafeInteger(progress.revision)||
+      progress.revision<applied.revision)?
+      applied.frame:progress?.sourceFrame;
     return Number.isFinite(samples)?samples/state.decoded.sampleRate:state.player.offset;
   }
   return (state.player.offset+Math.max(0,state.ctx.currentTime-state.player.at)*(state.player.sourceTimeRate||1))%duration();
@@ -555,6 +687,7 @@ function refreshPlayhead(){
   $("#elapsed").textContent=fmtTime(seconds);
   $("#duration").textContent=fmtTime(duration());
   $("#playhead").style.left=(duration()?clamp(seconds/duration(),0,1)*100:0)+"%";
+  detailWaveEditor?.refresh();
   state.raf=requestAnimationFrame(refreshPlayhead);
 }
 function playheadFromPointer(e,startIfStopped=true){
@@ -570,7 +703,7 @@ function playheadFromPointer(e,startIfStopped=true){
     // A drag beginning while stopped launches exactly one player. Moves that
     // occur during async AudioWorklet registration merely replace state.seek.
     const launchAt=state.seek;
-    void play(GRANULAR_EXPERIMENT?"dry":"wet",launchAt)
+    void play(preferredWaveMode(),launchAt)
       .catch(err=>message("再生失敗: "+err.message,"error"));
   }
   refreshStatusSeek();
@@ -578,6 +711,7 @@ function playheadFromPointer(e,startIfStopped=true){
 function refreshStatusSeek(){
   $("#elapsed").textContent=fmtTime(state.seek);
   $("#playhead").style.left=(duration()?100*state.seek/duration():0)+"%";
+  detailWaveEditor?.refresh(true);
 }
 // Opt-in R3 scrub: one captured pointer, with real touch/mouse moves; legacy
 // modes retain the existing single-tap seek. Synthetic legacy fixture events
@@ -586,13 +720,13 @@ const waveSurface=$("#wave");
 waveSurface.addEventListener("pointerdown",e=>{
   if(e.pointerType==="mouse"&&e.button!==0)return;
   if(activeWavePointer!==null)return;
-  if(GRANULAR_EXPERIMENT&&e.isTrusted){
+  if((GRANULAR_EXPERIMENT||mainTab()==="player")&&e.isTrusted){
     activeWavePointer=e.pointerId;
     try{waveSurface.setPointerCapture(e.pointerId);}catch{}
   }
   playheadFromPointer(e);
 });
-if(GRANULAR_EXPERIMENT){
+if(PLAYER_GRANULAR_AVAILABLE){
   waveSurface.style.touchAction="none";
   $("#wave-hint").textContent="波形を押したまま動かしてスクラブ";
   waveSurface.setAttribute("aria-label",
@@ -614,10 +748,42 @@ if(GRANULAR_EXPERIMENT){
   for(const type of ["pointerup","pointercancel","lostpointercapture"])
     waveSurface.addEventListener(type,finishWave);
 }
+// Dedicated detail viewport: zoomed waveform moves under a fixed central
+// playhead; original #wave remains a full-track overview and legacy test API.
+detailWaveEditor=createPlayerWaveEditor({
+  canvas:$("#wave-detail"),wrap:document.querySelector(".wave-detail-wrap"),
+  overviewSelection:$("#wave-overview-selection"),
+  markerA:$("#wave-a-marker"),markerB:$("#wave-b-marker"),
+  zoomIn:$("#wave-zoom-in"),zoomOut:$("#wave-zoom-out"),
+  zoomLabel:$("#wave-zoom-label"),
+  visibleStart:$("#wave-visible-start"),visibleEnd:$("#wave-visible-end"),
+  getPosition:()=>playPosition(),
+  onScrubState:active=>{
+    // Running Worklet source time can be ahead of the last commanded seek.
+    // Capture it BEFORE selecting gesture-owned state.seek, or the central
+    // playhead would jump backward at the start of every drag/tap/pinch.
+    if(active&&!detailWaveScrubbing)state.seek=playPosition();
+    detailWaveScrubbing=active;
+  },
+  onStart:()=>{
+    if(!state.dry||state.player)return;
+    void play("player",state.seek).catch(error=>message("スクラブ再生失敗: "+error.message,"error"));
+  },
+  onPosition:seconds=>{
+    if(!state.dry)return;
+    state.seek=clamp(seconds,0,Math.max(0,duration()-1/state.decoded.sampleRate));
+    if(state.player&&!state.player.initializing)seek(state.seek);
+    else refreshStatusSeek();
+  },
+  onAB:(edge,frame)=>{
+    if(!edge)return {...ab};
+    editAB(edge,String(frame));
+  }
+});
 $("#wave").addEventListener("keydown",e=>{
   if(!state.dry)return;
   if(e.key==="Enter"||e.key===" "){
-    e.preventDefault();play(GRANULAR_EXPERIMENT?"dry":"wet",state.seek).catch(err=>message(err.message,"error"));
+    e.preventDefault();play(preferredWaveMode(),state.seek).catch(err=>message(err.message,"error"));
   }else if(e.key==="ArrowLeft"||e.key==="ArrowRight"){
     e.preventDefault();const diff=e.key==="ArrowLeft"?-2:2;
     const pos=clamp(playPosition()+diff,0,Math.max(0,duration()-.01));
@@ -745,7 +911,12 @@ function schedulePCMSeek(p,frame){
 }
 function seek(seconds){
   const p=state.player;
-  const where=clamp(seconds,0,Math.max(0,duration()-.001));
+  // Legacy source/buffer playback keeps its historical millisecond guard.
+  // PCM sample transport instead accepts the FINAL decoded source frame,
+  // including [N-48..N-1] for 48kHz, without silent 1ms shortening.
+  const rightEdge=p?.rawPCM&&state.decoded?
+    duration()-1/state.decoded.sampleRate:duration()-.001;
+  const where=clamp(seconds,0,Math.max(0,rightEdge));
   state.seek=where;mediaStatus(Boolean(p));
   if(!p)return;
   if(p.labStream){void stop().then(()=>play("wet",where));return;}
@@ -830,7 +1001,9 @@ async function stop(){
   if(state.rebuildTimer){clearTimeout(state.rebuildTimer);state.rebuildTimer=null;}
   const p=state.player;
   if(!p){
-    controls.stop.disabled=true;mediaStatus(false);
+    controls.stop.disabled=true;
+    controls.main.disabled=!state.dry;
+    mediaStatus(false);
     indicator("停止中");
     return;
   }
@@ -848,7 +1021,7 @@ async function stop(){
     $("#rt-telemetry").textContent="";
     delete $("#rt-telemetry").dataset.pcmTransport;
     indicator("停止中 · PCM実験経路を終了");
-    if(GRANULAR_EXPERIMENT)$("#granular-optin-status").textContent="停止中・設定保持";
+    if(p.granular)$("#granular-optin-status").textContent="停止中・設定保持";
     refreshStatusSeek();return;
   }
   try{p.source?.stop();}catch{}
@@ -869,17 +1042,19 @@ async function play(mode="wet",offset=null){
   if(lab.mode!=="live"&&mode==="wet")return startModelPlayback(offset);
   if(state.player?.labStream){const where=offset??playPosition();await stop();return play(mode,where);}
   if(state.player?.rawPCM){
-    if(mode==="dry"){
+    if(mode===state.player.mode){
       if(offset!==null)seek(offset);
       return;
     }
-    // Same protection as the existing direct-original route: reject
-    // unsupported wet settings BEFORE interrupting a valid raw session.
-    const check=prepareStreamSettings(settings());
-    if(!check.ok){
-      indicator("原音再生中 · 変換設定未反映 · "+check.field);
-      message("原音再生を継続中。変換設定は未反映: "+check.message,"error");
-      return;
+    // Validate only when leaving an existing audio stream for the old wet
+    // DSP; switching to the named main player/original never needs this.
+    if(mode==="wet"){
+      const check=prepareStreamSettings(settings());
+      if(!check.ok){
+        indicator("再生中 · モデル設定未反映 · "+check.field);
+        message("再生を継続中。変換設定は未反映: "+check.message,"error");
+        return;
+      }
     }
     const where=offset??playPosition();
     await stop();return play(mode,where);
@@ -913,6 +1088,9 @@ async function play(mode="wet",offset=null){
     if(state.transportEpoch!==nextEpoch)return;
     return play("wet",position);
   }
+  if(state.player&&mode==="player"){
+    const at=offset??playPosition();await stop();return play("player",at);
+  }
   if(state.player){
     if(offset!==null)seek(offset);
     state.player.mode=mode;
@@ -921,9 +1099,11 @@ async function play(mode="wet",offset=null){
     return;
   }
   const launchEpoch=++state.transportEpoch;
-  controls.dry.disabled=true;controls.wet.disabled=true;
-  if(mode==="dry"&&RAW_PCM_EXPERIMENT){
-    // Explicit opt-in only. Raw source PCM is not a pitch-preserving model.
+  controls.main.disabled=true;controls.dry.disabled=true;controls.wet.disabled=true;
+  if(mode==="player"||(mode==="dry"&&RAW_PCM_EXPERIMENT)){
+    const granularActive=mode==="player"||GRANULAR_EXPERIMENT;
+    // The main player is an explicit independent pitch/time engine. The
+    // original button retains its prior semantics and mode identity.
     let bridge=null;
     try{
       const ctx=await context();
@@ -932,17 +1112,24 @@ async function play(mode="wet",offset=null){
       const at=clamp(offset===null?state.seek:offset,0,Math.max(0,duration()-1/sourceRate));
       // Preserve the values supplied to an asynchronous Worklet startup; user
       // edits during addModule() must be replayed before starting playback.
-      const initialSpeed=GRANULAR_EXPERIMENT?granular.speed:1;
-      const initialPitch=GRANULAR_EXPERIMENT?granular.pitch:0;
+      const initialSpeed=granularActive?granular.speed:1;
+      const initialPitch=granularActive?granular.pitch:0;
+      const initialLoop={...ab};
       bridge=await createSourcePCMBridge({
         ctx,sourceChannels:state.dry,sourceSampleRate:sourceRate,
         speed:initialSpeed,
-        processingMode:GRANULAR_EXPERIMENT?"granular":"raw",
+        processingMode:granularActive?"granular":"raw",
         pitchSemitones:initialPitch,
-        startFrame:Math.round(at*sourceRate),loopEnabled:true,
-        loopStartFrame:0,loopEndFrame:state.dry[0].length,
+        startFrame:Math.round(at*sourceRate),loopEnabled:initialLoop.enabled,
+        loopStartFrame:initialLoop.a,loopEndFrame:initialLoop.b||state.dry[0].length,
         onEvent:data=>{
-          if(GRANULAR_EXPERIMENT&&state.player?.pcmBridge===bridge){
+          if(data.type==="render-applied"&&state.player?.pcmBridge===bridge&&
+             Number.isSafeInteger(data.revision)&&Number.isFinite(data.sourceFrame)){
+            const player=state.player;
+            if(!player.lastAppliedFrame||data.revision>=player.lastAppliedFrame.revision)
+              player.lastAppliedFrame={revision:data.revision,frame:data.sourceFrame};
+          }
+          if(granularActive&&state.player?.pcmBridge===bridge){
             const status=$("#granular-optin-status");
             if(data.type==="command-accepted"){
               status.textContent="命令受理 #"+data.requestId+" revision "+data.revision+
@@ -971,7 +1158,7 @@ async function play(mode="wet",offset=null){
               if(state.player||state.transportEpoch!==failedEpoch+1)return;
               // A processor can fail before await bridge.play() settles, while
               // the launch has temporarily disabled both playback buttons.
-              controls.dry.disabled=!state.dry;
+              controls.main.disabled=!state.dry;controls.dry.disabled=!state.dry;
               controls.wet.disabled=!state.dry;
               indicator("PCM実験再生エンジンの異常終了");
               message("PCM実験再生を停止しました。音源は保持されています: "+
@@ -984,12 +1171,12 @@ async function play(mode="wet",offset=null){
       const master=ctx.createGain(),directRoute=ctx.createGain();
       directRoute.gain.value=1;bridge.connect(master);
       master.connect(directRoute);directRoute.connect(ctx.destination);
-      const player={rawPCM:true,directDry:true,pcmBridge:bridge,mode:"dry",
+      const player={rawPCM:true,directDry:true,pcmBridge:bridge,mode,granular:granularActive,
         labRealtime:false,labProcessed:false,master,directRoute,bridgeRoute:null,
         outputRoute:"direct",offset:at,at:ctx.currentTime,
-        initializing:GRANULAR_EXPERIMENT};
+        initializing:granularActive};
       state.player=player;
-      if(GRANULAR_EXPERIMENT){
+      if(granularActive){
         // Assign ownership first: later edits now go straight to this bridge.
         // Commands issued here precede the play command; never silently start
         // with an obsolete captured speed/pitch while the UI shows new values.
@@ -1000,6 +1187,24 @@ async function play(mode="wet",offset=null){
           await bridge.setPitch(granular.pitch);
         if(launchEpoch!==state.transportEpoch||state.player!==player)return;
       }
+      // Sample-exact interval edits may arrive WHILE an earlier loop-config
+      // command is waiting for its AudioWorklet acknowledgment. Re-snapshot
+      // after every response; never begin audible playback at stale A/B.
+      let installedLoop=initialLoop;
+      const sameLoop=(x,y)=>x.a===y.a&&x.b===y.b&&x.enabled===y.enabled;
+      for(let pass=0;granularActive&&pass<8&&!sameLoop(installedLoop,ab);pass++){
+        const requested={...ab};
+        await bridge.setLoopBounds(requested.a,requested.b);
+        if(launchEpoch!==state.transportEpoch||state.player!==player)return;
+        await bridge.setLoopEnabled(requested.enabled);
+        if(launchEpoch!==state.transportEpoch||state.player!==player)return;
+        installedLoop=requested;
+      }
+      // UI text edits are finite events. If repeatedly interrupted, stop
+      // rather than falsely claiming the first audible quantum uses latest A/B.
+      if(granularActive&&!sameLoop(installedLoop,ab))
+        throw Error("区間変更が連続したため開始位置を確定できません。操作後に再生してください。");
+      player.appliedLoop=installedLoop;
       // If the user scrubbed while the AudioWorklet was registering, the
       // latest source location must be in the Worklet BEFORE audio starts.
       // No outdated grain may be emitted as the first audible quantum.
@@ -1007,7 +1212,7 @@ async function play(mode="wet",offset=null){
       // Bounded startup synchronization: keep the Worklet paused while
       // reconciling at most two positions, so a continuously moving finger
       // cannot starve audio startup indefinitely.
-      for(let pass=0;GRANULAR_EXPERIMENT&&pass<2&&state.seek!==initializedAt;pass++){
+      for(let pass=0;granularActive&&pass<2&&state.seek!==initializedAt;pass++){
         const latestAt=state.seek;
         await bridge.seek(Math.min(state.dry[0].length-1,
           Math.max(0,Math.round(latestAt*sourceRate))));
@@ -1017,31 +1222,33 @@ async function play(mode="wet",offset=null){
       await bridge.play();
       if(launchEpoch!==state.transportEpoch||state.player!==player)return;
       player.initializing=false;
+      if(granularActive)syncLoopToPlayer(player);
       // If the pointer continued moving during the final async await,
       // follow it immediately through the bounded live scrub queue.
-      if(GRANULAR_EXPERIMENT&&state.seek!==initializedAt)seek(state.seek);
+      if(granularActive&&state.seek!==initializedAt)seek(state.seek);
       mediaStatus(true);void mediaBridge(player);
       controls.stop.disabled=false;
+      controls.main.disabled=false;
       const telemetry=$("#rt-telemetry");
-      telemetry.dataset.pcmTransport=GRANULAR_EXPERIMENT?"granular-experimental":"raw-experimental";
+      telemetry.dataset.pcmTransport=granularActive?"granular-experimental":"raw-experimental";
       telemetry.dataset.pcmNodeStarts=String(
         Number(telemetry.dataset.pcmNodeStarts||0)+1
       );
-      indicator(GRANULAR_EXPERIMENT?"粒状合成中 · 独立音程/±8/0倍（音質未受入）":"原音再生中 · PCM実験経路（速度と音程は未連動）");
-      message(GRANULAR_EXPERIMENT?"粒状実験中。録音素材での音質・実機可聴遅延は未受入。":"実験用PCM再生中。音程変更・0倍の音響品質は未実装です。","warning");
+      indicator(granularActive?"粒状合成中 · 独立音程/±8/0倍（音質未受入）":"原音再生中 · PCM実験経路（速度と音程は未連動）");
+      message(granularActive?"再生中。極短ループのクリック・実機可聴遅延・音質は引き続き検証中。":"実験用PCM再生中。音程変更・0倍の音響品質は未実装です。","warning");
     }catch(err){
       if(launchEpoch!==state.transportEpoch){bridge?.dispose();return;}
       await stop();
       // stop() fences this failed launch by incrementing transportEpoch.
       // Restore controls only if no newer launch/replacement has taken over.
       if(state.transportEpoch===launchEpoch+1){
-        controls.dry.disabled=!state.dry;
+        controls.main.disabled=!state.dry;controls.dry.disabled=!state.dry;
         controls.wet.disabled=!state.dry;
       }
       message("PCM実験経路の起動失敗（原音再生に自動置換しません）: "+err.message,"error");
     }finally{
       if(launchEpoch===state.transportEpoch){
-        controls.dry.disabled=!state.dry;controls.wet.disabled=!state.dry;
+        controls.main.disabled=!state.dry;controls.dry.disabled=!state.dry;controls.wet.disabled=!state.dry;
       }
     }
     return;
@@ -1077,6 +1284,7 @@ async function play(mode="wet",offset=null){
       indicator("原音起動失敗");
     }finally{
       if(launchEpoch===state.transportEpoch){
+        controls.main.disabled=!state.dry;
         controls.dry.disabled=!state.dry;
         controls.wet.disabled=!state.dry;
       }
@@ -1152,6 +1360,7 @@ async function play(mode="wet",offset=null){
     }
   }finally{
     if(launchEpoch===state.transportEpoch){
+      controls.main.disabled=!state.dry;
       controls.dry.disabled=!state.dry;
       controls.wet.disabled=!state.dry;
     }
@@ -1489,10 +1698,11 @@ for(const id of ["crusher-enabled","crusher-bits","crusher-hold"]){
   });
 }
 
+controls.main.addEventListener("click",()=>play("player"));
 controls.dry.addEventListener("click",()=>play("dry"));
 controls.wet.addEventListener("click",()=>play("wet"));
 controls.stop.addEventListener("click",()=>stop());
-window.addEventListener("resize",()=>{drawCurve();drawAudio();});
+window.addEventListener("resize",()=>{drawCurve();drawAudio();detailWaveEditor?.refresh(true);});
 window.addEventListener("pagehide",()=>{if(state.rebuildTimer)clearTimeout(state.rebuildTimer);stop();if(state.offlineWorker)state.offlineWorker.terminate();});
 // Cold-start audio decode on iOS can stall after the file picker closes.
 // A single OfflineAudioContext promise with a 45s timeout produced the
@@ -1557,13 +1767,18 @@ async function load(file){
     state.offline=null;state.decoded={sampleRate:data.sampleRate};
     lab.job++;lab.worker?.terminate();lab.worker=null;lab.processed=null;
     state.dry=dry;state.seek=0;
+    // Preserve the last playable song on decode failure; a successful new
+    // source starts with its own valid exact-sample A/B boundaries.
+    ab.a=0;ab.b=dry[0].length;ab.enabled=true;
+    detailWaveEditor?.setSource(dry,data.sampleRate);
+    refreshAB();
     labRefresh();state.lastStats=null;
     state.name=file.name.replace(/\.[^.]+$/,"");
     mediaStatus(false);
     state.fileMeta=file.name+" · "+duration().toFixed(1)+"秒 · "+data.sampleRate+"Hz · "+count+"ch";
     $("#file-meta").textContent=state.fileMeta;
     labels("high");drawCurve();drawAudio();refreshStatusSeek();
-    controls.dry.disabled=false;controls.wet.disabled=false;
+    controls.main.disabled=false;controls.dry.disabled=false;controls.wet.disabled=false;
     controls.stop.disabled=true;
     controls.render.disabled=false;controls.download.disabled=true;
     $("#progress").value=0;
@@ -1912,7 +2127,10 @@ async function labSettingsChanged(){
   // +/- context windows are part of Rust's existing DSP API.
   $("#quality").value=lab.fftSize===1024?"eco":lab.fftSize===2048?"standard":"high";
   labInvalidate();
-  if(state.player){
+  // Editing research/model options must not switch an actively playing
+  // R4 granular track back to the unprocessed original. The independent
+  // player is controlled exclusively by its own signed-speed/pitch/AB UI.
+  if(state.player&&state.player.mode!=="player"){
     if(previous==="live"&&lab.mode==="live"&&!previousIndividual&&!lab.individual&&state.player.labRealtime){
       const p=state.player;p.offset=currentTime;p.at=state.ctx.currentTime;
       p.sourceTimeRate=lab.speed;

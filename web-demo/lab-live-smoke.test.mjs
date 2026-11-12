@@ -24,6 +24,9 @@ test('full Chrome: inherited Rust AudioWorklet live independent speed/pitch UI',
   page.on('pageerror',error=>errors.push(error.message));
   await page.goto('http://127.0.0.1:8769/',{waitUntil:'domcontentloaded'});
   await page.waitForSelector('html[data-fw-boot="ready"]');
+  // The research/model controls now live on their explicit top-level tab.
+  await page.click('#main-tab-model');
+  assert.equal(await page.$eval('body',e=>e.dataset.mainTab),'model');
   await (await page.$('#audio-file')).uploadFile(audioFile);
   await page.waitForFunction(()=>!document.querySelector('#play-wet').disabled,{timeout:20000});
   // Native Chrome UI contract: opt-in controls a real slider; log2 positions
@@ -49,12 +52,28 @@ test('full Chrome: inherited Rust AudioWorklet live independent speed/pitch UI',
   await page.waitForFunction(()=>document.querySelector('#lab-model').value==='live');
   await page.$eval('#lab-speed',e=>{e.value='1.5';e.dispatchEvent(new Event('change',{bubbles:true}));});
   await page.$eval('#lab-pitch',e=>{e.value='5';e.dispatchEvent(new Event('change',{bubbles:true}));});
+  await page.$eval('#play-wet',el=>el.scrollIntoView({block:'center',inline:'nearest'}));
+  const beforeWet=await page.evaluate(()=>{
+    const wet=document.querySelector('#play-wet'),main=document.querySelector('#play-main');
+    window.__wetNativeClicks=0;wet.addEventListener('click',()=>window.__wetNativeClicks++);
+    const rect=wet.getBoundingClientRect(),cx=rect.left+rect.width/2,cy=rect.top+rect.height/2;
+    const hit=document.elementFromPoint(cx,cy);
+    return {wetCenter:{x:Math.round(cx),y:Math.round(cy)},hit:{id:hit?.id,
+      tag:hit?.tagName,cls:String(hit?.className||'').slice(0,110)},
+      wetDisabled:wet.disabled,mainDisabled:main.disabled,
+      wetDisplay:getComputedStyle(wet).display,tab:document.body.dataset.mainTab,
+      file:document.querySelector('#file-meta')?.textContent,
+      labModel:document.querySelector('#lab-model')?.value,
+      individual:document.querySelector('#lab-individual-periods')?.checked,
+      status:document.querySelector('#status')?.textContent};
+  });
+  assert.equal(beforeWet.wetDisabled,false,'Rust wet play must remain enabled: '+JSON.stringify(beforeWet));
   await (await page.$('#play-wet')).click();
   try{
     await page.waitForFunction(()=>document.querySelector('#rt-indicator')?.textContent.includes('稼働中 · Rust/WASM AudioWorklet'),{timeout:20000});
   }catch(error){
     const info=await page.evaluate(()=>({status:document.querySelector('#status')?.textContent,indicator:document.querySelector('#rt-indicator')?.textContent,lab:document.querySelector('#lab-status')?.textContent}));
-    throw Error('Rust Worklet failed: '+JSON.stringify(info)+' / '+error.message);
+    throw Error('Rust Worklet failed: '+JSON.stringify({beforeWet,clicks:await page.evaluate(()=>window.__wetNativeClicks),...info})+' / '+error.message);
   }
   assert.equal(await page.$eval('#lab-speed',e=>e.value),'1.5');
   assert.equal(await page.$eval('#lab-pitch',e=>e.value),'5');

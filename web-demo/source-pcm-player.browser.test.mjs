@@ -91,6 +91,8 @@ test("live Audio Lab opt-in original playback uses a persistent PCM node across 
       quality.add(new Option("Invalid test only","invalid-for-test"));
       quality.value="invalid-for-test";
     });
+    // Models now have an explicit tab; changing tabs must not stop PCM.
+    await page.click("#main-tab-model");
     await page.click("#play-wet");
     await page.waitForFunction(()=>document.querySelector("#status")
       ?.textContent.includes("変換設定は未反映"),{timeout:10000});
