@@ -563,7 +563,9 @@ function playheadFromPointer(e,startIfStopped=true){
   const frac=clamp((e.clientX-rect.left)/rect.width,0,.999999);
   state.seek=frac*duration();
   if(state.player){
-    seek(state.seek);
+    // A bridge registered but not yet started must reconcile its final
+    // gesture coordinate BEFORE the first audible quantum.
+    if(!state.player.initializing)seek(state.seek);
   }else if(startIfStopped){
     // A drag beginning while stopped launches exactly one player. Moves that
     // occur during async AudioWorklet registration merely replace state.seek.
@@ -983,7 +985,8 @@ async function play(mode="wet",offset=null){
       master.connect(directRoute);directRoute.connect(ctx.destination);
       const player={rawPCM:true,directDry:true,pcmBridge:bridge,mode:"dry",
         labRealtime:false,labProcessed:false,master,directRoute,bridgeRoute:null,
-        outputRoute:"direct",offset:at,at:ctx.currentTime};
+        outputRoute:"direct",offset:at,at:ctx.currentTime,
+        initializing:GRANULAR_EXPERIMENT};
       state.player=player;
       if(GRANULAR_EXPERIMENT){
         // Assign ownership first: later edits now go straight to this bridge.
@@ -1000,7 +1003,10 @@ async function play(mode="wet",offset=null){
       // latest source location must be in the Worklet BEFORE audio starts.
       // No outdated grain may be emitted as the first audible quantum.
       let initializedAt=at;
-      while(GRANULAR_EXPERIMENT&&state.seek!==initializedAt){
+      // Bounded startup synchronization: keep the Worklet paused while
+      // reconciling at most two positions, so a continuously moving finger
+      // cannot starve audio startup indefinitely.
+      for(let pass=0;GRANULAR_EXPERIMENT&&pass<2&&state.seek!==initializedAt;pass++){
         const latestAt=state.seek;
         await bridge.seek(Math.min(state.dry[0].length-1,
           Math.max(0,Math.round(latestAt*sourceRate))));
@@ -1009,6 +1015,10 @@ async function play(mode="wet",offset=null){
       }
       await bridge.play();
       if(launchEpoch!==state.transportEpoch||state.player!==player)return;
+      player.initializing=false;
+      // If the pointer continued moving during the final async await,
+      // follow it immediately through the bounded live scrub queue.
+      if(GRANULAR_EXPERIMENT&&state.seek!==initializedAt)seek(state.seek);
       mediaStatus(true);void mediaBridge(player);
       controls.stop.disabled=false;
       const telemetry=$("#rt-telemetry");
