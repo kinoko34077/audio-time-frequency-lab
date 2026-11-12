@@ -2,11 +2,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {readFileSync} from "node:fs";
 import {createSourcePCMRenderer} from "./source-pcm-renderer.mjs";
+import {createGranularTimePitch} from "./source-granular.mjs";
 
 // A deterministic real Worklet-class harness: no wall-clock sleeps, mock only
 // AudioWorkletProcessor's port. The imported renderer is the production module.
 const source=readFileSync(new URL("./source-pcm.worklet.js",import.meta.url),"utf8")
-  .replace(/^import [^\n]+\n/m,"");
+  .replace(/^import [^\n]+\n/gm,"");
 function processor(options){
   const messages=[];
   let Worklet;
@@ -20,10 +21,10 @@ function processor(options){
     }
   }
   new Function("AudioWorkletProcessor","registerProcessor",
-    "createSourcePCMRenderer","sampleRate",source)(
+    "createSourcePCMRenderer","createGranularTimePitch","sampleRate",source)(
     FakeAudioWorkletProcessor,
     (name,constructor)=>{assert.equal(name,"audio-lab-source-pcm");Worklet=constructor;},
-    createSourcePCMRenderer,48000
+    createSourcePCMRenderer,createGranularTimePitch,48000
   );
   return {p:new Worklet({processorOptions:options}),messages};
 }
