@@ -739,6 +739,14 @@ async function play(mode="wet",offset=null){
       if(offset!==null)seek(offset);
       return;
     }
+    // Same protection as the existing direct-original route: reject
+    // unsupported wet settings BEFORE interrupting a valid raw session.
+    const check=prepareStreamSettings(settings());
+    if(!check.ok){
+      indicator("原音再生中 · 変換設定未反映 · "+check.field);
+      message("原音再生を継続中。変換設定は未反映: "+check.message,"error");
+      return;
+    }
     const where=offset??playPosition();
     await stop();return play(mode,where);
   }
@@ -821,6 +829,12 @@ async function play(mode="wet",offset=null){
     }catch(err){
       if(launchEpoch!==state.transportEpoch){bridge?.dispose();return;}
       await stop();
+      // stop() fences this failed launch by incrementing transportEpoch.
+      // Restore controls only if no newer launch/replacement has taken over.
+      if(state.transportEpoch===launchEpoch+1){
+        controls.dry.disabled=!state.dry;
+        controls.wet.disabled=!state.dry;
+      }
       message("PCM実験経路の起動失敗（原音再生に自動置換しません）: "+err.message,"error");
     }finally{
       if(launchEpoch===state.transportEpoch){
