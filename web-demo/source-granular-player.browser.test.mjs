@@ -152,6 +152,43 @@ test("R3 opt-in real page applies precise signed speed/pitch without replacing t
     assert.equal(after.speed,"0");
     assert.ok(Number.isFinite(Number(after.renderRevision)));
     assert.match(after.note,/音声処理済み|音声反映前に上書き/);
+
+    // Actual browser pointer movement, not a synthetic pointerdown fixture:
+    // scrub a still-audible 0× granular stream across the waveform. It must
+    // keep the original Worklet and reach the LAST dragged source coordinate.
+    const box=await page.$eval("#wave",element=>{
+      const r=element.getBoundingClientRect();
+      return {left:r.left,top:r.top,width:r.width,height:r.height};
+    });
+    const y=box.top+box.height/2;
+    await page.mouse.move(box.left+box.width*.2,y);
+    await page.mouse.down();
+    for(let n=1;n<=24;n++)
+      await page.mouse.move(box.left+box.width*(.2+.6*n/24),y);
+    const duringDrag=await page.evaluate(()=>({
+      head:parseFloat(document.querySelector("#playhead").style.left),
+      elapsed:document.querySelector("#elapsed").textContent
+    }));
+    assert.ok(duringDrag.head>75&&duringDrag.head<85,
+      "live playhead should follow the finger, not a stale render ACK");
+    await page.mouse.up();
+    await page.waitForFunction(()=>Number(document.querySelector(
+      "#granular-optin-status")?.dataset.renderFrame)>70000,{timeout:20000});
+    const dragResult=await page.evaluate(()=>({
+      starts:Number(document.querySelector("#rt-telemetry").dataset.pcmNodeStarts),
+      mode:document.querySelector("#rt-telemetry").dataset.pcmTransport,
+      speed:document.querySelector("#granular-speed-value").value,
+      pitch:document.querySelector("#granular-pitch-value").value,
+      renderFrame:Number(document.querySelector(
+        "#granular-optin-status").dataset.renderFrame)
+    }));
+    assert.equal(dragResult.starts,starts,
+      "scrub may not recreate the AudioWorklet");
+    assert.equal(dragResult.mode,"granular-experimental");
+    assert.equal(dragResult.speed,"0");
+    assert.equal(dragResult.pitch,"7.1234");
+    assert.ok(dragResult.renderFrame>70000);
+
     await page.click("#stop");
     await page.waitForFunction(()=>!document.querySelector("#rt-telemetry")
       ?.dataset.pcmTransport,{timeout:10000});
