@@ -248,6 +248,10 @@ test("native Chrome content-audio stereo output matches independent source-time 
           appliedFrame:destination.sourceFrame,
           speedApplied:direction.op==="speed"
         });
+        // A rapid sequence can legitimately complete entirely between two
+        // output quanta. Observe a short real output interval per destination
+        // rather than asserting a render happened during zero elapsed frames.
+        await sleep(12);
       }
       const burstStat=await measure("snapshot");
       const last=changes[changes.length-1];
