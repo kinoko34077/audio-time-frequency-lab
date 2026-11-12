@@ -78,3 +78,12 @@ Source files added for the bounded first step:
 - Real Chrome tests inject a processor fatal event during a pending seek, blackhole a command acknowledgement until timeout, and trigger a processor fatal in the **actual user file/playback path**, asserting file retention/restart and no stale `raw-experimental` state.
 - Recovery/timeout does not imply uninterrupted sound under a true processor crash. Source-cache underruns and unexpected processor termination are different fault classes with different telemetry.
 
+
+## R2 real output PCM stress gate (instrumentation, not acceptance of all loads)
+
+A test-only `source-pcm-probe.worklet.js` measures PCM **after** the experimental source renderer's AudioWorkletNode, without reusing the source cache's `missingFrames` counter as proof of audible output. Chrome `source-pcm-stress.browser.test.mjs` reports:
+- 44.1kHz source → 48kHz output, stereo nonzero constant test signal and 1/2/16/127/128/129/256-sample A/B loops at ±8 raw source speed. Only these *fully cached, static* loops are gated for **zero output frames containing unexpected silence** and no unexplained sample jumps.
+- A pinned short loop while the browser main thread is synchronously blocked, verifying that independent audio rendering does not rely on the blocked thread when its source data is already cached.
+- 2,000,000-source-frame long stereo audio at +8 raw speed with a deliberately 1,050ms blocked main thread. This exceeds the finite window cache's supply horizon; the test **reports** source cache misses, independent post-render zero frames, sample jumps and output counts, **without requiring an impossible zero-gap result**. It then seeks, changes speed and measures recovery and command ACK latency (ACK latency is *not* physical audible latency).
+
+For constant nonzero PCM, observed exact zeros are unintended inserted silence, not legitimate program quiet. For arbitrary musical recordings this simple metric is not enough; source-equivalent PCM alignment, intentional loop-boundary jumps, envelope/click tests, source-to-render ACK and actual device output latency must be measured separately. Headless Chrome is not a physical iPhone, and a CI green result cannot replace live device acceptance.
