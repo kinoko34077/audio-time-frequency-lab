@@ -35,7 +35,7 @@ export function createSourcePCMRenderer({
     loopStartFrame,loopEndFrame,loopEnabled
   });
   const windows=[];
-  let missingFrames=0,renderedFrames=0;
+  let missingFrames=0,renderedFrames=0,firstMissingFrame=null;
   const find=(index)=>{
     for(let i=windows.length-1;i>=0;i--){
       const w=windows[i];
@@ -45,6 +45,7 @@ export function createSourcePCMRenderer({
   };
   const api={
     timeline,
+    get firstMissingFrame(){return firstMissingFrame;},
     get statistics(){return Object.freeze({
       missingFrames,renderedFrames,windowCount:windows.length
     });},
@@ -86,6 +87,7 @@ export function createSourcePCMRenderer({
         throw RangeError("invalid output PCM block");
       const len=output[0].length;
       let missing=0;
+      firstMissingFrame=null;
       const loopState=timeline.state;
       for(let i=0;i<len;i++){
         const position=timeline.sourceFrameAt(i);
@@ -99,7 +101,9 @@ export function createSourcePCMRenderer({
           ?loopState.loopStartFrame:Math.min(sourceFrames-1,at+1);
         const left=find(at);
         const right=weight>0?find(next):left;
-        if(!left||!right){missing++;
+        if(!left||!right){
+          if(firstMissingFrame===null)firstMissingFrame=left?next:at;
+          missing++;
           for(let ch=0;ch<channelCount;ch++)output[ch][i]=0;
           continue;
         }
