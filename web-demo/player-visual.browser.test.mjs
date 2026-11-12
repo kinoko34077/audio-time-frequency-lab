@@ -70,6 +70,7 @@ test("R4 usability visual captures: desktop and mobile player and folded researc
     assert.equal(await page.$eval(".model-legacy-fold",el=>el.open),false);
     assert.equal(await page.$eval("#audio-lab",el=>getComputedStyle(el).display==="none"),false);
     await page.screenshot({path:path.join(captureDir,"02-model-desktop.png")});
+    console.log("UI_REVIEW_JPEG_MODEL_DESKTOP:"+Buffer.from(await page.screenshot({type:"jpeg",quality:28})).toString("base64"));
     await page.click(".model-legacy-fold > summary");
     assert.equal(await page.$eval(".model-legacy-fold",el=>el.open),true);
     assert.equal(await page.$eval(".quick-panel",el=>getComputedStyle(el).display==="none"),false,
@@ -88,6 +89,7 @@ test("R4 usability visual captures: desktop and mobile player and folded researc
     await mobile.click("#main-tab-model");
     assert.equal(await mobile.$eval(".model-legacy-fold",el=>el.open),false);
     await mobile.screenshot({path:path.join(captureDir,"04-model-mobile.png")});
+    console.log("UI_REVIEW_JPEG_MODEL_MOBILE:"+Buffer.from(await mobile.screenshot({type:"jpeg",quality:30})).toString("base64"));
     assert.deepEqual(errors,[],"no console page exceptions");
   }finally{
     await browser?.close();
