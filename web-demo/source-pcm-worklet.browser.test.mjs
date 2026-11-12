@@ -57,11 +57,39 @@ test("native Chrome experimental source-PCM AudioWorklet renders and loops witho
       node.port.onmessage=e=>afterDispose.push(e.data?.type);
       node.port.postMessage({type:"command",op:"play",requestId:999999});
       await new Promise(resolve=>setTimeout(resolve,120));
+
+      // Real Worklet integration for the independent review's long-loop bug:
+      // A/B pins + two moving windows are full before a far seek to frame 700k.
+      // Installation and seek must reach the processor in one atomic message.
+      const longEvents=[];
+      const long=await createSourcePCMBridge({
+        ctx,sourceChannels:[new Float32Array(1_000_000).fill(.35)],
+        sourceSampleRate:48000,startFrame:340000,speed:8,
+        loopEnabled:true,loopStartFrame:0,loopEndFrame:999999,
+        onEvent:e=>{if(e.type==="window-accepted"||e.type==="error")
+          longEvents.push({type:e.type,message:e.message});}
+      });
+      long.connect(analyser);
+      await long.play();
+      await new Promise(resolve=>setTimeout(resolve,260));
+      const beforeSeekMissing=long.latest?.missingFrames||0;
+      const appliedSeek=await long.seek(700000);
+      await new Promise(resolve=>setTimeout(resolve,75));
+      const afterSeek=long.latest;
+      await long.pause();
+      long.dispose();
       await ctx.close();
       return {
         first,loop,rms,stable,afterDispose,errors:events.filter(x=>x.type==="error"),
         windowAccepts:events.filter(x=>x.type==="window-accepted").length,
-        gapReports:events.filter(x=>x.type==="underrun").length
+        gapReports:events.filter(x=>x.type==="underrun").length,
+        farSeek:{
+          ack:appliedSeek.sourceFrame, beforeMissing:beforeSeekMissing,
+          afterMissing:afterSeek?.missingFrames,
+          afterFrame:afterSeek?.sourceFrame,
+          windows:longEvents.filter(e=>e.type==="window-accepted").length,
+          errors:longEvents.filter(e=>e.type==="error")
+        }
       };
     });
     assert.deepEqual(pageErrors,[]);
@@ -74,6 +102,12 @@ test("native Chrome experimental source-PCM AudioWorklet renders and loops witho
     assert.deepEqual(evidence.afterDispose,[],
       "disposed worklet must no longer accept commands");
     assert.ok(evidence.windowAccepts>=1);
+    assert.equal(evidence.farSeek.ack,700000);
+    assert.deepEqual(evidence.farSeek.errors,[]);
+    assert.ok(evidence.farSeek.windows>=4,evidence.farSeek);
+    assert.ok(evidence.farSeek.afterFrame>700000,evidence.farSeek);
+    assert.equal(evidence.farSeek.afterMissing,evidence.farSeek.beforeMissing,
+      "far seek source cache should be ready without missing output frames");
   }finally{
     await browser?.close();
     server.kill();
