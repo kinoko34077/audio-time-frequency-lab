@@ -140,6 +140,26 @@ test("integral PCM sample at cache edge never interpolates missing neighbor into
   assert.ok(Number.isFinite(out.output[0][0]));
 });
 
+test("A/B endpoint windows remain pinned while the moving source cache advances",()=>{
+  const p=createSourcePCMRenderer({sourceFrames:200000,
+    sourceSampleRate:48000,outputSampleRate:48000,
+    maxWindowFrames:20,maxWindows:3});
+  p.installWindow(100,[new Float32Array(20)],"A");
+  p.installWindow(199900,[new Float32Array(20)],"B");
+  p.installWindow(50000,[new Float32Array(20)]);
+  p.installWindow(50020,[new Float32Array(20)]);
+  assert.equal(p.statistics.windowCount,3);
+  assert.equal(p.hasFrame(100),true);
+  assert.equal(p.hasFrame(199900),true);
+  assert.equal(p.hasFrame(50000),false);
+  assert.equal(p.hasFrame(50020),true);
+  p.installWindow(120,[new Float32Array(20)],"A");
+  assert.equal(p.hasFrame(100),false);
+  assert.equal(p.hasFrame(120),true);
+  assert.equal(p.hasFrame(199900),true);
+  assert.throws(()=>p.installWindow(200,[new Float32Array(20)],"invalid"),RangeError);
+});
+
 test("directional window placement is bounded even at original source endpoints",()=>{
   const total=48000*600;
   for(const speed of [-8,-1,0,1,8]){
