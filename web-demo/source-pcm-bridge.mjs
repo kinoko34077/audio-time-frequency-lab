@@ -65,6 +65,9 @@ export async function createSourcePCMBridge({
   };
   const failProcessor=error=>{
     if(closed)return;
+    // A lost command ACK does not mean the audio render thread has stopped.
+    // Ask the processor to terminate before suppressing normal dispose().
+    try{node.port.postMessage({type:"dispose"});}catch{}
     closed=true;
     node.port.onmessage=null;
     node.removeEventListener("processorerror",onProcessorError);
