@@ -205,8 +205,22 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, swit
       speed.dispatchEvent(new Event("change",{bubbles:true}));
       document.getElementById("player-loop-enabled").click();
     });
-    await page.waitForFunction(()=>document.querySelector("#player-loop-hint")
-      ?.textContent.includes("反映が完了"),{timeout:20000});
+    try{
+      await page.waitForFunction(()=>document.querySelector("#player-loop-hint")
+        ?.textContent.includes("反映が完了"),{timeout:20000});
+    }catch(error){
+      const state=await page.evaluate(()=>({
+        hint:document.querySelector("#player-loop-hint")?.textContent,
+        loopSectionHidden:document.querySelector("#player-loop-controls")?.hidden,
+        loopChecked:document.querySelector("#player-loop-enabled")?.checked,
+        selectedTab:document.body.dataset.mainTab,
+        speed:document.querySelector("#granular-speed-value")?.value,
+        playerStatus:document.querySelector("#granular-optin-status")?.textContent,
+        telemetry:{...document.querySelector("#rt-telemetry")?.dataset}
+      }));
+      console.log("R4_LOOP_SYNC_FAILURE "+JSON.stringify(state));
+      throw error;
+    }
     assert.equal(await page.$eval("#granular-speed-value",el=>el.value),"-1.125");
     assert.equal(await page.$eval("#player-loop-enabled",el=>el.checked),false);
     assert.equal(await page.$eval("#rt-telemetry",el=>Number(el.dataset.pcmNodeStarts)),starts);
