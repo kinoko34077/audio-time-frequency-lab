@@ -129,6 +129,34 @@ test("live Audio Lab opt-in original playback uses a persistent PCM node across 
     assert.equal(recovered.dry,true,"failed raw start disabled dry retry");
     assert.equal(recovered.wet,true,"failed raw start disabled wet fallback option");
     assert.equal(recovered.pcm,undefined);
+    await page.evaluate(()=>{
+      window.AudioWorkletNode=function(ctx,name,options){
+        const node=new window.__nativeAudioWorkletNode(ctx,name,options);
+        if(name==="audio-lab-source-pcm")window.__faultTargetPCMNode=node;
+        return node;
+      };
+    });
+    await page.click("#play-dry");
+    await page.waitForFunction(()=>document.querySelector("#rt-telemetry")
+      ?.dataset.pcmTransport==="raw-experimental",{timeout:12000});
+    // Exercise the real app callback, not only a standalone bridge fixture.
+    await page.evaluate(()=>{
+      window.__faultTargetPCMNode.dispatchEvent(new Event("processorerror"));
+    });
+    await page.waitForFunction(()=>document.querySelector("#status")
+      ?.textContent.includes("音源は保持されています"),{timeout:10000});
+    const afterFatal=await page.evaluate(()=>({
+      dry:!document.querySelector("#play-dry").disabled,
+      wet:!document.querySelector("#play-wet").disabled,
+      file:document.querySelector("#file-meta").textContent,
+      raw:document.querySelector("#rt-telemetry").dataset.pcmTransport,
+      indicator:document.querySelector("#rt-indicator").textContent
+    }));
+    assert.equal(afterFatal.dry,true);
+    assert.equal(afterFatal.wet,true);
+    assert.match(afterFatal.file,/pcm-optin.wav/);
+    assert.equal(afterFatal.raw,undefined);
+    assert.match(afterFatal.indicator,/異常終了/);
     await page.evaluate(()=>{window.AudioWorkletNode=window.__nativeAudioWorkletNode;});
     await page.click("#play-dry");
     await page.waitForFunction(()=>document.querySelector("#rt-telemetry")
