@@ -89,7 +89,7 @@ export function createSourcePCMRenderer({
         }
         const at=Math.floor(position);
         const weight=position-at;
-        const next=loopState.loopEnabled&&at+1>=loopState.loopEndFrame
+        const next=weight>0&&loopState.loopEnabled&&at+1>=loopState.loopEndFrame
           ?loopState.loopStartFrame:Math.min(sourceFrames-1,at+1);
         const left=find(at);
         const right=weight>0?find(next):left;
@@ -99,6 +99,7 @@ export function createSourcePCMRenderer({
         }
         for(let ch=0;ch<channelCount;ch++){
           const a=left.channels[ch][at-left.start];
+          if(weight===0){output[ch][i]=a;continue;}
           const b=right.channels[ch][next-right.start];
           output[ch][i]=a+(b-a)*weight;
         }
