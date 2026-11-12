@@ -116,8 +116,19 @@ test("native Chrome content-audio stereo output matches independent source-time 
             sum+=delta*delta;max=Math.max(max,delta);
           }
         }
+        const lead=Math.min(128,count);
+        const leadRms=captured.map(samples=>Math.sqrt(
+          samples.slice(0,lead).reduce((sum,v)=>sum+v*v,0)/lead
+        ));
+        const trailingZeroRun=captured.map(samples=>{
+          let zeros=0;
+          for(let i=count-1;i>=0&&Math.abs(samples[i])<1e-7;i--)
+            zeros++;
+          return zeros;
+        });
         return {offsetFrames:bestK,comparedFrames:count,
           rmsError:Math.sqrt(sum/(count*2)),maxError:max,
+          leadingRms:leadRms,trailingZeroRun,
           frames:stats.frames,zeroFrames:stats.channels.map(c=>c.zeroFrames),
           maxZeroRun:stats.channels.map(c=>c.maxZeroRun),
           maxStep:stats.channels.map(c=>c.maxStep),
@@ -177,6 +188,8 @@ test("native Chrome content-audio stereo output matches independent source-time 
         Math.sqrt((performance.now()-start)*127);
       }
       const cachedStall=await measure("snapshot");
+      // A frozen but nonzero value cannot pass as correct loop playback.
+      const cachedStallMatch=score(cachedStall,12000,1,[12000,12256]);
       await short.pause();short.dispose();
 
       const long=await createSourcePCMBridge({
@@ -217,6 +230,7 @@ test("native Chrome content-audio stereo output matches independent source-time 
         frames,channels:2,silence:[145000,146500],
         type:"deterministic chord/voice-like FM, transients, noise and silence"
       },loopChecks,cachedStall:{
+        match:cachedStallMatch,
         frames:cachedStall.frames,channels:cachedStall.channels.map(c=>({
           zeroFrames:c.zeroFrames,maxZeroRun:c.maxZeroRun,
           rms:c.rms,maxStep:c.maxStep
@@ -243,10 +257,20 @@ test("native Chrome content-audio stereo output matches independent source-time 
       assert.ok(score.rmsError<.00012,{name,score});
       assert.ok(score.maxError<.0005,{name,score});
     }
+    const transition=evidence.intendedSilence.score;
+    assert.ok(transition.leadingRms.every(x=>x>.02),
+      "silence test requires genuine stereo audio before the quiet section");
+    assert.ok(transition.trailingZeroRun.every(n=>n>=128),
+      "captured output must cross from non-silent into actual source silence");
     assert.ok(evidence.intendedSilence.statistics.channels
       .every(c=>c.maxZeroRun>128),
       "intentional source silence must not be mistaken for inserted silence");
     assert.ok(evidence.cachedStall.frames>=128);
+    assert.ok(evidence.cachedStall.match.comparedFrames>=512);
+    assert.ok(evidence.cachedStall.match.rmsError<.00012,
+      evidence.cachedStall.match);
+    assert.ok(evidence.cachedStall.match.maxError<.0005,
+      evidence.cachedStall.match);
     assert.ok(evidence.cachedStall.channels.every(c=>c.maxZeroRun<128),
       "fully cached real-content loop must not drop whole render quanta");
     assert.ok(evidence.starved.frames>=128);
