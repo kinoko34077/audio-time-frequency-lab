@@ -25,7 +25,10 @@ test("rail operating range cannot mutate accepted speed",()=>{
   assert.equal(speedOnRail(-8,2),-2);
   for(const range of [1,2,4,8])
     assert.equal(validateSpeedRailRange(range),range);
-  assert.throws(()=>validateSpeedRailRange(3),RangeError);
+  assert.equal(validateSpeedRailRange(3),3);
+  assert.equal(validateSpeedRailRange(3.75),3.75);
+  for(const bad of [0,-1,8.001,NaN,Infinity])
+    assert.throws(()=>validateSpeedRailRange(bad),RangeError);
 });
 
 test("forward, reverse, and zero source-time advancement",()=>{
