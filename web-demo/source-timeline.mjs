@@ -2,7 +2,7 @@
  * A/B coordinates are original-source sample frames, independent of zoom/UI.
  */
 export const SPEED_LIMIT=8;
-export const SPEED_RAIL_RANGES=Object.freeze([1,2,4,8]);
+export const SPEED_RAIL_PRESETS=Object.freeze([1,2,4,8]);
 const finite=v=>typeof v==="number"&&Number.isFinite(v);
 const frame=v=>Number.isSafeInteger(v)&&v>=0;
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
@@ -14,8 +14,9 @@ export function validatePlaybackSpeed(s){
   return Object.is(s,-0)?0:s;
 }
 export function validateSpeedRailRange(range){
-  if(!SPEED_RAIL_RANGES.includes(range))
-    throw RangeError("speed rail range must be ±1, ±2, ±4 or ±8");
+  // Presets are suggestions, not limits on a user-specified visible range.
+  if(!finite(range)||range<=0||range>SPEED_LIMIT)
+    throw RangeError("speed rail range must be greater than 0 and no more than 8");
   return range;
 }
 export function speedOnRail(speed,range){
