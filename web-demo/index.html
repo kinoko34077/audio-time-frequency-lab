@@ -4,20 +4,24 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="dark">
-<title>Audio Time–Frequency Lab | 音声モデル比較</title>
+<title>Audio Time–Frequency Lab | 再生・音程・速度</title>
 <link rel="stylesheet" href="./style.css">
 </head>
-<body class="model-lab">
+<body class="model-lab" data-main-tab="player">
 <main class="studio">
   <header class="header">
     <div class="brand"><span class="logo" aria-hidden="true">∿</span><div>
-      <h1>Audio Time–Frequency Lab</h1><p>再生速度と音程を独立に比較</p>
+      <h1>Audio Time–Frequency Lab</h1><p>音源を開いて、速度・音程・区間を直接操作</p>
     </div></div>
     <button id="settings-open" type="button" class="gear" aria-label="設定を開く" aria-haspopup="dialog" aria-controls="settings-dialog">
       <span aria-hidden="true">⚙</span><span>設定</span>
     </button>
   </header>
 
+  <nav class="main-workspace-tabs" role="tablist" aria-label="作業画面" id="workspace-tabs">
+    <button id="main-tab-player" type="button" role="tab" aria-selected="true" aria-controls="main-player-panel">再生</button>
+    <button id="main-tab-model" type="button" role="tab" aria-selected="false" aria-controls="audio-lab">処理モデル</button>
+  </nav>
   <section id="audio-lab" class="panel audio-lab-panel" aria-label="再生速度と解析モデルの比較">
     <div class="section-header"><div><p class="eyebrow">TIME / PITCH / MODEL LAB</p><h2>モデル別の音声比較</h2></div><span class="micro-hint">処理は再生操作で自動開始</span></div>
     <div class="lab-grid">
@@ -61,8 +65,8 @@
   </section>
   <div class="workspace-grid">
     <div class="workspace-left">
-      <section class="panel player" aria-labelledby="player-title">
-        <div class="section-header"><div><p class="eyebrow">AUDIO SOURCE</p><h2 id="player-title">音源の読込・再生</h2></div><span class="micro-hint">先頭600秒まで</span></div>
+      <section id="main-player-panel" class="panel player" aria-labelledby="player-title">
+        <div class="section-header"><div><p class="eyebrow">AUDIO SOURCE</p><h2 id="player-title">音源を再生</h2></div><span class="micro-hint">先頭600秒まで</span></div>
         <label id="drop" class="drop" for="audio-file" role="button" tabindex="0" aria-label="音声ファイルを選ぶ">
           <span aria-hidden="true">♫</span><strong>ここを押して音声を選ぶ</strong>
           <small>WAV / MP3 / M4A など · 75MBまで · ドロップ可</small>
@@ -71,8 +75,24 @@
         <p id="file-meta" class="meta">音声未選択</p>
         <div class="wave-wrap"><canvas id="wave" role="button" tabindex="0" aria-label="波形を押すとその位置から再生"></canvas><div id="playhead" class="playhead"></div></div>
         <div class="transport"><span id="elapsed">0:00.0</span><span id="wave-hint">波形を押して移動</span><span id="duration">0:00.0</span></div>
-        <section id="granular-optin-controls" class="lab-bottom" aria-label="粒状合成実験の速度と音程" hidden>
-          <p class="lab-note">R3実験: ±8/0倍速度と独立音程の粒状合成。波形ドラッグ操作は実験対応。録音音質・クリック・可聴遅延・実機は未受入。通常モデルには影響しません。</p>
+        <section class="player-loop" id="player-loop-controls" aria-label="再生区間を指定してループ" hidden>
+          <div class="player-loop-top"><strong>再生区間 A–B</strong>
+            <label for="player-loop-enabled"><input id="player-loop-enabled" type="checkbox" checked> 区間をループ</label>
+          </div>
+          <div class="player-loop-fields">
+            <label for="player-loop-a">開始 A（サンプル）
+              <input id="player-loop-a" type="number" min="0" step="1" value="0" inputmode="numeric">
+              <button id="player-loop-a-now" type="button">ここをAに</button>
+            </label>
+            <label for="player-loop-b">終端 B（サンプル、含まない）
+              <input id="player-loop-b" type="number" min="1" step="1" value="1" inputmode="numeric">
+              <button id="player-loop-b-now" type="button">ここをBに</button>
+            </label>
+          </div>
+          <p id="player-loop-hint" class="lab-note" aria-live="polite">A と B を決め、ループをONにするとその区間を繰り返します。</p>
+        </section>
+        <section id="granular-optin-controls" class="lab-bottom player-pitch-speed" aria-label="再生速度と音程" hidden>
+          <p class="lab-note player-quality-note">速度は−8〜+8倍、0倍でも発音します。独立音程±12半音。音質・極短ループのクリック・実機での遅延は検証中です。</p>
           <div class="lab-grid">
             <label class="lab-field" for="granular-speed">速度 <output id="granular-speed-output" for="granular-speed">1.00×</output>
               <input id="granular-speed" type="range" min="-8" max="8" step=".01" value="1">
@@ -97,8 +117,9 @@
           <p id="granular-optin-status" class="lab-note" role="status" aria-live="polite">再生時に実験DSPへ適用します。</p>
         </section>
         <div class="actions">
-          <button id="play-wet" class="primary" disabled>▶ モデルで再生</button>
-          <button id="play-dry" disabled>原音</button>
+          <button id="play-main" class="primary" disabled>▶ 再生</button>
+          <button id="play-wet" disabled>▶ モデルで再生</button>
+          <button id="play-dry" disabled>原音で聴く</button>
           <button id="stop" disabled>■ 停止</button>
         </div>
         <audio id="background-output" playsinline preload="none" aria-hidden="true" hidden></audio>
