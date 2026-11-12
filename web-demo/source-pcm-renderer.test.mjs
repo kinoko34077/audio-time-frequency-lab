@@ -235,6 +235,29 @@ test("reverse prefetch never evicts the current window before crossing backward"
   assert.equal(p.hasFrame(85),true);
 });
 
+test("explicit seek window survives full cache and overrides old-cursor eviction",()=>{
+  const p=createSourcePCMRenderer({sourceFrames:1000,sourceSampleRate:48000,
+    outputSampleRate:48000,channelCount:1,speed:1,startFrame:340,
+    loopStartFrame:0,loopEndFrame:990,loopEnabled:true,
+    maxWindowFrames:20,maxWindows:SOURCE_WINDOW_SLOTS});
+  const data=new Float32Array(20).fill(.5);
+  p.installWindow(0,[data.slice()],"A");
+  p.installWindow(970,[data.slice()],"B");
+  p.installWindow(340,[data.slice()]);
+  p.installWindow(390,[data.slice()]);
+  assert.equal(p.statistics.windowCount,4);
+  p.installWindow(700,[data.slice()]); // speculative: correctly rejected
+  assert.equal(p.hasFrame(700),false);
+  p.installWindow(700,[data.slice()],null,"seek");
+  p.timeline.seek(700); // atomic with install in actual Worklet handler
+  assert.equal(p.hasFrame(700),true);
+  const out=block(p,16);
+  assert.equal(out.missing,0);
+  assert.ok(out.output[0].every(x=>x===.5));
+  assert.equal(p.timeline.state.sourceFrame,716);
+  assert.throws(()=>p.installWindow(100,[data.slice()],null,"invalid"),RangeError);
+});
+
 test("directional window placement is bounded even at original source endpoints",()=>{
   const total=48000*600;
   for(const speed of [-8,-1,0,1,8]){
