@@ -63,6 +63,9 @@ test("R4 usability visual captures: desktop and mobile player and folded researc
     await waitForFile(page);
     await layoutEvidence(page,"desktop-loaded");
     await page.screenshot({path:path.join(captureDir,"01-player-desktop.png"),fullPage:true});
+    // Compact viewport preview is logged so reviewers without artifact ZIP
+    // extraction can inspect the actual browser pixels at the exact test HEAD.
+    console.log("UI_REVIEW_JPEG_DESKTOP:"+Buffer.from(await page.screenshot({type:"jpeg",quality:30})).toString("base64"));
     await page.click("#main-tab-model");
     assert.equal(await page.$eval(".model-legacy-fold",el=>el.open),false);
     assert.equal(await page.$eval("#audio-lab",el=>getComputedStyle(el).display==="none"),false);
@@ -75,6 +78,7 @@ test("R4 usability visual captures: desktop and mobile player and folded researc
     await page.setViewport({width:390,height:844,deviceScaleFactor:2,isMobile:true,hasTouch:true});
     await layoutEvidence(page,"mobile-loaded");
     await page.screenshot({path:path.join(captureDir,"03-player-mobile.png"),fullPage:true});
+    console.log("UI_REVIEW_JPEG_MOBILE:"+Buffer.from(await page.screenshot({type:"jpeg",quality:32})).toString("base64"));
     await page.click("#main-tab-model");
     // Research settings retain their open state across tabs; close the fold
     // for the actual model-default presentation capture.
