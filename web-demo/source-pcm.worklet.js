@@ -32,6 +32,17 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
           this.port.postMessage({type:"window-accepted",requestId:m.requestId,start:m.start});
           return;
         }
+        if(m.type==="seek-window"){
+          // One atomic handler: install the requested destination PCM before
+          // changing source time, without a render quantum between commands.
+          this.renderer.installWindow(m.start,m.channels,null,"seek");
+          const st=this.renderer.timeline.seek(m.frame);
+          this.pendingRequest=null;
+          this.port.postMessage({type:"command-accepted",
+            requestId:m.requestId,op:"seek",sourceFrame:st.sourceFrame,
+            revision:st.revision,rawPCM:true});
+          return;
+        }
         if(m.type!=="command")return;
         const t=this.renderer.timeline;
         switch(m.op){

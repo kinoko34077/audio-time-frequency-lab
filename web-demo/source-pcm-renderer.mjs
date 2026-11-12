@@ -5,7 +5,7 @@
 import {createSourceTimeline} from "./source-timeline.mjs";
 
 export const SOURCE_WINDOW_FRAMES=65536;
-export const SOURCE_WINDOW_SLOTS=3;
+export const SOURCE_WINDOW_SLOTS=4;
 
 export function chooseSourceWindowStart(frame,sourceFrames,windowFrames=SOURCE_WINDOW_FRAMES,speed=1){
   if(!Number.isSafeInteger(sourceFrames)||sourceFrames<1 ||
@@ -50,8 +50,9 @@ export function createSourcePCMRenderer({
       missingFrames,renderedFrames,windowCount:windows.length
     });},
     hasFrame(index){return Number.isInteger(index)&&!!find(index);},
-    installWindow(start,channels,pin=null){
-      if((pin!==null&&pin!=="A"&&pin!=="B")||
+    installWindow(start,channels,pin=null,intent="prefetch"){
+      if((intent!=="prefetch"&&intent!=="seek")||
+         (pin!==null&&pin!=="A"&&pin!=="B")||
          !Number.isSafeInteger(start)||start<0||
          !Array.isArray(channels)||channels.length!==channelCount||
          channels.some(ch=>!(ch instanceof Float32Array))||
@@ -76,8 +77,44 @@ export function createSourcePCMRenderer({
       }
       windows.push({start,end,channels,pin:resolvedPin});
       while(windows.length>maxWindows){
-        const victim=windows.findIndex(w=>w.pin===null);
-        windows.splice(victim<0?0:victim,1);
+        // A/B can occupy two pinned slots. A pair of moving windows must
+        // overlap in time during prefetch; never evict the live source
+        // window just because a farther lookahead request arrived first.
+        const cursor=timeline.sampleIndexAt(0);
+        const direction=timeline.state.speed<0?-1:1;
+        const moving=[];
+        for(let i=0;i<windows.length;i++)
+          if(windows[i].pin===null)moving.push(i);
+        if(!moving.length){windows.shift();continue;}
+        const behind=moving.filter(i=>cursor!==null&&
+          (direction>0?windows[i].end<=cursor:windows[i].start>cursor));
+        let victim;
+        if(intent==="seek"){
+          // The host sends an atomic seek-window message: after installing
+          // this target, the worklet moves its source cursor within the same
+          // message handler. Preserve the new target, not the old cursor.
+          const newWindow=windows.length-1;
+          victim=moving.find(i=>i!==newWindow)??newWindow;
+        }else if(behind.length){
+          // Prefer discarding PCM already consumed in this direction.
+          victim=behind.reduce((a,b)=>direction>0
+            ?(windows[a].end<=windows[b].end?a:b)
+            :(windows[a].start>=windows[b].start?a:b));
+        }else{
+          const notCurrent=moving.filter(i=>cursor===null||
+            cursor<windows[i].start||cursor>=windows[i].end);
+          if(notCurrent.length){
+            // If all remaining windows are still ahead, reject the farthest
+            // speculative prefetch rather than dropping the near window.
+            victim=notCurrent.reduce((a,b)=>direction>0
+              ?(windows[a].start>=windows[b].start?a:b)
+              :(windows[a].end<=windows[b].end?a:b));
+          }else{
+            // Multiple overlapping moving windows all cover current frame.
+            victim=moving[0];
+          }
+        }
+        windows.splice(victim,1);
       }
       return windows.length;
     },

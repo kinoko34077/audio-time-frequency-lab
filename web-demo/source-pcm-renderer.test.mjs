@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {createSourcePCMRenderer,chooseSourceWindowStart,SOURCE_WINDOW_FRAMES} from "./source-pcm-renderer.mjs";
+import {createSourcePCMRenderer,chooseSourceWindowStart,SOURCE_WINDOW_FRAMES,SOURCE_WINDOW_SLOTS} from "./source-pcm-renderer.mjs";
 
 const mk=(source,opts={})=>{
   const channels=source.map(a=>Float32Array.from(a));
@@ -116,6 +116,7 @@ test("window count and size stay bounded; invalid PCM windows fail closed",()=>{
     sourceFrames:400000,sourceSampleRate:48000,outputSampleRate:48000,
     maxWindowFrames:1024,maxWindows:2,channelCount:1
   });
+  p.timeline.seek(3072); // only source-window 3072 is currently needed
   for(let i=0;i<4;i++)p.installWindow(i*1024,[new Float32Array(1024)]);
   assert.equal(p.statistics.windowCount,2);
   assert.equal(p.hasFrame(0),false);
@@ -168,6 +169,7 @@ test("A/B endpoint windows remain pinned while the moving source cache advances"
   p.installWindow(100,[new Float32Array(20)],"A");
   p.installWindow(199900,[new Float32Array(20)],"B");
   p.installWindow(100,[new Float32Array(20)]); // same range, no pin arg
+  p.timeline.seek(50020); // moving cursor now needs the future window
   p.installWindow(50000,[new Float32Array(20)]);
   p.installWindow(50020,[new Float32Array(20)]);
   assert.equal(p.statistics.windowCount,3);
@@ -180,6 +182,80 @@ test("A/B endpoint windows remain pinned while the moving source cache advances"
   assert.equal(p.hasFrame(120),true);
   assert.equal(p.hasFrame(199900),true);
   assert.throws(()=>p.installWindow(200,[new Float32Array(20)],"invalid"),RangeError);
+});
+
+test("two moving windows survive speculative prefetch while A/B endpoints are pinned",()=>{
+  assert.equal(SOURCE_WINDOW_SLOTS,4);
+  const p=createSourcePCMRenderer({sourceFrames:200,sourceSampleRate:48000,
+    outputSampleRate:48000,channelCount:1,speed:1,startFrame:42,
+    loopStartFrame:0,loopEndFrame:190,loopEnabled:true,
+    maxWindowFrames:20,maxWindows:SOURCE_WINDOW_SLOTS});
+  const fill=start=>new Float32Array(20).fill(.5);
+  p.installWindow(0,[fill(0)],"A");
+  p.installWindow(170,[fill(170)],"B");
+  p.installWindow(40,[fill(40)]);
+  assert.equal(block(p,5).missing,0); // position 47, actively in [40,60)
+  p.installWindow(60,[fill(60)]); // prefetch the adjacent window
+  assert.equal(p.statistics.windowCount,4);
+  assert.equal(p.hasFrame(47),true);
+  assert.equal(block(p,5).missing,0); // the old design inserted 5 silence frames
+  p.installWindow(80,[fill(80)]); // too speculative: reject ahead, keep near
+  assert.equal(p.hasFrame(52),true);
+  assert.equal(p.hasFrame(60),true);
+  assert.equal(p.hasFrame(80),false);
+  assert.equal(block(p,9).missing,0); // crosses [40,60) -> [60,80)
+  assert.equal(p.timeline.state.sourceFrame,61);
+  p.installWindow(80,[fill(80)]); // old [40,60) now behind, safe to evict
+  assert.equal(p.hasFrame(47),false);
+  assert.equal(p.hasFrame(61),true);
+  assert.equal(p.hasFrame(80),true);
+  assert.equal(p.statistics.missingFrames,0);
+});
+
+test("reverse prefetch never evicts the current window before crossing backward",()=>{
+  const p=createSourcePCMRenderer({sourceFrames:200,sourceSampleRate:48000,
+    outputSampleRate:48000,channelCount:1,speed:-1,startFrame:135,
+    loopStartFrame:0,loopEndFrame:190,loopEnabled:true,
+    maxWindowFrames:20,maxWindows:SOURCE_WINDOW_SLOTS});
+  p.installWindow(0,[new Float32Array(20).fill(.5)],"A");
+  p.installWindow(170,[new Float32Array(20).fill(.5)],"B");
+  p.installWindow(120,[new Float32Array(20).fill(.5)]);
+  assert.equal(block(p,5).missing,0);
+  p.installWindow(100,[new Float32Array(20).fill(.5)]);
+  assert.equal(block(p,5).missing,0);
+  p.installWindow(80,[new Float32Array(20).fill(.5)]);
+  assert.equal(p.hasFrame(125),true);
+  assert.equal(p.hasFrame(115),true);
+  assert.equal(p.hasFrame(85),false);
+  assert.equal(block(p,12).missing,0); // crosses from 120 down to 119
+  assert.equal(p.timeline.state.sourceFrame,113);
+  p.installWindow(80,[new Float32Array(20).fill(.5)]);
+  assert.equal(p.hasFrame(130),false);
+  assert.equal(p.hasFrame(110),true);
+  assert.equal(p.hasFrame(85),true);
+});
+
+test("explicit seek window survives full cache and overrides old-cursor eviction",()=>{
+  const p=createSourcePCMRenderer({sourceFrames:1000,sourceSampleRate:48000,
+    outputSampleRate:48000,channelCount:1,speed:1,startFrame:340,
+    loopStartFrame:0,loopEndFrame:990,loopEnabled:true,
+    maxWindowFrames:20,maxWindows:SOURCE_WINDOW_SLOTS});
+  const data=new Float32Array(20).fill(.5);
+  p.installWindow(0,[data.slice()],"A");
+  p.installWindow(970,[data.slice()],"B");
+  p.installWindow(340,[data.slice()]);
+  p.installWindow(390,[data.slice()]);
+  assert.equal(p.statistics.windowCount,4);
+  p.installWindow(700,[data.slice()]); // speculative: correctly rejected
+  assert.equal(p.hasFrame(700),false);
+  p.installWindow(700,[data.slice()],null,"seek");
+  p.timeline.seek(700); // atomic with install in actual Worklet handler
+  assert.equal(p.hasFrame(700),true);
+  const out=block(p,16);
+  assert.equal(out.missing,0);
+  assert.ok(out.output[0].every(x=>x===.5));
+  assert.equal(p.timeline.state.sourceFrame,716);
+  assert.throws(()=>p.installWindow(100,[data.slice()],null,"invalid"),RangeError);
 });
 
 test("directional window placement is bounded even at original source endpoints",()=>{
