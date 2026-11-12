@@ -125,6 +125,8 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, swit
     const beforePinchSpan=asSeconds(await page.$eval("#wave-zoom-label",
       el=>el.textContent));
     assert.ok(Number.isFinite(beforePinchSpan)&&beforePinchSpan>0);
+    const beforePinchFrame=Number(await page.$eval("#wave-detail",
+      el=>el.getAttribute("aria-valuenow")));
     const touch=await page.createCDPSession();
     await touch.send("Emulation.setTouchEmulationEnabled",
       {enabled:true,maxTouchPoints:2});
@@ -141,6 +143,10 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, swit
     const afterPinchSpan=asSeconds(await page.$eval("#wave-zoom-label",
       el=>el.textContent));
     assert.ok(afterPinchSpan<beforePinchSpan,{beforePinchSpan,afterPinchSpan});
+    const afterPinchFrame=Number(await page.$eval("#wave-detail",
+      el=>el.getAttribute("aria-valuenow")));
+    assert.ok(Math.abs(afterPinchFrame-beforePinchFrame)<=2,
+      "releasing the second finger after a centered pinch must not seek");
     assert.equal(await page.$eval("#player-loop-b",el=>el.value),String(draggedB));
     assert.equal(await page.$eval("#rt-telemetry",el=>Number(el.dataset.pcmNodeStarts)),starts,
       "pinch may not restart the audio engine");
