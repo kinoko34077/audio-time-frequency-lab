@@ -11,6 +11,11 @@ function ensureProcessor(ctx){
   if(!ready){
     ready=ctx.audioWorklet.addModule(new URL("./source-pcm.worklet.js",import.meta.url));
     installations.set(ctx,ready);
+    // A rejected registration is not a permanent backend failure. Keep the
+    // successful promise, but permit a new attempt after the cause is fixed.
+    ready.catch(()=>{
+      if(installations.get(ctx)===ready)installations.delete(ctx);
+    });
   }
   return ready;
 }
