@@ -41,15 +41,20 @@ export function createSourceTimeline({
   if(!valid(loopStartFrame,loopEndFrame))throw RangeError("invalid A/B source-frame interval");
   if(typeof loopEnabled!=="boolean")throw TypeError("loopEnabled must be boolean");
   let position=startFrame,rate=validatePlaybackSpeed(speed),
-      A=loopStartFrame,B=loopEndFrame,loop=loopEnabled,revision=0;
+      A=loopStartFrame,B=loopEndFrame,loop=loopEnabled,revision=0,ended=false;
   const reconcile=()=>{
     if(loop){
+      ended=false;
       if(position<A||position>=B)position=rate<0?B-1:A;
-    }else if(rate<0&&position===sourceFrames)position=sourceFrames-1;
+    }else if(rate<0&&position===sourceFrames){
+      position=sourceFrames-1;
+    }else if(rate>0&&position===sourceFrames){
+      ended=true;
+    }
   };
   const state=()=>Object.freeze({
     sourceFrame:position,speed:rate,loopStartFrame:A,loopEndFrame:B,
-    loopEnabled:loop,revision
+    loopEnabled:loop,revision,ended
   });
   const delta=frames=>frames*rate*sourceSampleRate/outputSampleRate;
   reconcile();
@@ -57,6 +62,7 @@ export function createSourceTimeline({
     get state(){return state();},
     sourceFrameAt(outputOffset=0){
       if(!frame(outputOffset))throw RangeError("invalid output-frame offset");
+      if(ended&&!loop)return null;
       const p=position+delta(outputOffset);
       if(loop)return wrap(p,A,B);
       return p>=0&&p<sourceFrames?p:null;
@@ -67,32 +73,39 @@ export function createSourceTimeline({
     },
     advance(outputFrames){
       if(!frame(outputFrames))throw RangeError("invalid output frame count");
+      // An exhausted unlooped direction stays exhausted across render quanta.
+      if(outputFrames===0||(!loop&&ended))return state();
       const p=position+delta(outputFrames);
-      position=loop?wrap(p,A,B):clamp(p,0,sourceFrames);
+      if(loop)position=wrap(p,A,B);
+      else{
+        position=clamp(p,0,sourceFrames);
+        if(rate<0&&p<0 || rate>0&&p>=sourceFrames)ended=true;
+      }
       return state();
     },
     seek(p){
       if(!frame(p)||p>sourceFrames)throw RangeError("invalid seek frame");
-      const old=position;position=p;reconcile();
-      if(!Object.is(old,position))revision++;
+      const old=position,wasEnded=ended;
+      position=p;ended=false;reconcile();
+      if(!Object.is(old,position)||wasEnded!==ended)revision++;
       return state();
     },
     setSpeed(s){
       const next=validatePlaybackSpeed(s);
       if(Object.is(rate,next))return state();
-      rate=next;reconcile();revision++;
+      rate=next;ended=false;reconcile();revision++;
       return state();
     },
     setLoopBounds(a,b){
       if(!valid(a,b))throw RangeError("invalid A/B source-frame interval");
       if(A===a&&B===b)return state();
-      A=a;B=b;reconcile();revision++;
+      A=a;B=b;if(loop){ended=false;reconcile();}revision++;
       return state();
     },
     setLoopEnabled(enabled){
       if(typeof enabled!=="boolean")throw TypeError("loopEnabled must be boolean");
       if(loop===enabled)return state();
-      loop=enabled;reconcile();revision++;
+      loop=enabled;ended=false;reconcile();revision++;
       return state();
     }
   };
