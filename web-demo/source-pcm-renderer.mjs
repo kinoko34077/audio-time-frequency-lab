@@ -170,8 +170,18 @@ export function createSourcePCMRenderer({
       // No whole-song clone into the AudioWorklet.
       if(!granular||typeof granular.render!=="function")
         throw RangeError("invalid experimental granular engine");
+      const state=timeline.state;
+      // Unlooped EOF is an exhausted transport, not a time-freeze request.
+      // Do not keep resynthesizing the last grain forever at the clamped
+      // frame; a later explicit seek or genuine reversal can re-arm it.
+      if(state.ended&&!state.loopEnabled){
+        for(const channel of output)channel.fill(0);
+        firstMissingFrame=null;
+        renderedFrames+=output[0].length;
+        return 0;
+      }
       const outcome=granular.render(
-        output,timeline.state,readFrame,sourceFrames);
+        output,state,readFrame,sourceFrames);
       firstMissingFrame=outcome.firstMissingFrame;
       missingFrames+=outcome.missingFrames;
       renderedFrames+=output[0].length;
