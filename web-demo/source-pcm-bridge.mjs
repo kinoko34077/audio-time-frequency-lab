@@ -24,7 +24,8 @@ export async function createSourcePCMBridge({
   ctx,sourceChannels,sourceSampleRate,
   speed=1,startFrame=0,loopStartFrame=0,
   loopEndFrame=sourceChannels?.[0]?.length,loopEnabled=false,
-  onEvent=()=>{},commandTimeoutMs=5000
+  onEvent=()=>{},commandTimeoutMs=5000,
+  processingMode="raw",pitchSemitones=0
 }={}){
   if(!ctx?.audioWorklet||!Number.isFinite(ctx.sampleRate)||
      !Array.isArray(sourceChannels)||sourceChannels.length<1||
@@ -38,6 +39,17 @@ export async function createSourcePCMBridge({
   if(!Number.isFinite(commandTimeoutMs)||commandTimeoutMs<1||commandTimeoutMs>60000)
     throw RangeError("invalid PCM command timeout");
   let currentSpeed=validatePlaybackSpeed(speed);
+  if(processingMode!=="raw"&&processingMode!=="granular")
+    throw RangeError("invalid PCM processing mode");
+  const validatePitch=value=>{
+    if(typeof value!=="number"||!Number.isFinite(value)||
+      value<-12||value>12)
+      throw RangeError("pitch must be finite within -12..12 semitones");
+    return value;
+  };
+  pitchSemitones=validatePitch(pitchSemitones);
+  if(processingMode==="raw"&&pitchSemitones!==0)
+    throw RangeError("raw PCM cannot apply independent pitch");
   let A=loopStartFrame,B=loopEndFrame,loop=loopEnabled;
   if(!Number.isSafeInteger(A)||!Number.isSafeInteger(B)||
      A<0||A>=B||B>frames||typeof loop!=="boolean"||
@@ -50,7 +62,8 @@ export async function createSourcePCMBridge({
     processorOptions:{
       sourceFrames:frames,sourceSampleRate,
       channelCount:sourceChannels.length,speed,
-      startFrame,loopStartFrame:A,loopEndFrame:B,loopEnabled:loop
+      startFrame,loopStartFrame:A,loopEndFrame:B,loopEnabled:loop,
+      processingMode,pitchSemitones
     }
   });
   // Do not copy entire track to the worklet; these small snapshots are moved.
@@ -168,6 +181,15 @@ export async function createSourcePCMBridge({
       catch(error){return Promise.reject(error);}
       return command("speed",{speed:currentSpeed});
     },
+    setPitch(next){
+      if(processingMode!=="granular")
+        return Promise.reject(Error("independent pitch requires granular mode"));
+      try{next=validatePitch(next);}
+      catch(error){return Promise.reject(error);}
+      // Preserve caller's full finite input precision, independent of any
+      // display rounding or rail snap. Render receipt has pitchRevision.
+      return command("pitch",{semitones:next});
+    },
     setLoopBounds(a,b){
       if(!Number.isSafeInteger(a)||!Number.isSafeInteger(b)||
          a<0||a>=b||b>frames)return Promise.reject(RangeError("invalid A/B bounds"));
@@ -181,6 +203,7 @@ export async function createSourcePCMBridge({
       return updateLoop(A,B,enabled,"loop");
     },
     get latest(){return latest;},
+    get processingMode(){return processingMode;},
     dispose(){
       if(closed)return;
       closed=true;
