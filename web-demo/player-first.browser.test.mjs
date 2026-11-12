@@ -65,6 +65,45 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, swit
       ?.textContent.includes("反映が完了"),{timeout:20000});
     assert.equal(await page.$eval("#player-loop-a",el=>el.value),"8000");
     assert.equal(await page.$eval("#player-loop-b",el=>el.value),"12000");
+    // Voice Memos / AudioStretch interaction: a stationary central head,
+    // a separately navigable overview, and zoomed sound under the finger.
+    assert.equal(await page.$eval("#wave-center-head",el=>getComputedStyle(el).left),
+      "50%"); // DOM center line is CSS-owned and cannot drift with playback.
+    assert.equal(await page.$eval("#wave-detail",el=>getComputedStyle(el).touchAction),"none");
+    const wave=await page.$eval("#wave-detail",el=>{
+      const r=el.getBoundingClientRect();
+      return {x:r.x,y:r.y,width:r.width,height:r.height};
+    });
+    assert.ok(wave.width>220&&wave.height>160,"large detailed waveform is visible");
+    const initialSpan=await page.$eval("#wave-zoom-label",el=>el.textContent);
+    await page.click("#wave-zoom-in");
+    await page.click("#wave-zoom-in");
+    assert.notEqual(await page.$eval("#wave-zoom-label",el=>el.textContent),initialSpan,
+      "zoom controls must change the source-time viewport");
+    const bHandle=await page.$eval("#wave-b-marker",el=>{
+      const r=el.getBoundingClientRect();
+      return {x:r.left+r.width/2,y:r.top+r.height/2,visible:!el.hidden};
+    });
+    assert.ok(bHandle.visible,"B handle should be in the zoomed viewport");
+    await page.mouse.move(bHandle.x,wave.y+wave.height*.5);
+    await page.mouse.down();
+    await page.mouse.move(bHandle.x+55,wave.y+wave.height*.5,{steps:6});
+    await page.mouse.up();
+    await page.waitForFunction(()=>Number(document.querySelector("#player-loop-b").value)>12000,
+      {timeout:15000});
+    const draggedB=Number(await page.$eval("#player-loop-b",el=>el.value));
+    assert.ok(draggedB>12000);
+    // Move the waveform under the fixed head (as opposed to moving a head
+    // over a static whole-song overview).
+    const beforePan=Number(await page.$eval("#wave-detail",el=>el.getAttribute("aria-valuenow")));
+    await page.mouse.move(wave.x+wave.width*.20,wave.y+wave.height*.65);
+    await page.mouse.down();
+    await page.mouse.move(wave.x+wave.width*.10,wave.y+wave.height*.65,{steps:8});
+    await page.mouse.up();
+    await page.waitForFunction(prev=>Number(document.querySelector("#wave-detail")
+      ?.getAttribute("aria-valuenow"))>prev,{timeout:15000},beforePan);
+    assert.equal(await page.$eval("#rt-telemetry",el=>Number(el.dataset.pcmNodeStarts)),starts,
+      "zoom/handle scrub may not create extra worklet nodes");
     await page.click("#main-tab-model");
     assert.equal(await page.$eval("body",el=>el.dataset.mainTab),"model");
     assert.notEqual(await page.$eval("#audio-lab",el=>getComputedStyle(el).display),"none");
@@ -74,7 +113,7 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, swit
     assert.equal(await page.$eval("#granular-speed-value",el=>el.value),"0");
     assert.equal(await page.$eval("#granular-pitch-value",el=>el.value),"7.1234");
     assert.equal(await page.$eval("#player-loop-a",el=>el.value),"8000");
-    assert.equal(await page.$eval("#player-loop-b",el=>el.value),"12000");
+    assert.equal(await page.$eval("#player-loop-b",el=>el.value),String(draggedB));
     assert.equal(await page.$eval("#rt-telemetry",el=>Number(el.dataset.pcmNodeStarts)),starts,
       "switching tabs may not recreate the Worklet");
     await page.evaluate(()=>{
