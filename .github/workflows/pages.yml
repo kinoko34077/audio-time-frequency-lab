@@ -59,6 +59,9 @@ jobs:
       - name: Native Chrome recorded CC0 upright piano file-to-R3 Worklet (real recording)
         run: |
           node --test web-demo/source-recorded-player.browser.test.mjs
+      - name: Native Chrome R4 playback-first real-file and A/B/tab-state regression
+        run: |
+          node --test web-demo/player-first.browser.test.mjs
       - name: Native Chrome opt-in granular controls with precise signed speed and pitch (R3)
         run: |
           node --test web-demo/source-granular-player.browser.test.mjs
