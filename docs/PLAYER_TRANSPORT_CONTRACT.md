@@ -1,6 +1,6 @@
 # Audio Lab — Source-time transport contract (#36)
 
-Status: R0/R1 accepted in main via PR #37; R2 experimental PCM AudioWorklet via PR #38 and original-audio opt-in integration via PR #39, followed by cache/seek fixes in PR #40 (2026-11-12). The time mapper is used by the experimental Worklet only at `?pcmTransport=1` + original play. Normal music DSP/UI/export are not migrated. **These changes do not demonstrate independent-pitch negative/zero speed or complete gapless output.**
+Status (2026-11-13): R0/R1 accepted via PR #37; R2 bounded PCM / continuous AudioWorklet / cache / command-vs-render telemetry integrated in PR #38–#46, but full audio-quality, CPU/GC and hardware acceptance remain OPEN. R3 **experimental** signed-speed, 0× audible granular and independent pitch via PR #47, explicit opt-in controls via PR #48, native waveform drag/scrub path via PR #49. The source-time mapper feeds the experimental `?pcmTransport=1` raw mode and `?pcmTransport=granular` prototype. The default Rust / PV / WSOLA / dual / AM modes and current export remain distinct. **Do not equate opt-in control success with recording fidelity, true clickless audio or independent-pitch production acceptance.**
 
 ## Purpose and priority
 
@@ -111,3 +111,11 @@ The existing R2 **bounded window cache, source timeline, AudioWorklet node and h
 - R2 `render-applied` remains a render-thread observation rather than the hardware/DAC presentation timestamp; independent music-level pitch/zero-speed acceptance must eventually be done on physical devices and content-bearing recordings. The existing research PV/WSOLA/dual/AM model entry points are **not** modified or hidden by this slice.
 
 **R3 remains OPEN** for full product integration, practical waveform scrubbing, high-quality ±8/0 and official UI controls. Retain #36 as the sole roadmap owner; the new function is an implementation slice, not a completed feature announcement.
+
+## R3 experimental waveform drag continuation (PR #49)
+
+- The existing `#wave` canvas is the gesture owner. Only `?pcmTransport=granular` permits a captured mouse/touch pointer to update source time continuously; pointer release/cancel ends the drag. Other playback routes keep their historical single-tap behavior and keyboard access.
+- Every gesture target uses the same source time and existing bridge `seek(frame)` command; speed and pitch are orthogonal, with no new AudioWorklet node or per-grain source restart.
+- The host bounds rapid gesture destinations to one in-flight atomic PCM seek-window transfer and one replaceable latest target. A drag that begins during Worklet registration is reconciled to the last available source position **while still paused** before `play`; a still-moving gesture is followed afterward rather than postponing audio startup indefinitely.
+- Command ACK and `render-applied` are separate; render receipts while paused have `running=false` and must not be described as audible. The first `running=true` render following a deferred stopped drag is checked against the final decoded-rate source-frame coordinate in native Chrome, not merely against an arbitrary threshold.
+- This is a bounded functional gesture result. Natural clicks, actual recorded music/transients, subjective pitch quality, output-device latency, CPU/GC and physical touch/Safari acceptance are unverified; R2 stays the first unfinished checkpoint. Do not treat a Chromium mouse test as an iPhone test.

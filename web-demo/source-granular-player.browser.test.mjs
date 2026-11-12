@@ -97,7 +97,33 @@ test("R3 opt-in real page applies precise signed speed/pitch without replacing t
         }
       };
     });
-    await page.click("#play-dry");
+    // Start by touching the waveform while stopped, then drag to a new
+    // location DURING delayed Worklet initialization. The first audible
+    // render must use the FINAL scrub coordinate, never the stale down point.
+    const sourceRate=await page.$eval("#file-meta",e=>
+      Number(e.textContent.match(/(\d+)Hz/)?.[1]));
+    assert.ok(sourceRate>0,"decoded PCM sample rate must be known");
+    await page.$eval("#wave",e=>e.scrollIntoView({block:"center"}));
+    const initialBox=await page.$eval("#wave",e=>{
+      const r=e.getBoundingClientRect();
+      return {left:r.left,top:r.top,width:r.width,height:r.height};
+    });
+    await page.evaluate(()=>{
+      const status=document.getElementById("granular-optin-status");
+      window.__firstGranularPlayFrame=null;
+      const observer=new MutationObserver(()=>{
+        if(status.dataset.renderRunning==="true"&&
+           window.__firstGranularPlayFrame===null){
+          window.__firstGranularPlayFrame=Number(status.dataset.renderFrame);
+          observer.disconnect();
+        }
+      });
+      observer.observe(status,{attributes:true,
+        attributeFilter:["data-render-running"]});
+    });
+    const initialY=initialBox.top+initialBox.height/2;
+    await page.mouse.move(initialBox.left+initialBox.width*.18,initialY);
+    await page.mouse.down();
     await page.waitForFunction(()=>window.__granularInitPending,{timeout:10000});
     await page.evaluate(()=>{
       const set=(id,value)=>{
@@ -107,6 +133,14 @@ test("R3 opt-in real page applies precise signed speed/pitch without replacing t
       set("granular-speed-value","1.237");
       set("granular-pitch-value","-3.456");
     });
+    await page.mouse.move(initialBox.left+initialBox.width*.72,initialY);
+    await page.mouse.up();
+    const firstExpected=Math.round(sourceRate*2*.72);
+    await page.waitForFunction(()=>window.__firstGranularPlayFrame!==null,
+      {timeout:20000});
+    const firstFrame=await page.evaluate(()=>window.__firstGranularPlayFrame);
+    assert.ok(Math.abs(firstFrame-firstExpected)<=2,
+      `first audible render must start at final scrub frame ${firstExpected}; got ${firstFrame}`);
     await page.waitForFunction(()=>document.querySelector("#rt-telemetry")
       ?.dataset.pcmTransport==="granular-experimental",{timeout:20000});
     await page.waitForFunction(()=>document.querySelector("#granular-optin-status")
@@ -152,6 +186,46 @@ test("R3 opt-in real page applies precise signed speed/pitch without replacing t
     assert.equal(after.speed,"0");
     assert.ok(Number.isFinite(Number(after.renderRevision)));
     assert.match(after.note,/音声処理済み|音声反映前に上書き/);
+
+    // Actual browser pointer movement, not a synthetic pointerdown fixture:
+    // scrub a still-audible 0× granular stream across the waveform. It must
+    // keep the original Worklet and reach the LAST dragged source coordinate.
+    const box=await page.$eval("#wave",element=>{
+      const r=element.getBoundingClientRect();
+      return {left:r.left,top:r.top,width:r.width,height:r.height};
+    });
+    const y=box.top+box.height/2;
+    await page.mouse.move(box.left+box.width*.2,y);
+    await page.mouse.down();
+    for(let n=1;n<=24;n++)
+      await page.mouse.move(box.left+box.width*(.2+.6*n/24),y);
+    const duringDrag=await page.evaluate(()=>({
+      head:parseFloat(document.querySelector("#playhead").style.left),
+      elapsed:document.querySelector("#elapsed").textContent
+    }));
+    assert.ok(duringDrag.head>75&&duringDrag.head<85,
+      "live playhead should follow the finger, not a stale render ACK");
+    await page.mouse.up();
+    const finalExpected=Math.round(sourceRate*2*.8);
+    await page.waitForFunction(expected=>Math.abs(Number(document.querySelector(
+      "#granular-optin-status")?.dataset.renderFrame)-expected)<=2,
+      {timeout:20000},finalExpected);
+    const dragResult=await page.evaluate(()=>({
+      starts:Number(document.querySelector("#rt-telemetry").dataset.pcmNodeStarts),
+      mode:document.querySelector("#rt-telemetry").dataset.pcmTransport,
+      speed:document.querySelector("#granular-speed-value").value,
+      pitch:document.querySelector("#granular-pitch-value").value,
+      renderFrame:Number(document.querySelector(
+        "#granular-optin-status").dataset.renderFrame)
+    }));
+    assert.equal(dragResult.starts,starts,
+      "scrub may not recreate the AudioWorklet");
+    assert.equal(dragResult.mode,"granular-experimental");
+    assert.equal(dragResult.speed,"0");
+    assert.equal(dragResult.pitch,"7.1234");
+    assert.ok(Math.abs(dragResult.renderFrame-finalExpected)<=2,
+      `final source frame must be ${finalExpected}, got ${dragResult.renderFrame}`);
+
     await page.click("#stop");
     await page.waitForFunction(()=>!document.querySelector("#rt-telemetry")
       ?.dataset.pcmTransport,{timeout:10000});

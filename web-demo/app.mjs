@@ -537,7 +537,11 @@ function drawAudio(){
   }
   ctx.stroke();
 }
+let activeWavePointer=null;
 function playPosition(){
+  // During a native gesture the latest finger/mouse position is the UI source
+  // of truth; callback progress/command ACK can lag behind the dragged point.
+  if(activeWavePointer!==null)return state.seek;
   if(!state.player||!state.ctx||!duration())return state.seek;
   if(state.player.labStream)return state.player.stream.sourcePositionAt(state.ctx.currentTime);
   if(state.player.rawPCM){
@@ -553,15 +557,21 @@ function refreshPlayhead(){
   $("#playhead").style.left=(duration()?clamp(seconds/duration(),0,1)*100:0)+"%";
   state.raf=requestAnimationFrame(refreshPlayhead);
 }
-function playheadFromPointer(e){
+function playheadFromPointer(e,startIfStopped=true){
   if(!state.dry)return;
   const rect=$("#wave").getBoundingClientRect();
   const frac=clamp((e.clientX-rect.left)/rect.width,0,.999999);
   state.seek=frac*duration();
   if(state.player){
-    seek(state.seek);
-  }else{
-    play(GRANULAR_EXPERIMENT?"dry":"wet",state.seek).catch(err=>message("再生失敗: "+err.message,"error"));
+    // A bridge registered but not yet started must reconcile its final
+    // gesture coordinate BEFORE the first audible quantum.
+    if(!state.player.initializing)seek(state.seek);
+  }else if(startIfStopped){
+    // A drag beginning while stopped launches exactly one player. Moves that
+    // occur during async AudioWorklet registration merely replace state.seek.
+    const launchAt=state.seek;
+    void play(GRANULAR_EXPERIMENT?"dry":"wet",launchAt)
+      .catch(err=>message("再生失敗: "+err.message,"error"));
   }
   refreshStatusSeek();
 }
@@ -569,7 +579,41 @@ function refreshStatusSeek(){
   $("#elapsed").textContent=fmtTime(state.seek);
   $("#playhead").style.left=(duration()?100*state.seek/duration():0)+"%";
 }
-$("#wave").addEventListener("pointerdown",playheadFromPointer);
+// Opt-in R3 scrub: one captured pointer, with real touch/mouse moves; legacy
+// modes retain the existing single-tap seek. Synthetic legacy fixture events
+// still make a single seek, without opening an unended drag session.
+const waveSurface=$("#wave");
+waveSurface.addEventListener("pointerdown",e=>{
+  if(e.pointerType==="mouse"&&e.button!==0)return;
+  if(activeWavePointer!==null)return;
+  if(GRANULAR_EXPERIMENT&&e.isTrusted){
+    activeWavePointer=e.pointerId;
+    try{waveSurface.setPointerCapture(e.pointerId);}catch{}
+  }
+  playheadFromPointer(e);
+});
+if(GRANULAR_EXPERIMENT){
+  waveSurface.style.touchAction="none";
+  $("#wave-hint").textContent="波形を押したまま動かしてスクラブ";
+  waveSurface.setAttribute("aria-label",
+    "波形をタップまたはドラッグして音源位置を移動");
+  waveSurface.addEventListener("pointermove",e=>{
+    if(activeWavePointer!==e.pointerId)return;
+    playheadFromPointer(e,false);
+    e.preventDefault();
+  });
+  const finishWave=e=>{
+    if(activeWavePointer!==e.pointerId)return;
+    if(e.type==="pointerup")playheadFromPointer(e,false);
+    activeWavePointer=null;
+    try{
+      if(waveSurface.hasPointerCapture(e.pointerId))
+        waveSurface.releasePointerCapture(e.pointerId);
+    }catch{}
+  };
+  for(const type of ["pointerup","pointercancel","lostpointercapture"])
+    waveSurface.addEventListener(type,finishWave);
+}
 $("#wave").addEventListener("keydown",e=>{
   if(!state.dry)return;
   if(e.key==="Enter"||e.key===" "){
@@ -677,6 +721,28 @@ function startSource(p,offset){
   src.start(when,clamp(inputOffset,0,Math.max(0,p.buffer.duration-.001)));
   p.source=src;p.offset=offset;p.at=when;state.seek=offset;
 }
+function schedulePCMSeek(p,frame){
+  // One atomic bounded window transfer may be in flight; subsequent drag
+  // positions replace one pending destination instead of accumulating copies.
+  p.queuedSeekFrame=frame;
+  if(p.seekInFlight)return;
+  p.seekInFlight=true;
+  void (async()=>{
+    while(state.player===p&&p.queuedSeekFrame!==null){
+      const target=p.queuedSeekFrame;
+      p.queuedSeekFrame=null;
+      await p.pcmBridge.seek(target);
+    }
+  })().catch(error=>{
+    p.queuedSeekFrame=null;
+    if(state.player===p)
+      message("PCM実験シーク未反映: "+error.message,"error");
+  }).finally(()=>{
+    p.seekInFlight=false;
+    if(state.player===p&&p.queuedSeekFrame!==null)
+      schedulePCMSeek(p,p.queuedSeekFrame);
+  });
+}
 function seek(seconds){
   const p=state.player;
   const where=clamp(seconds,0,Math.max(0,duration()-.001));
@@ -685,9 +751,8 @@ function seek(seconds){
   if(p.labStream){void stop().then(()=>play("wet",where));return;}
   if(p.rawPCM){
     p.offset=where;
-    void p.pcmBridge.seek(Math.min(state.dry[0].length-1,
-      Math.max(0,Math.round(where*state.decoded.sampleRate))))
-      .catch(err=>message("PCM実験シーク未反映: "+err.message,"error"));
+    schedulePCMSeek(p,Math.min(state.dry[0].length-1,
+      Math.max(0,Math.round(where*state.decoded.sampleRate))));
     return;
   }
   // Short host mute covers state reset and rebuffering at the new position.
@@ -761,6 +826,7 @@ async function stop(){
   // Fence any pending async AudioContext/WASM/Worklet launch. A successful
   // file replacement and explicit stop must never be undone by an old click.
   state.transportEpoch++;
+  activeWavePointer=null;
   if(state.rebuildTimer){clearTimeout(state.rebuildTimer);state.rebuildTimer=null;}
   const p=state.player;
   if(!p){
@@ -885,7 +951,9 @@ async function play(mode="wet",offset=null){
               status.dataset.renderRevision=String(data.revision);
               status.dataset.renderPitch=String(data.pitchSemitones);
               status.dataset.renderFrame=String(data.sourceFrame);
-              status.textContent="音声処理済み revision "+data.revision+
+              status.dataset.renderRunning=String(data.running);
+              status.textContent=(data.running?"音声処理済み":"再生前の位置設定済み（出力は無音）")+
+                " revision "+data.revision+
                 " · sourceFrame "+data.sourceFrame+
                 " · cache不足 "+data.missingFramesInBlock;
             }else if(data.type==="render-superseded"){
@@ -918,7 +986,8 @@ async function play(mode="wet",offset=null){
       master.connect(directRoute);directRoute.connect(ctx.destination);
       const player={rawPCM:true,directDry:true,pcmBridge:bridge,mode:"dry",
         labRealtime:false,labProcessed:false,master,directRoute,bridgeRoute:null,
-        outputRoute:"direct",offset:at,at:ctx.currentTime};
+        outputRoute:"direct",offset:at,at:ctx.currentTime,
+        initializing:GRANULAR_EXPERIMENT};
       state.player=player;
       if(GRANULAR_EXPERIMENT){
         // Assign ownership first: later edits now go straight to this bridge.
@@ -931,8 +1000,26 @@ async function play(mode="wet",offset=null){
           await bridge.setPitch(granular.pitch);
         if(launchEpoch!==state.transportEpoch||state.player!==player)return;
       }
+      // If the user scrubbed while the AudioWorklet was registering, the
+      // latest source location must be in the Worklet BEFORE audio starts.
+      // No outdated grain may be emitted as the first audible quantum.
+      let initializedAt=at;
+      // Bounded startup synchronization: keep the Worklet paused while
+      // reconciling at most two positions, so a continuously moving finger
+      // cannot starve audio startup indefinitely.
+      for(let pass=0;GRANULAR_EXPERIMENT&&pass<2&&state.seek!==initializedAt;pass++){
+        const latestAt=state.seek;
+        await bridge.seek(Math.min(state.dry[0].length-1,
+          Math.max(0,Math.round(latestAt*sourceRate))));
+        if(launchEpoch!==state.transportEpoch||state.player!==player)return;
+        initializedAt=latestAt;
+      }
       await bridge.play();
       if(launchEpoch!==state.transportEpoch||state.player!==player)return;
+      player.initializing=false;
+      // If the pointer continued moving during the final async await,
+      // follow it immediately through the bounded live scrub queue.
+      if(GRANULAR_EXPERIMENT&&state.seek!==initializedAt)seek(state.seek);
       mediaStatus(true);void mediaBridge(player);
       controls.stop.disabled=false;
       const telemetry=$("#rt-telemetry");
