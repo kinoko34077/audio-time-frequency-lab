@@ -2,6 +2,7 @@ import {QUALITY,mixWet} from "./dsp.mjs";
 import {liveFactors,fullBandPartialOptions} from "./lab-contract.mjs";
 import {createModelStream} from "./lab-stream.mjs";
 import {createSourcePCMBridge} from "./source-pcm-bridge.mjs";
+import {validatePlaybackSpeed,validateSpeedRailRange,speedOnRail,formatPlaybackSpeed} from "./source-timeline.mjs";
 import {frequencyFromSlider,sliderFromFrequency,holdFromFrequency,drawCrusherPreview} from "./crusher-visual.mjs";
 import {drawFrequencyGraph} from "./graph.mjs";
 import {mountDualThumb} from "./dual-thumb.mjs";
@@ -20,7 +21,10 @@ import {axisShiftUnits,axisShiftCanonical,axisShiftView} from "./axis-shift-view
 const $=id=>document.querySelector(id);
 const MAX_PREVIEW_SECONDS=600;
 // R2 development-only: never switch the real musical-pitch DSP by default.
-const RAW_PCM_EXPERIMENT=new URLSearchParams(location.search).get("pcmTransport")==="1";
+const PCM_EXPERIMENT=new URLSearchParams(location.search).get("pcmTransport");
+const RAW_PCM_EXPERIMENT=PCM_EXPERIMENT==="1"||PCM_EXPERIMENT==="granular";
+const GRANULAR_EXPERIMENT=PCM_EXPERIMENT==="granular";
+const granular={speed:1,pitch:0,railMax:8};
 let graphMax=2000;
 let graphAlphaBeforeZoom=0;
 const controls={
@@ -106,6 +110,68 @@ const fmtTime=seconds=>{
   return Math.floor(s/60)+":"+(s%60).toFixed(1).padStart(4,"0");
 };
 const duration=()=>state.dry?.length?state.dry[0].length/state.decoded.sampleRate:0;
+// #36 R3: thin UI over source-timeline + existing granular bridge contracts.
+// Presentation rounding and rail visibility must not rewrite canonical values.
+function refreshGranular(){
+  if(!GRANULAR_EXPERIMENT)return;
+  const s=$("#granular-speed"),p=$("#granular-pitch");
+  const st=$("#granular-speed-value"),pt=$("#granular-pitch-value");
+  s.min=String(-granular.railMax);s.max=String(granular.railMax);
+  s.value=String(speedOnRail(granular.speed,granular.railMax));
+  s.setAttribute("aria-valuetext",formatPlaybackSpeed(granular.speed)+"倍");
+  p.value=String(granular.pitch);
+  if(document.activeElement!==st)st.value=formatPlaybackSpeed(granular.speed,{editing:true});
+  if(document.activeElement!==pt)pt.value=String(granular.pitch);
+  $("#granular-speed-output").textContent=formatPlaybackSpeed(granular.speed)+"×";
+  $("#granular-pitch-output").textContent=granular.pitch.toFixed(1)+" 半音";
+  $("#granular-range").value=String(granular.railMax);
+  $("#granular-rail-note").textContent=Math.abs(granular.speed)>granular.railMax?
+    "指定速度はレール外です。直接入力した数値は保持されています。":"";
+}
+function editGranular(kind,raw){
+  const input=$("#granular-"+kind+"-value");
+  if(!String(raw).trim()){
+    input.setCustomValidity("値を入力してください");input.reportValidity();return;
+  }
+  const value=Number(raw);
+  try{
+    if(kind==="speed")validatePlaybackSpeed(value);
+    else if(!Number.isFinite(value)||value<-12||value>12)
+      throw RangeError("音程は±12半音まで");
+  }catch(error){
+    input.setCustomValidity(error.message);input.reportValidity();return;
+  }
+  input.setCustomValidity("");
+  if(Object.is(granular[kind],value)){refreshGranular();return;}
+  granular[kind]=value;refreshGranular();
+  const bridge=state.player?.pcmBridge,status=$("#granular-optin-status");
+  if(!bridge||bridge.processingMode!=="granular"){
+    status.textContent="設定保持中。次の実験再生時に適用します。";return;
+  }
+  status.textContent="処理へ設定を要求しました（音声反映は未確認）。";
+  void (kind==="speed"?bridge.setSpeed(value):bridge.setPitch(value))
+    .catch(error=>{
+      if(state.player?.pcmBridge!==bridge)return;
+      status.textContent="未反映: "+error.message;
+      message("実験音声設定の反映失敗: "+error.message,"error");
+    });
+}
+if(GRANULAR_EXPERIMENT){
+  $("#granular-optin-controls").hidden=false;
+  controls.dry.textContent="▶ 粒状音程（実験）";
+  controls.dry.title="独立音程・±8/0倍再生。音質は未受入。";
+  for(const k of ["speed","pitch"]){
+    const slider=$("#granular-"+k),input=$("#granular-"+k+"-value");
+    slider.addEventListener("input",()=>editGranular(k,slider.value));
+    input.addEventListener("input",()=>input.setCustomValidity(""));
+    input.addEventListener("change",()=>editGranular(k,input.value));
+  }
+  $("#granular-range").addEventListener("change",e=>{
+    granular.railMax=validateSpeedRailRange(Number(e.target.value));
+    refreshGranular();
+  });
+  refreshGranular();
+}
 function message(text,type="info"){
   const node=$("#status");
   if(node.textContent!==text)node.textContent=text;
@@ -495,7 +561,7 @@ function playheadFromPointer(e){
   if(state.player){
     seek(state.seek);
   }else{
-    play("wet",state.seek).catch(err=>message("再生失敗: "+err.message,"error"));
+    play(GRANULAR_EXPERIMENT?"dry":"wet",state.seek).catch(err=>message("再生失敗: "+err.message,"error"));
   }
   refreshStatusSeek();
 }
@@ -507,7 +573,7 @@ $("#wave").addEventListener("pointerdown",playheadFromPointer);
 $("#wave").addEventListener("keydown",e=>{
   if(!state.dry)return;
   if(e.key==="Enter"||e.key===" "){
-    e.preventDefault();play("wet",state.seek).catch(err=>message(err.message,"error"));
+    e.preventDefault();play(GRANULAR_EXPERIMENT?"dry":"wet",state.seek).catch(err=>message(err.message,"error"));
   }else if(e.key==="ArrowLeft"||e.key==="ArrowRight"){
     e.preventDefault();const diff=e.key==="ArrowLeft"?-2:2;
     const pos=clamp(playPosition()+diff,0,Math.max(0,duration()-.01));
@@ -715,7 +781,9 @@ async function stop(){
     mediaStatus(false);controls.stop.disabled=true;
     $("#rt-telemetry").textContent="";
     delete $("#rt-telemetry").dataset.pcmTransport;
-    indicator("停止中 · PCM実験経路を終了");refreshStatusSeek();return;
+    indicator("停止中 · PCM実験経路を終了");
+    if(GRANULAR_EXPERIMENT)$("#granular-optin-status").textContent="停止中・設定保持";
+    refreshStatusSeek();return;
   }
   try{p.source?.stop();}catch{}
   try{p.source?.disconnect();p.worklet?.disconnect();p.wet?.disconnect();
@@ -796,11 +864,34 @@ async function play(mode="wet",offset=null){
       if(launchEpoch!==state.transportEpoch)return;
       const sourceRate=state.decoded.sampleRate;
       const at=clamp(offset===null?state.seek:offset,0,Math.max(0,duration()-1/sourceRate));
+      // Preserve the values supplied to an asynchronous Worklet startup; user
+      // edits during addModule() must be replayed before starting playback.
+      const initialSpeed=GRANULAR_EXPERIMENT?granular.speed:1;
+      const initialPitch=GRANULAR_EXPERIMENT?granular.pitch:0;
       bridge=await createSourcePCMBridge({
         ctx,sourceChannels:state.dry,sourceSampleRate:sourceRate,
-        speed:1,startFrame:Math.round(at*sourceRate),loopEnabled:true,
+        speed:initialSpeed,
+        processingMode:GRANULAR_EXPERIMENT?"granular":"raw",
+        pitchSemitones:initialPitch,
+        startFrame:Math.round(at*sourceRate),loopEnabled:true,
         loopStartFrame:0,loopEndFrame:state.dry[0].length,
         onEvent:data=>{
+          if(GRANULAR_EXPERIMENT&&state.player?.pcmBridge===bridge){
+            const status=$("#granular-optin-status");
+            if(data.type==="command-accepted"){
+              status.textContent="命令受理 #"+data.requestId+" revision "+data.revision+
+                " · 音声ブロック反映待ち";
+            }else if(data.type==="render-applied"){
+              status.dataset.renderRevision=String(data.revision);
+              status.dataset.renderPitch=String(data.pitchSemitones);
+              status.dataset.renderFrame=String(data.sourceFrame);
+              status.textContent="音声処理済み revision "+data.revision+
+                " · sourceFrame "+data.sourceFrame+
+                " · cache不足 "+data.missingFramesInBlock;
+            }else if(data.type==="render-superseded"){
+              status.textContent="受理済み命令 #"+data.requestId+" は音声反映前に上書き";
+            }
+          }
           if(data.type==="progress"&&state.player?.pcmBridge===bridge){
             $("#rt-telemetry").textContent="PCM実験経路 · 元音源時刻 "+
               (data.sourceFrame/sourceRate).toFixed(3)+"s · cache不足 "+data.missingFrames;
@@ -829,17 +920,28 @@ async function play(mode="wet",offset=null){
         labRealtime:false,labProcessed:false,master,directRoute,bridgeRoute:null,
         outputRoute:"direct",offset:at,at:ctx.currentTime};
       state.player=player;
+      if(GRANULAR_EXPERIMENT){
+        // Assign ownership first: later edits now go straight to this bridge.
+        // Commands issued here precede the play command; never silently start
+        // with an obsolete captured speed/pitch while the UI shows new values.
+        if(!Object.is(initialSpeed,granular.speed))
+          await bridge.setSpeed(granular.speed);
+        if(launchEpoch!==state.transportEpoch||state.player!==player)return;
+        if(!Object.is(initialPitch,granular.pitch))
+          await bridge.setPitch(granular.pitch);
+        if(launchEpoch!==state.transportEpoch||state.player!==player)return;
+      }
       await bridge.play();
       if(launchEpoch!==state.transportEpoch||state.player!==player)return;
       mediaStatus(true);void mediaBridge(player);
       controls.stop.disabled=false;
       const telemetry=$("#rt-telemetry");
-      telemetry.dataset.pcmTransport="raw-experimental";
+      telemetry.dataset.pcmTransport=GRANULAR_EXPERIMENT?"granular-experimental":"raw-experimental";
       telemetry.dataset.pcmNodeStarts=String(
         Number(telemetry.dataset.pcmNodeStarts||0)+1
       );
-      indicator("原音再生中 · PCM実験経路（速度と音程は未連動）");
-      message("実験用PCM再生中。音程変更・0倍の音響品質は未実装です。","warning");
+      indicator(GRANULAR_EXPERIMENT?"粒状合成中 · 独立音程/±8/0倍（音質未受入）":"原音再生中 · PCM実験経路（速度と音程は未連動）");
+      message(GRANULAR_EXPERIMENT?"粒状実験中。録音素材での音質・実機可聴遅延は未受入。":"実験用PCM再生中。音程変更・0倍の音響品質は未実装です。","warning");
     }catch(err){
       if(launchEpoch!==state.transportEpoch){bridge?.dispose();return;}
       await stop();

@@ -71,6 +71,31 @@
         <p id="file-meta" class="meta">音声未選択</p>
         <div class="wave-wrap"><canvas id="wave" role="button" tabindex="0" aria-label="波形を押すとその位置から再生"></canvas><div id="playhead" class="playhead"></div></div>
         <div class="transport"><span id="elapsed">0:00.0</span><span>波形を押して移動</span><span id="duration">0:00.0</span></div>
+        <section id="granular-optin-controls" class="lab-bottom" aria-label="粒状合成実験の速度と音程" hidden>
+          <p class="lab-note">R3実験: ±8/0倍速度と独立音程の粒状合成。録音音質・スクラブ・実機は未受入。通常モデルには影響しません。</p>
+          <div class="lab-grid">
+            <label class="lab-field" for="granular-speed">速度 <output id="granular-speed-output" for="granular-speed">1.00×</output>
+              <input id="granular-speed" type="range" min="-8" max="8" step=".01" value="1">
+            </label>
+            <label class="lab-field" for="granular-speed-value">速度直接入力
+              <input id="granular-speed-value" type="number" min="-8" max="8" step="any" value="1" inputmode="decimal">
+            </label>
+            <label class="lab-field" for="granular-pitch">音程 <output id="granular-pitch-output" for="granular-pitch">0.0 半音</output>
+              <input id="granular-pitch" type="range" min="-12" max="12" step=".1" value="0">
+            </label>
+            <label class="lab-field" for="granular-pitch-value">音程直接入力（半音）
+              <input id="granular-pitch-value" type="number" min="-12" max="12" step="any" value="0" inputmode="decimal">
+            </label>
+            <label class="lab-field" for="granular-range">速度レール表示幅
+              <select id="granular-range">
+                <option value="1">±1倍</option><option value="2">±2倍</option>
+                <option value="4">±4倍</option><option value="8" selected>±8倍</option>
+              </select>
+            </label>
+          </div>
+          <p id="granular-rail-note" class="lab-note"></p>
+          <p id="granular-optin-status" class="lab-note" role="status" aria-live="polite">再生時に実験DSPへ適用します。</p>
+        </section>
         <div class="actions">
           <button id="play-wet" class="primary" disabled>▶ モデルで再生</button>
           <button id="play-dry" disabled>原音</button>

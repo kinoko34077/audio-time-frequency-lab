@@ -56,6 +56,9 @@ jobs:
       - name: Native Chrome real-page raw PCM opt-in and seek without node restart
         run: |
           node --test web-demo/source-pcm-player.browser.test.mjs
+      - name: Native Chrome opt-in granular controls with precise signed speed and pitch (R3)
+        run: |
+          node --test web-demo/source-granular-player.browser.test.mjs
       - name: Native Chrome post-render PCM stress evidence (R2, not gapless acceptance)
         run: |
           node --test web-demo/source-pcm-stress.browser.test.mjs
