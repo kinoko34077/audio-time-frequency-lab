@@ -94,20 +94,20 @@ test("0 speed freezes sample position but does NOT claim audible pitch-preservin
   assert.equal(p.statistics.missingFrames,0);
 });
 
-test("cache misses are counted and never advance source clock silently",()=>{
+test("cache misses are counted while output time advances without replay",()=>{
   const p=createSourcePCMRenderer({
     sourceFrames:1000,sourceSampleRate:48000,outputSampleRate:48000,
     channelCount:1,speed:1,startFrame:100
   });
   let r=block(p,128);
   assert.equal(r.missing,128);
-  assert.equal(p.timeline.state.sourceFrame,100);
+  assert.equal(p.timeline.state.sourceFrame,228);
   assert.equal(p.statistics.missingFrames,128);
-  assert.equal(p.needsSourceWindow(0),100);
+  assert.equal(p.needsSourceWindow(0),228);
   p.installWindow(0,[Float32Array.from({length:500},()=>.25)]);
   r=block(p,128);
   assert.equal(r.missing,0);
-  assert.equal(p.timeline.state.sourceFrame,228);
+  assert.equal(p.timeline.state.sourceFrame,356);
   assert.ok(r.output[0].every(x=>x===.25));
 });
 
@@ -152,14 +152,50 @@ test("crossing a cached chunk reports the real missing frame, not the cached hea
   const first=block(player,128);
   assert.ok(first.missing>0);
   assert.ok(player.firstMissingFrame>=65536);
-  assert.equal(player.timeline.state.sourceFrame,65408);
+  assert.equal(player.timeline.state.sourceFrame,65408+128*7);
   const from=chooseSourceWindowStart(player.firstMissingFrame,total,65536,7);
   player.installWindow(from,[Float32Array.from({length:total-from},()=>.5)]);
   const retry=block(player,128);
   assert.equal(retry.missing,0);
   assert.ok(retry.output[0].every(x=>x===.5));
-  assert.ok(player.timeline.state.sourceFrame>65408);
+  assert.ok(player.timeline.state.sourceFrame>65408+128*7);
   assert.equal(player.firstMissingFrame,null);
+});
+
+test("partial cache miss never replays emitted PCM after refill",()=>{
+  const p=createSourcePCMRenderer({
+    sourceFrames:256,sourceSampleRate:48000,outputSampleRate:48000,
+    startFrame:60,speed:1
+  });
+  p.installWindow(0,[new Float32Array(64).fill(.25)]);
+  const first=block(p,8);
+  assert.equal(first.missing,4);
+  assert.deepEqual(Array.from(first.output[0]),[.25,.25,.25,.25,0,0,0,0]);
+  assert.equal(p.firstMissingFrame,64);
+  assert.equal(p.timeline.state.sourceFrame,68);
+  p.installWindow(64,[new Float32Array(64).fill(.5)]);
+  const second=block(p,8);
+  assert.equal(second.missing,0);
+  assert.deepEqual(Array.from(second.output[0]),Array(8).fill(.5));
+  assert.equal(p.timeline.state.sourceFrame,76);
+  assert.equal(p.statistics.missingFrames,4);
+});
+
+test("reverse and loop cache misses never rewind committed source time",()=>{
+  const p=createSourcePCMRenderer({
+    sourceFrames:300,sourceSampleRate:48000,outputSampleRate:48000,
+    startFrame:132,speed:-1,loopStartFrame:0,loopEndFrame:300,
+    loopEnabled:true
+  });
+  p.installWindow(125,[new Float32Array(8).fill(.75)]);
+  const first=block(p,12);
+  assert.equal(first.missing,4);
+  assert.equal(p.timeline.state.sourceFrame,120);
+  p.installWindow(112,[new Float32Array(13).fill(.6)]);
+  const second=block(p,8);
+  assert.equal(second.missing,0);
+  assert.ok(second.output[0].every(x=>Math.abs(x-.6)<1e-5));
+  assert.equal(p.timeline.state.sourceFrame,112);
 });
 
 test("A/B endpoint windows remain pinned while the moving source cache advances",()=>{
@@ -256,6 +292,58 @@ test("explicit seek window survives full cache and overrides old-cursor eviction
   assert.ok(out.output[0].every(x=>x===.5));
   assert.equal(p.timeline.state.sourceFrame,716);
   assert.throws(()=>p.installWindow(100,[data.slice()],null,"invalid"),RangeError);
+});
+
+test("atomic A/B change preloads endpoints before the next output block",()=>{
+  const p=createSourcePCMRenderer({
+    sourceFrames:1000,sourceSampleRate:48000,outputSampleRate:48000,
+    speed:1,startFrame:3,loopEnabled:true,loopStartFrame:0,
+    loopEndFrame:990,maxWindowFrames:20,maxWindows:4
+  });
+  const old=new Float32Array(20).fill(.25);
+  p.installWindow(0,[old],"A");
+  p.installWindow(970,[old],"B");
+  p.installWindow(40,[old]);p.installWindow(60,[old]);
+  assert.equal(block(p,4).missing,0);
+  assert.equal(p.timeline.state.sourceFrame,7);
+  const newWindow={start:400,channels:[new Float32Array(20).fill(.5)]};
+  const nextEnd={start:400,channels:[new Float32Array(20).fill(.5)]};
+  const receipt=p.applyLoopConfiguration(400,420,true,[newWindow,nextEnd]);
+  assert.equal(receipt.sourceFrame,400);
+  assert.equal(receipt.loopStartFrame,400);
+  assert.equal(receipt.loopEndFrame,420);
+  const first=block(p,4);
+  assert.equal(first.missing,0);
+  assert.ok(first.output[0].every(x=>x===.5));
+  assert.equal(p.timeline.state.sourceFrame,404);
+});
+
+test("rejected atomic bounds update leaves source time, loop and cache unchanged",()=>{
+  const p=createSourcePCMRenderer({
+    sourceFrames:1000,sourceSampleRate:48000,outputSampleRate:48000,
+    speed:1,startFrame:3,loopEnabled:true,
+    loopStartFrame:0,loopEndFrame:990,maxWindowFrames:20
+  });
+  const old=new Float32Array(20).fill(.5);
+  p.installWindow(0,[old],"A");
+  p.installWindow(970,[old],"B");
+  const prev=p.timeline.state;
+  assert.throws(()=>p.applyLoopConfiguration(400,420,true,[
+    {start:400,channels:[new Float32Array(20)]},
+    {start:400,channels:[new Float32Array(18)]}
+  ]),RangeError);
+  assert.deepEqual(p.timeline.state,prev);
+  assert.equal(block(p,4).missing,0);
+  assert.equal(p.hasFrame(3),true);
+  assert.equal(p.hasFrame(400),false);
+  p.applyLoopConfiguration(0,990,false,[]);
+  assert.equal(p.timeline.state.loopEnabled,false);
+  assert.equal(p.statistics.windowCount,2);
+  p.timeline.seek(300); // old A is now behind playback, not protected
+  p.installWindow(300,[new Float32Array(20)]);
+  p.installWindow(400,[new Float32Array(20)]);
+  p.installWindow(500,[new Float32Array(20)]);
+  assert.equal(p.hasFrame(0),false,"old A pin must not survive loop disable");
 });
 
 test("directional window placement is bounded even at original source endpoints",()=>{

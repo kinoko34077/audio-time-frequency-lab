@@ -50,6 +50,16 @@ test("native Chrome experimental source-PCM AudioWorklet renders and loops witho
       await player.play();
       await new Promise(resolve=>setTimeout(resolve,180));
       const loop=player.latest;
+      const loopMissing=loop?.missingFrames??0;
+      // Update both PCM loop endpoints while the real AudioWorklet renders.
+      // The boundaries and their caches must be applied in a single message.
+      const transitions=[];
+      for(const [a,b] of [[1800,1816],[4200,4201],[9400,9529],[97,99]]){
+        const receipt=await player.setLoopBounds(a,b);
+        await new Promise(resolve=>setTimeout(resolve,45));
+        const current=player.latest;
+        transitions.push({a,b,receipt,current});
+      }
       await player.pause();
       const stable=node===player.node;
       player.dispose();
@@ -80,7 +90,7 @@ test("native Chrome experimental source-PCM AudioWorklet renders and loops witho
       long.dispose();
       await ctx.close();
       return {
-        first,loop,rms,stable,afterDispose,errors:events.filter(x=>x.type==="error"),
+        first,loop,rms,stable,loopMissing,transitions,afterDispose,errors:events.filter(x=>x.type==="error"),
         windowAccepts:events.filter(x=>x.type==="window-accepted").length,
         gapReports:events.filter(x=>x.type==="underrun").length,
         farSeek:{
@@ -99,6 +109,16 @@ test("native Chrome experimental source-PCM AudioWorklet renders and loops witho
     assert.equal(evidence.loop.missingFrames,0,evidence);
     assert.ok(evidence.rms>.01,`expected audible PCM: ${JSON.stringify(evidence)}`);
     assert.equal(evidence.stable,true);
+    assert.equal(evidence.transitions.length,4);
+    for(const {a,b,receipt,current} of evidence.transitions){
+      assert.equal(receipt.loopStartFrame,a);
+      assert.equal(receipt.loopEndFrame,b);
+      assert.equal(receipt.loopEnabled,true);
+      assert.ok(current.sourceFrame>=a&&current.sourceFrame<b,
+        `loop read outside updated interval [${a},${b}): ${JSON.stringify(current)}`);
+      assert.equal(current.missingFrames,evidence.loopMissing,
+        "changing A/B must not create an intermediate cache-miss block");
+    }
     assert.deepEqual(evidence.afterDispose,[],
       "disposed worklet must no longer accept commands");
     assert.ok(evidence.windowAccepts>=1);

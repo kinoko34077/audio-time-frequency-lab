@@ -118,12 +118,47 @@ export function createSourcePCMRenderer({
       }
       return windows.length;
     },
+    /** One atomic render-thread operation for loop state and endpoint PCM.
+     * The host must transfer both endpoint windows in the same worklet message.
+     * Validate every piece before mutating the transport or the cache.
+     */
+    applyLoopConfiguration(a,b,enabled,endpoints=[]){
+      if(!Number.isSafeInteger(a)||!Number.isSafeInteger(b)||
+         a<0||a>=b||b>sourceFrames||typeof enabled!=="boolean"||
+         !Array.isArray(endpoints)||endpoints.length!==(enabled?2:0))
+        throw RangeError("invalid atomic loop configuration");
+      if(enabled){
+        for(let i=0;i<2;i++){
+          const w=endpoints[i],target=i===0?a:b-1;
+          if(!w||!Number.isSafeInteger(w.start)||w.start<0||
+             !Array.isArray(w.channels)||w.channels.length!==channelCount||
+             w.channels.some(ch=>!(ch instanceof Float32Array))||
+             w.channels[0].length<1||w.channels[0].length>maxWindowFrames||
+             w.channels.some(ch=>ch.length!==w.channels[0].length)||
+             w.start+w.channels[0].length>sourceFrames||
+             target<w.start||target>=w.start+w.channels[0].length)
+            throw RangeError("invalid loop endpoint PCM window");
+        }
+      }
+      timeline.setLoopBounds(a,b);
+      timeline.setLoopEnabled(enabled);
+      if(enabled){
+        api.installWindow(endpoints[0].start,endpoints[0].channels,"A","seek");
+        api.installWindow(endpoints[1].start,endpoints[1].channels,"B","seek");
+      }else{
+        // Once looping is off, endpoint windows must not monopolize cache.
+        for(const w of windows)w.pin=null;
+      }
+      return timeline.state;
+    },
     /**
      * Render exactly one output block, no new worklet/node per loop.
      * Output must contain zeroed-by-render Float32Array channels of equal length.
      * Missing source data is explicitly counted. On underrun the timeline is
-     * held for the whole block; missing samples are silence, never fake success.
-     * Returns missing-frame count (not a newly allocated status object).
+     * advanced by the output quantum even when a cache miss inserts silence.
+     * Frames already emitted must NEVER be replayed after refill. Missing
+     * samples are silence and counted, never fake success.
+     * Returns missing output-frame count (not a newly allocated status object).
      */
     render(output){
       if(!Array.isArray(output)||output.length!==channelCount||
@@ -161,7 +196,10 @@ export function createSourcePCMRenderer({
       }
       renderedFrames+=len;
       missingFrames+=missing;
-      if(missing===0)timeline.advance(len);
+      // An audible quantum has elapsed regardless of cache availability.
+      // Holding the entire source clock on a partial miss duplicates the PCM
+      // already output before the missing source frame on the next callback.
+      timeline.advance(len);
       return missing;
     },
     /** Used by host to prefetch ahead; does not report an audio success. */
