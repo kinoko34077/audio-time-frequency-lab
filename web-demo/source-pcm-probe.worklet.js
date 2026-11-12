@@ -32,13 +32,13 @@ class AudioLabPCMProbe extends AudioWorkletProcessor {
   stats(){
     const channels=this.channels.map(c=>({
       frames:c.frames,zeroFrames:c.zero,nonzeroFrames:c.nonzero,
-      maxStep:c.maxStep,maxAbs:c.maxAbs,
+      maxStep:c.maxStep,maxAbs:c.maxAbs,maxZeroRun:c.maxZeroRun,
       rms:c.frames?Math.sqrt(c.squared/c.frames):0,
       captured:c.capture?
         Array.from(c.capture.subarray(0,c.captureCount)):[]
     }));
     const first=channels[0]||{frames:0,zeroFrames:0,nonzeroFrames:0,
-      maxStep:0,maxAbs:0,rms:0};
+      maxStep:0,maxAbs:0,rms:0,maxZeroRun:0};
     return {...first,blocks:this.blocks,inputChannels:this.peakChannels,
       channels};
   }
@@ -57,14 +57,17 @@ class AudioLabPCMProbe extends AudioWorkletProcessor {
       if(!c){
         c={frames:0,nonzero:0,zero:0,maxStep:0,maxAbs:0,
           previous:0,hasPrevious:false,squared:0,
+          zeroRun:0,maxZeroRun:0,
           capture:this.captureLimit?new Float32Array(this.captureLimit):null,
           captureCount:0};
         this.channels[channel]=c;
       }
       for(let i=0;i<samples.length;i++){
         const value=samples[i],abs=Math.abs(value);
-        if(abs<1e-7)c.zero++;
-        else c.nonzero++;
+        if(abs<1e-7){
+          c.zero++;c.zeroRun++;
+          c.maxZeroRun=Math.max(c.maxZeroRun,c.zeroRun);
+        }else{c.nonzero++;c.zeroRun=0;}
         if(abs>c.maxAbs)c.maxAbs=abs;
         if(c.hasPrevious)c.maxStep=Math.max(c.maxStep,
           Math.abs(value-c.previous));
