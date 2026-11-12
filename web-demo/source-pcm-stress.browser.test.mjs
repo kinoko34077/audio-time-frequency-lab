@@ -149,6 +149,8 @@ test("native Chrome measures actual output PCM under tiny loops and long-source 
       assert.equal(measured.zeroFrames,0,
         `fully cached short loop dropped stereo channel ${ch} under host stall`);
       assert.ok(Math.abs(measured.rms-reference)<.015,measured);
+      assert.ok(measured.maxStep<.015,
+        `main-thread stall introduced unexpected jump in channel ${ch}: ${JSON.stringify(measured)}`);
     }
     assert.ok(evidence.stalledLong.frames>=128,evidence.stalledLong);
     assert.equal(evidence.stalledLong.inputChannels,2);
