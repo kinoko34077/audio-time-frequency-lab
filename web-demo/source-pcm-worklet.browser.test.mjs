@@ -88,9 +88,51 @@ test("native Chrome experimental source-PCM AudioWorklet renders and loops witho
       const afterSeek=long.latest;
       await long.pause();
       long.dispose();
+
+      // Fault injection at the actual AudioWorkletNode boundary. A fatal
+      // processor error must reject commands without hanging and emit exactly
+      // one explicit fatal state, rather than reporting stale "playing".
+      const injected=[];
+      const crashed=await createSourcePCMBridge({
+        ctx,sourceChannels:[data],sourceSampleRate:48000,
+        commandTimeoutMs:150,onEvent:e=>injected.push(e)
+      });
+      crashed.connect(analyser);
+      await crashed.play();
+      const pendingSeek=crashed.seek(1234);
+      crashed.node.dispatchEvent(new Event("processorerror"));
+      let crashRejected=false;
+      try{await pendingSeek;}catch(err){
+        crashRejected=/processor unexpectedly terminated/.test(err.message);
+      }
+      const fatalCount=injected.filter(x=>x.type==="fatal-error").length;
+      let afterCrashRejected=false;
+      try{await crashed.setSpeed(2);}catch(err){
+        afterCrashRejected=/disposed/.test(err.message);
+      }
+      crashed.dispose();
+
+      const silent=[];
+      const unresponsive=await createSourcePCMBridge({
+        ctx,sourceChannels:[data],sourceSampleRate:48000,
+        commandTimeoutMs:65,onEvent:e=>silent.push(e)
+      });
+      unresponsive.connect(analyser);
+      // Simulate a lost ACK or silent processor shutdown, without firing
+      // onprocessorerror. Every command must settle within the bounded timer.
+      unresponsive.node.port.onmessage=null;
+      let timedOut=false;
+      try{await unresponsive.setSpeed(2);}catch(err){
+        timedOut=/command response timed out/.test(err.message);
+      }
+      const timeoutFatalCount=silent.filter(x=>x.type==="fatal-error").length;
+      unresponsive.dispose();
       await ctx.close();
       return {
-        first,loop,rms,stable,loopMissing,transitions,afterDispose,errors:events.filter(x=>x.type==="error"),
+        first,loop,rms,stable,loopMissing,transitions,afterDispose,
+        failureRecovery:{crashRejected,fatalCount,afterCrashRejected,
+          timedOut,timeoutFatalCount},
+        errors:events.filter(x=>x.type==="error"),
         windowAccepts:events.filter(x=>x.type==="window-accepted").length,
         gapReports:events.filter(x=>x.type==="underrun").length,
         farSeek:{
@@ -122,6 +164,10 @@ test("native Chrome experimental source-PCM AudioWorklet renders and loops witho
     assert.deepEqual(evidence.afterDispose,[],
       "disposed worklet must no longer accept commands");
     assert.ok(evidence.windowAccepts>=1);
+    assert.deepEqual(evidence.failureRecovery,{
+      crashRejected:true,fatalCount:1,afterCrashRejected:true,
+      timedOut:true,timeoutFatalCount:1
+    });
     assert.equal(evidence.farSeek.ack,700000);
     assert.deepEqual(evidence.farSeek.errors,[]);
     assert.ok(evidence.farSeek.windows>=4,evidence.farSeek);
