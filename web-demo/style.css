@@ -1012,3 +1012,17 @@ body.model-lab[data-main-tab="player"] .wave-editor-footer span:nth-child(2){
     font-size:9px;max-width:46%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap
   }
 }
+
+
+/* User-facing player must never have a floating legacy diagnostics widget
+   covering the waveform, transport or tuning fields. Keep it accessible
+   in normal document flow; model tab retains its specialist floating HUD. */
+body.model-lab[data-main-tab="player"] .runtime-hud{
+  position:static!important;top:auto!important;right:auto!important;
+  bottom:auto!important;left:auto!important;transform:none!important;
+  width:min(calc(100% - 18px),910px)!important;max-width:none!important;
+  max-height:none!important;margin:8px auto 16px;box-shadow:none!important;
+}
+body.model-lab[data-main-tab="player"] .runtime-hud-body{
+  max-height:none!important;overflow:visible!important
+}
