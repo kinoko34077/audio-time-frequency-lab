@@ -470,42 +470,43 @@ test("recorded piano independently measures cent shift, harmonic energy and atta
         harmonics});
     }
   }
-  // Find the largest real positive 512-frame RMS jump (recorded attack)
-  // instead of inventing a synthetic click or assuming onset at time zero.
+  // This is the largest positive 512-frame RMS rise, NOT necessarily a
+  // physical note onset. Keep source-local envelope-rise and start-of-file
+  // attack/decay metrics explicitly separate.
   const envelope=[];
   for(let i=0;i+512<=pcm.length;i+=512)
     envelope.push(rms(pcm.subarray(i,i+512)));
-  let attackBin=-1,best=0;
+  let riseBin=-1,best=0;
   for(let i=2;i<envelope.length-5;i++){
     const increase=envelope[i]-envelope[i-1];
-    if(increase>best&&envelope[i]>.002){best=increase;attackBin=i;}
+    if(increase>best&&envelope[i]>.002){best=increase;riseBin=i;}
   }
-  assert.ok(attackBin>=3&&best>.001,
+  assert.ok(riseBin>=3&&best>.001,
     "real recording must have a measurable transient");
-  const onsetFrame=attackBin*512;
-  const transientStart=onsetFrame-2048;
-  const base=pcm.subarray(transientStart,transientStart+8192);
+  const riseFrame=riseBin*512;
+  const riseStart=riseFrame-2048;
+  const base=pcm.subarray(riseStart,riseStart+8192);
   const blockRms=(x,offset,count)=>rms(x.subarray(offset,offset+count));
-  const attacks=[];
+  const rises=[];
   for(const pitch of [0,7.1234,-5]){
-    const output=renderLong(transientStart,1,pitch,8192);
+    const output=renderLong(riseStart,1,pitch,8192);
     const sourcePre=blockRms(base,1024,1024),
       sourcePost=blockRms(base,2048,1024);
     const processedPre=blockRms(output,1024,1024),
       processedPost=blockRms(output,2048,1024);
-    attacks.push({pitch,
+    rises.push({pitch,
       sourcePrePostRatio:round(sourcePre/Math.max(sourcePost,1e-9)),
       outputPrePostRatio:round(processedPre/Math.max(processedPost,1e-9)),
       beforeRms:round(processedPre),afterRms:round(processedPost),
-      attackContrastDb:round(20*Math.log10(
+      riseContrastDb:round(20*Math.log10(
         Math.max(processedPost/Math.max(processedPre,1e-9),1e-12))),
-      sourceAttackContrastDb:round(20*Math.log10(
+      sourceRiseContrastDb:round(20*Math.log10(
         Math.max(sourcePost/Math.max(sourcePre,1e-9),1e-12)))
     });
   }
   // Compare the SAME real low piano at longer existing granular window
   // lengths after the recorded source exposed ambiguous harmonic ridges.
-  // Longer grains can reduce pitch sidebands but smear attacks and raise
+  // Longer grains can reduce pitch sidebands but smear rises and raise
   // processing cost; never silently change production defaults from a
   // single-source offline test.
   const grainSweep=[];
@@ -525,18 +526,45 @@ test("recorded piano independently measures cent shift, harmonic energy and atta
               Math.max(measured.amplitude/outputRms,1e-12)/
               Math.max(amplitude/rms(sourceRef),1e-12)))};
         });
-        const referenceContrast=attacks.find(x=>x.pitch===pitch);
-        const outAttack=renderLong(transientStart,1,pitch,8192,grainFrames);
-        const pre=rms(outAttack.subarray(1024,2048)),
-          post=rms(outAttack.subarray(2048,3072));
+        const referenceContrast=rises.find(x=>x.pitch===pitch);
+        const outRise=renderLong(riseStart,1,pitch,8192,grainFrames);
+        const pre=rms(outRise.subarray(1024,2048)),
+          post=rms(outRise.subarray(2048,3072));
         const contrastDb=20*Math.log10(Math.max(post/Math.max(pre,1e-9),1e-12));
         grainSweep.push({grainFrames,hopFrames:grainFrames/2,speed,pitch,
           harmonicErrors,
           dominantHarmonicCents:harmonicErrors[2].errorCents,
-          attackContrastDb:round(contrastDb),
-          attackContrastDeltaDb:round(contrastDb-referenceContrast.sourceAttackContrastDb),
+          riseContrastDb:round(contrastDb),
+          riseContrastDeltaDb:round(contrastDb-referenceContrast.sourceRiseContrastDb),
           offlineRenderWallMs:round(measuredRenderWallMs)});
       }
+    }
+  }
+  // The first actual audio samples start at file time zero; evaluate that
+  // initial attack/decay shape separately from the biggest later RMS rise.
+  // A fixed 512-frame RMS envelope compares dynamics without pretending
+  // that phase-resampled PCM can equal source samples sample-for-sample.
+  const initialFrames=8192,envelopeHop=512;
+  const shape=x=>Array.from({length:initialFrames/envelopeHop},
+    (_,i)=>rms(x.subarray(i*envelopeHop,(i+1)*envelopeHop)));
+  const sourceInitialShape=shape(pcm.subarray(0,initialFrames));
+  const normalizer=sourceInitialShape.reduce((a,b)=>a+b,0)/
+    sourceInitialShape.length;
+  const initialEnvelope=[];
+  for(const grainFrames of [2048,4096,8192]){
+    for(const pitch of [-5,7.1234]){
+      const output=renderLong(0,1,pitch,initialFrames,grainFrames);
+      const bins=shape(output);
+      const scale=bins.reduce((a,b)=>a+b,0)/bins.length;
+      const normalizedRmsError=Math.sqrt(bins.reduce((sum,b,i)=>
+        sum+(b/Math.max(scale,1e-9)-
+          sourceInitialShape[i]/Math.max(normalizer,1e-9))**2,0)/bins.length);
+      initialEnvelope.push({grainFrames,pitch,
+        relativeEnvelopeRmsError:round(normalizedRmsError),
+        initial1024Rms:round(rms(output.subarray(0,1024))),
+        later1024Rms:round(rms(output.subarray(3072,4096))),
+        sourceInitial1024Rms:round(rms(pcm.subarray(0,1024))),
+        sourceLater1024Rms:round(rms(pcm.subarray(3072,4096)))});
     }
   }
   console.log("R2_REAL_PIANO_SPECTRAL_TRANSIENT_AUDIT "+JSON.stringify({
@@ -545,9 +573,10 @@ test("recorded piano independently measures cent shift, harmonic energy and atta
     referencePeaks:sourcePeaks.map(p=>({harmonic:p.harmonic,hz:round(p.hz),
       amplitude:round(p.amplitude)})),
     sourceRms:round(rms(sourceRef)),
-    cases,grainSweep,attack:{frame:onsetFrame,positiveRmsJump:round(best),
-      sourcePrevBinRms:round(envelope[attackBin-1]),
-      sourceAttackBinRms:round(envelope[attackBin]),cases:attacks},
+    cases,grainSweep,initialEnvelope,
+    envelopeRise:{frame:riseFrame,positiveRmsJump:round(best),
+      sourcePrevBinRms:round(envelope[riseBin-1]),
+      sourceRiseBinRms:round(envelope[riseBin]),cases:rises},
     limitations:"One real mono piano A0; individual spectral peaks may be modulation sidebands, not proof of true F0; cent and harmonic measurements are relative to the actual recording; transient measures describe envelope changes but not calibrated subjective quality. Audio path is existing renderer, not browser DAC."
   }));
 });
