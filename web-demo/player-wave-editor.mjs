@@ -39,14 +39,18 @@ function peakHierarchy(channels){
 export function createPlayerWaveEditor({
   canvas,wrap,overviewSelection,markerA,markerB,zoomIn,zoomOut,zoomLabel,
   visibleStart,visibleEnd,getPosition,onPosition,onStart,onAB,onScrubState,
-  onScrubMotion=()=>{}
+  onScrubMotion=()=>{},onHoverFrame=()=>false,onHoverEnd=()=>{}
 }){
   let channels=null,rate=48000,levels=null,frames=0,spanFrames=rate*8;
   let lastDraw=0,lastFrame=NaN,lastSpan=NaN,lastWidth=0,lastHeight=0;
   const pointers=new Map();
   let gesture=null,dragged=false,active=false;
+  // Anchor the unpressed hover to the waveform on pointer entry. Reusing a
+  // shifting playhead on each event would multiply tiny mouse movements.
+  let hover=null;
   const center=()=>clamp(Math.round(getPosition()*rate),0,Math.max(0,frames-1));
   function setSource(nextChannels,nextRate){
+    if(hover){hover=null;onHoverEnd(false);}
     channels=nextChannels;rate=nextRate||48000;frames=channels?.[0]?.length||0;
     levels=frames?peakHierarchy(channels):null;
     spanFrames=Math.max(2,Math.min(frames,rate*12));
@@ -80,6 +84,7 @@ export function createPlayerWaveEditor({
   }
   function zoom(factor,pivotX=.5){
     if(!frames)return;
+    if(hover){hover=null;onHoverEnd(false);}
     onScrubMotion(0,"cancel");
     const c=center(),anchor=c+(pivotX-.5)*spanFrames;
     const next=clamp(spanFrames*factor,2,Math.max(2,frames));
@@ -186,8 +191,24 @@ export function createPlayerWaveEditor({
     }
     refresh(true);
   }
+  const pointerHover=e=>{
+    if(!frames||pointers.size||e.pointerType!=="mouse"||e.buttons!==0||
+       !e.isTrusted)return;
+    if(!hover)hover={x:pos(e),frame:center()};
+    const sample=clamp(Math.round(hover.frame+
+      (pos(e)-hover.x)*spanFrames/Math.max(1,canvas.clientWidth)),0,frames-1);
+    if(!onHoverFrame(sample))hover=null;
+  };
+  canvas.addEventListener("pointerenter",pointerHover);
+  canvas.addEventListener("pointermove",pointerHover);
+  canvas.addEventListener("pointerleave",e=>{
+    if(e.pointerType==="mouse"&&hover){
+      hover=null;onHoverEnd(true);
+    }
+  });
   canvas.addEventListener("pointerdown",e=>{
     if(!frames||(e.pointerType==="mouse"&&e.button!==0))return;
+    if(hover){hover=null;onHoverEnd(false);}
     const x=pos(e);
     pointers.set(e.pointerId,{x});
     try{canvas.setPointerCapture(e.pointerId);}catch{}
@@ -275,6 +296,7 @@ export function createPlayerWaveEditor({
     canvas.addEventListener(name,e=>{if(pointers.has(e.pointerId))endGesture(e.pointerId,"cancel");});
   canvas.addEventListener("wheel",e=>{
     if(!frames)return;
+    if(hover){hover=null;onHoverEnd(false);}
     e.preventDefault();onScrubMotion(0,"cancel");
     if(e.ctrlKey||e.metaKey)zoom(Math.exp(e.deltaY*.004),pos(e)/canvas.clientWidth);
     else onPosition(clamp(center()+e.deltaY*spanFrames/canvas.clientWidth,0,frames-1)/rate,{start:false});
@@ -282,6 +304,7 @@ export function createPlayerWaveEditor({
   },{passive:false});
   canvas.addEventListener("keydown",e=>{
     if(!frames)return;
+    if(hover){hover=null;onHoverEnd(false);}
     onScrubMotion(0,"cancel");
     if(e.key==="+"||e.key==="="){zoom(.5);e.preventDefault();return;}
     if(e.key==="-"){zoom(2);e.preventDefault();return;}
