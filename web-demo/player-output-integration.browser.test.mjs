@@ -73,13 +73,18 @@ test("recorded piano main player: gesture/parameter receipts AND actual output P
     assert.equal(nodeStarts,1);
 
     const readings=[];
+    let previousAppliedRevision=-1;
     async function observe(tag,expectedSpeed,expectedPitch){
-      await page.waitForFunction(({speed,pitch})=>{
+      await page.waitForFunction(({speed,pitch,previousAppliedRevision})=>{
         const node=document.querySelector("#granular-optin-status");
         return node?.dataset.renderRunning==="true"&&
-          Number(node?.dataset.renderSpeed)===speed&&
-          Number(node?.dataset.renderPitch)===pitch;
-      },{timeout:20000},{speed:expectedSpeed,pitch:expectedPitch});
+          Number(document.querySelector("#granular-speed-value")?.value)===speed&&
+          Number(node?.dataset.renderPitch)===pitch&&
+          Number(node?.dataset.renderRevision)>previousAppliedRevision;
+      },{timeout:20000},{speed:expectedSpeed,pitch:expectedPitch,
+        previousAppliedRevision});
+      previousAppliedRevision=Number(await page.$eval("#granular-optin-status",
+        el=>el.dataset.renderRevision));
       const samples=[];
       for(let n=0;n<10;n++){
         await sleep(45);
