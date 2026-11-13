@@ -64,6 +64,9 @@ jobs:
       - name: Native Chrome recorded CC0 upright piano file-to-R3 Worklet (real recording)
         run: |
           node --test web-demo/source-recorded-player.browser.test.mjs
+      - name: Native Chrome realtime graph capacity and recorded ultrashort output PCM (R2)
+        run: |
+          node --test web-demo/source-recorded-worklet-capacity.browser.test.mjs
       - name: Native Chrome R4 playback-first real-file and A/B/tab-state regression
         run: |
           node --test web-demo/player-first.browser.test.mjs
