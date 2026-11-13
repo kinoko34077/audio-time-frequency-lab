@@ -163,3 +163,59 @@ test("unlooped granular EOF silences instead of pretending speed-zero freeze",()
   assert.ok(pcm[0].some(x=>Math.abs(x)>.001),
     "genuine reversal from EOF may re-arm finite source playback");
 });
+
+
+// #36 R2: secondary diagnostic ONLY AFTER the real CC0 piano measurement
+// found ambiguous extra spectral ridges. Reuse the existing nonconstant
+// musical 440/660/1320Hz stereo source; do not replace real-recording
+// quality acceptance with a synthetic-only 'good sounding' claim.
+test("diagnostic known 440/660Hz musical partials disambiguate pitch ridge from granular sidebands",()=>{
+  const N=8192-2048,window=new Float64Array(N);
+  for(let i=0;i<N;i++)
+    window[i]=.5-.5*Math.cos(2*Math.PI*i/(N-1));
+  const total=window.reduce((a,b)=>a+b,0);
+  const amplitude=(s,hz)=>{
+    const c=2*Math.cos(2*Math.PI*hz/SR);
+    let a=0,b=0;
+    for(let i=0;i<N;i++){
+      const x=s[i+2048]*window[i]+c*a-b;
+      b=a;a=x;
+    }
+    return Math.sqrt(Math.max(0,a*a+b*b-c*a*b))*2/total;
+  };
+  const peakNear=(s,hz)=>{
+    let best={hz:0,amp:-1};
+    for(let offset=-.06;offset<=.060001;offset+=.001){
+      const f=hz*(1+offset),amp=amplitude(s,f);
+      if(amp>best.amp)best={hz:f,amp};
+    }
+    return best;
+  };
+  const rows=[];
+  for(const speed of [-1,.5,1]){
+    for(const semitones of [-5,0,7.1234]){
+      const {audio,misses}=synth(speed,semitones);
+      assert.equal(misses,0);
+      const factor=2**(semitones/12);
+      const partials=[440,660,1320].map(sourceHz=>{
+        const target=sourceHz*factor,peak=peakNear(audio[0],target);
+        return {sourceHz,targetHz:Number(target.toFixed(3)),
+          peakHz:Number(peak.hz.toFixed(3)),
+          centsError:Number((1200*Math.log2(peak.hz/target)).toFixed(3)),
+          amplitude:Number(peak.amp.toFixed(6))};
+      });
+      for(const partial of partials){
+        // These existing deterministic tones have KNOWN exact input
+        // frequencies. Guard their output pitch ratio within the bounded
+        // 6,144-frame Hann/0.1%-grid measurement precision (not MOS).
+        assert.ok(Math.abs(partial.centsError)<12,
+          {speed,semitones,partial,contract:"steady-known-partial pitch ratio"});
+      }
+      rows.push({speed,semitones,partials});
+    }
+  }
+  console.log("KNOWN_PARTIAL_RIDGE_DIAGNOSTIC "+JSON.stringify({
+    signal:"existing 440+660+1320 Hz stereo musical fixture with drum onset",
+    rows,warning:"Known harmonic diagnostics isolate modulation sidebands; do not substitute for actual recorded-piano fidelity."
+  }));
+});
