@@ -201,6 +201,11 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, swit
     // The detailed viewport is zoomed to 0.75s; gesture velocity depends on
     // pointer event timing, so assert a positive signed command, not 1.5x.
     await page.waitForFunction(()=>window.__scratchSpeeds?.some(v=>v>0.05),{timeout:8000});
+    // Reverse the record by moving the waveform in the opposite direction
+    // before release; the Worklet must receive an actual negative speed.
+    await page.mouse.move(editingWave.x+editingWave.width*.17,
+      editingWave.y+editingWave.height*.65,{steps:8});
+    await page.waitForFunction(()=>window.__scratchSpeeds?.some(v=>v<-.05),{timeout:8000});
     await page.mouse.up();
     await page.waitForFunction(()=>window.__scratchSpeeds?.length>=4&&
       window.__scratchSpeeds.at(-1)===1,{timeout:10000});
