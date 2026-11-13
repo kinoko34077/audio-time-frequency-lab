@@ -74,6 +74,10 @@ jobs:
         if: always()
         run: |
           node --test web-demo/player-visual.browser.test.mjs
+      - name: Cross-viewport Chrome gesture and UX audit (320px to desktop incl Android-size)
+        if: always()
+        run: |
+          node --test web-demo/player-cross-viewport.browser.test.mjs
       - name: Preserve UI screenshots for human visual review
         if: always()
         uses: actions/upload-artifact@v4
