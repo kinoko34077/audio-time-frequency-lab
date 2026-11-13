@@ -399,7 +399,7 @@ test("recorded piano independently measures cent shift, harmonic energy and atta
     }
     return best;
   }
-  function renderLong(startFrame,speed,pitch,length=outFrames){
+  function renderLong(startFrame,speed,pitch,length=outFrames,grainFrames=2048){
     const renderer=createSourcePCMRenderer({
       sourceFrames:pcm.length,sourceSampleRate:RATE,outputSampleRate:RATE,
       channelCount:1,startFrame,speed,
@@ -409,7 +409,7 @@ test("recorded piano independently measures cent shift, harmonic energy and atta
       renderer.installWindow(at,[pcm.slice(at,Math.min(pcm.length,at+SOURCE_WINDOW_FRAMES))]);
     const granular=createGranularTimePitch({
       sourceSampleRate:RATE,outputSampleRate:RATE,channelCount:1,
-      pitchSemitones:pitch
+      pitchSemitones:pitch,grainFrames,hopFrames:grainFrames/2
     });
     const result=new Float32Array(length);
     for(let at=0;at<length;at+=BLOCK){
@@ -503,13 +503,49 @@ test("recorded piano independently measures cent shift, harmonic energy and atta
         Math.max(sourcePost/Math.max(sourcePre,1e-9),1e-12)))
     });
   }
+  // Compare the SAME real low piano at longer existing granular window
+  // lengths after the recorded source exposed ambiguous harmonic ridges.
+  // Longer grains can reduce pitch sidebands but smear attacks and raise
+  // processing cost; never silently change production defaults from a
+  // single-source offline test.
+  const grainSweep=[];
+  for(const grainFrames of [4096,8192]){
+    for(const {speed,startFrame} of modes){
+      for(const pitch of [-5,7.1234]){
+        const t=performance.now();
+        const out=renderLong(startFrame,speed,pitch,outFrames,grainFrames);
+        const measuredRenderWallMs=performance.now()-t;
+        const segment=out.subarray(warm),outputRms=rms(segment);
+        const factor=2**(pitch/12);
+        const harmonicErrors=sourcePeaks.map(({harmonic,hz,amplitude})=>{
+          const measured=bandPeak(segment,hz*factor,.12);
+          return {harmonic,
+            errorCents:round(1200*Math.log2(measured.hz/(hz*factor))),
+            normalizedDb:round(20*Math.log10(
+              Math.max(measured.amplitude/outputRms,1e-12)/
+              Math.max(amplitude/rms(sourceRef),1e-12)))};
+        });
+        const referenceContrast=attacks.find(x=>x.pitch===pitch);
+        const outAttack=renderLong(transientStart,1,pitch,8192,grainFrames);
+        const pre=rms(outAttack.subarray(1024,2048)),
+          post=rms(outAttack.subarray(2048,3072));
+        const contrastDb=20*Math.log10(Math.max(post/Math.max(pre,1e-9),1e-12));
+        grainSweep.push({grainFrames,hopFrames:grainFrames/2,speed,pitch,
+          harmonicErrors,
+          dominantHarmonicCents:harmonicErrors[2].errorCents,
+          attackContrastDb:round(contrastDb),
+          attackContrastDeltaDb:round(contrastDb-referenceContrast.sourceAttackContrastDb),
+          offlineRenderWallMs:round(measuredRenderWallMs)});
+      }
+    }
+  }
   console.log("R2_REAL_PIANO_SPECTRAL_TRANSIENT_AUDIT "+JSON.stringify({
     fixtureSha:EXPECT_SHA,source:"CC0 Meta Piano A0 real recording",
     referenceWindow:[anchorForward+warm,anchorForward+outFrames],
     referencePeaks:sourcePeaks.map(p=>({harmonic:p.harmonic,hz:round(p.hz),
       amplitude:round(p.amplitude)})),
     sourceRms:round(rms(sourceRef)),
-    cases,attack:{frame:onsetFrame,positiveRmsJump:round(best),
+    cases,grainSweep,attack:{frame:onsetFrame,positiveRmsJump:round(best),
       sourcePrevBinRms:round(envelope[attackBin-1]),
       sourceAttackBinRms:round(envelope[attackBin]),cases:attacks},
     limitations:"One real mono piano A0; individual spectral peaks may be modulation sidebands, not proof of true F0; cent and harmonic measurements are relative to the actual recording; transient measures describe envelope changes but not calibrated subjective quality. Audio path is existing renderer, not browser DAC."
