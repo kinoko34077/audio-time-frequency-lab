@@ -161,9 +161,11 @@ test("recorded piano main player: gesture/parameter receipts AND actual output P
       window.__scratchProtocol=[];
       const native=MessagePort.prototype.postMessage;
       MessagePort.prototype.postMessage=function(m,...args){
-        if(m?.type==="scrub"||m?.type==="seek-window")
-          window.__scratchProtocol.push({type:m.type,frame:m.frame,
-            speed:m.speed,bytes:m.channels?.reduce((n,c)=>n+c.byteLength,0)||0});
+        if(m?.type==="scrub"||m?.type==="seek-window"||
+           (m?.type==="command"&&m.op==="speed"))
+          window.__scratchProtocol.push({type:m.type==="command"?"speed":m.type,
+            frame:m.frame,speed:m.speed,
+            bytes:m.channels?.reduce((n,c)=>n+c.byteLength,0)||0});
         return native.call(this,m,...args);
       };
     });
@@ -243,6 +245,87 @@ test("recorded piano main player: gesture/parameter receipts AND actual output P
       transfers:overviewCommands.filter(x=>x.bytes>0).length,
       positive:overviewCommands.some(x=>x.speed>0),
       negative:overviewCommands.some(x=>x.speed<0)
+    }));
+    // U9 follow-up: with NO pointer buttons down, real Chrome mouse hover
+    // must reach the same live PCM processor. It is not a passive label edit.
+    // Autoplay has already been unlocked through the explicit Play click.
+    await page.mouse.move(2,2);
+    await page.evaluate(()=>{
+      const s=document.querySelector("#granular-speed-value");
+      s.value="1";s.dispatchEvent(new Event("change",{bubbles:true}));
+      const loop=document.querySelector("#player-loop-enabled");
+      if(loop.checked)loop.click();
+      window.__scratchProtocol=[];
+    });
+    const hoverY=overviewBox.y+overviewBox.height*.46;
+    await page.mouse.move(overviewBox.x+overviewBox.width*.59,hoverY);
+    await page.waitForFunction(()=>window.__scratchProtocol
+      ?.some(x=>x.type==="scrub"&&x.speed===0),{timeout:10000});
+    // A stationary pointer is 0x sustained source audio, not the saved 1x.
+    await sleep(155);
+    const heldHover=await page.evaluate(()=>{
+      const paths=window.__audioOutputPaths||[];
+      return {frame:Number(document.querySelector("#granular-optin-status")
+        ?.dataset.renderFrame),
+        rms:Math.max(...paths.map(({analyser})=>{
+          const pcm=new Float32Array(analyser.fftSize);
+          analyser.getFloatTimeDomainData(pcm);
+          return Math.sqrt(pcm.reduce((sum,v)=>sum+v*v,0)/pcm.length);
+        })),speeds:window.__scratchProtocol.map(x=>x.speed),
+        loop:document.querySelector("#player-loop-enabled").checked,
+        starts:Number(document.querySelector("#rt-telemetry").dataset.pcmNodeStarts)};
+    });
+    assert.ok(Math.abs(heldHover.frame-Math.round(decodedRate*3*.59))<=2,
+      "hover must hold the actual output source-frame under mouse");
+    assert.ok(heldHover.rms>1e-4,
+      "still 0x hover must render audible source PCM, not a frozen display");
+    assert.equal(heldHover.loop,false);
+    assert.equal(heldHover.starts,nodeStarts);
+    await page.mouse.move(overviewBox.x+overviewBox.width*.66,hoverY,{steps:7});
+    await page.mouse.move(overviewBox.x+overviewBox.width*.60,hoverY,{steps:7});
+    await page.waitForFunction(()=>window.__scratchProtocol
+      ?.some(x=>x.type==="scrub"&&x.speed>0)&&window.__scratchProtocol
+      ?.some(x=>x.type==="scrub"&&x.speed<0),{timeout:10000});
+    await sleep(150);
+    const overviewHoverLog=await page.evaluate(()=>window.__scratchProtocol.slice());
+    assert.equal(overviewHoverLog.filter(x=>x.type==="seek-window").length,0);
+    assert.ok(overviewHoverLog.some(x=>x.type==="scrub"&&x.speed===0));
+    assert.ok(overviewHoverLog.some(x=>x.type==="scrub"&&x.speed>0));
+    assert.ok(overviewHoverLog.some(x=>x.type==="scrub"&&x.speed<0));
+    await page.mouse.move(2,2);
+    await page.waitForFunction(()=>window.__scratchProtocol.some(x=>
+      x.type==="speed"&&Math.abs(x.speed-1)<1e-6),{timeout:10000});
+    // The detailed fixed-head waveform must also preview with no button
+    // press; its hover origin must not compound with a recentered viewport.
+    await page.$eval("#wave-detail",el=>el.scrollIntoView({block:"center"}));
+    const hoverDetail=await page.$eval("#wave-detail",el=>{
+      const r=el.getBoundingClientRect();
+      return {x:r.x,y:r.y,width:r.width,height:r.height};
+    });
+    const detailHoverStart=await page.evaluate(()=>window.__scratchProtocol.length);
+    const detailY=hoverDetail.y+hoverDetail.height*.68;
+    await page.mouse.move(hoverDetail.x+hoverDetail.width*.52,detailY);
+    await page.waitForFunction(i=>window.__scratchProtocol.slice(i).some(x=>
+      x.type==="scrub"&&x.speed===0),{timeout:10000},detailHoverStart);
+    await page.mouse.move(hoverDetail.x+hoverDetail.width*.56,detailY,{steps:6});
+    await page.waitForFunction(i=>window.__scratchProtocol.slice(i).some(x=>
+      x.type==="scrub"&&x.speed>0),{timeout:10000},detailHoverStart);
+    const detailHoverLog=await page.evaluate(i=>window.__scratchProtocol.slice(i),detailHoverStart);
+    assert.equal(detailHoverLog.filter(x=>x.type==="seek-window").length,0);
+    await page.mouse.move(2,2);
+    await sleep(530);
+    const hoverFinal=await page.evaluate(()=>({
+      starts:Number(document.querySelector("#rt-telemetry").dataset.pcmNodeStarts),
+      speed:document.querySelector("#granular-speed-value").value,
+      errors:window.__scratchProtocol.filter(x=>x.type==="seek-window").length
+    }));
+    assert.equal(hoverFinal.starts,nodeStarts);
+    assert.equal(hoverFinal.speed,"1");
+    assert.equal(hoverFinal.errors,0);
+    console.log("REAL_MOUSE_HOVER_AUDIO "+JSON.stringify({
+      overviewHeld:heldHover,overviewCommands:overviewHoverLog.length,
+      detailCommands:detailHoverLog.length,returnToSpeed:1,
+      output:"CHROME_AUDIO_ANALYSER_NOT_PHYSICAL_DAC"
     }));
     // Explicitly distinguish the browser's audio samples, render receipt,
     // and the lack of actual mobile-device acoustic/latency measurement.
