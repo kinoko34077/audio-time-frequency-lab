@@ -80,6 +80,7 @@ export function createPlayerWaveEditor({
   }
   function zoom(factor,pivotX=.5){
     if(!frames)return;
+    onScrubMotion(0,"cancel");
     const c=center(),anchor=c+(pivotX-.5)*spanFrames;
     const next=clamp(spanFrames*factor,2,Math.max(2,frames));
     spanFrames=next;
@@ -203,6 +204,7 @@ export function createPlayerWaveEditor({
     const c=center(),w=canvas.clientWidth,{a,b}=onAB();
     const distanceA=Math.abs(boundsToX(a,c,w)-x),distanceB=Math.abs(boundsToX(b,c,w)-x);
     const target=Math.min(distanceA,distanceB)<=24?(distanceA<=distanceB?"a":"b"):"pan";
+    if(target!=="pan")onScrubMotion(0,"cancel");
     gesture={type:target,id:e.pointerId,x,frame:c,moved:false,
       lastSeekFrame:c,lastMoveTime:performance.now(),lastMovedAt:-Infinity,
       velocity:0,idleTimer:null};
