@@ -90,7 +90,11 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
           case "seek":t.seek(m.frame);this.granular?.reset();break;
           case "speed":
             t.setSpeed(m.speed);
-            this.granular?.reset();
+            // Keep the existing overlap grains and output-time epoch: a
+            // scrub wheel changes signed speed many times per second.
+            // Clearing every grain on every speed command produces audible
+            // joins even when the source PCM window is already cached.
+            this.granular?.beginTransition();
             break;
           case "pitch":
             if(!this.granular)

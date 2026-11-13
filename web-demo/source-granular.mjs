@@ -20,6 +20,16 @@ export function createGranularTimePitch({
   const srcPerOutput=sourceSampleRate/outputSampleRate;
   let outputFrames=0,direction=1,pitch=0,factor=1,revision=0;
   const grains=new Map();
+  // Bounded output transition prevents a new pitch/speed epoch from jumping
+  // immediately from the previous audio sample to a different grain phase.
+  const lastSamples=new Float32Array(channelCount);
+  const transitionFrom=new Float32Array(channelCount);
+  const TRANSITION_FRAMES=128;
+  let transitionLeft=0;
+  function beginTransition(){
+    transitionFrom.set(lastSamples);
+    transitionLeft=TRANSITION_FRAMES;
+  }
   function setPitch(semitones){
     if(typeof semitones!=="number"||!Number.isFinite(semitones)||
       semitones<-12||semitones>12)
@@ -28,6 +38,8 @@ export function createGranularTimePitch({
       pitch=semitones;factor=2**(pitch/12);revision++;
       // A new grain configuration is a new synthesis epoch, but not a new
       // AudioWorklet node or source-time coordinate.
+      // Initial nonzero pitch is not a change between audible epochs.
+      if(outputFrames>0)beginTransition();
       grains.clear();outputFrames=0;
     }
     return {pitchSemitones:pitch,pitchRatio:factor,pitchRevision:revision};
@@ -38,8 +50,8 @@ export function createGranularTimePitch({
       pitchSemitones:pitch,pitchRatio:factor,
       pitchRevision:revision,outputFrames
     };},
-    setPitch,
-    reset(){grains.clear();outputFrames=0;},
+    setPitch,beginTransition,
+    reset(){beginTransition();grains.clear();outputFrames=0;},
     render(output,state,read,sourceFrames){
       if(!Array.isArray(output)||output.length!==channelCount||
         output.some(ch=>!(ch instanceof Float32Array)||
@@ -127,8 +139,13 @@ export function createGranularTimePitch({
             }
             value+=weight*(left+(right-left)*frac);
           }
-          output[ch][i]=totalWeight?value/totalWeight:0;
+          const rendered=totalWeight?value/totalWeight:0;
+          const weight=transitionLeft>0?transitionLeft/TRANSITION_FRAMES:0;
+          const smooth=rendered*(1-weight)+transitionFrom[ch]*weight;
+          output[ch][i]=smooth;
+          lastSamples[ch]=smooth;
         }
+        if(transitionLeft>0)transitionLeft--;
         if(sampleMiss)missing++;
       }
       outputFrames+=output[0].length;

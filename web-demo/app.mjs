@@ -2,6 +2,7 @@ import {QUALITY,mixWet} from "./dsp.mjs";
 import {liveFactors,fullBandPartialOptions} from "./lab-contract.mjs";
 import {createModelStream} from "./lab-stream.mjs";
 import {createSourcePCMBridge} from "./source-pcm-bridge.mjs";
+import {returnToPlaySpeed} from "./scrub-kinetics.mjs";
 import {createPlayerWaveEditor} from "./player-wave-editor.mjs";
 import {validatePlaybackSpeed,validateSpeedRailRange,speedOnRail,formatPlaybackSpeed} from "./source-timeline.mjs";
 import {frequencyFromSlider,sliderFromFrequency,holdFromFrequency,drawCrusherPreview} from "./crusher-visual.mjs";
@@ -31,6 +32,8 @@ const GRANULAR_EXPERIMENT=PCM_EXPERIMENT==="granular";
 const PLAYER_GRANULAR_AVAILABLE=true;
 const granular={speed:1,pitch:0,railMax:8};
 let detailWaveEditor=null,detailWaveScrubbing=false;
+// Scrub speed temporarily overrides transport; it never edits canonical speed.
+let temporaryScrubSpeed=null,scrubMotionToken=0,scrubMotionFrame=0;
 const ab={a:0,b:0,enabled:true};
 function mainTab(){
   return document.body.dataset.mainTab==="model"?"model":"player";
@@ -141,6 +144,90 @@ function refreshGranular(){
   $("#granular-rail-note").textContent=Math.abs(granular.speed)>granular.railMax?
     "指定速度はレール外です。直接入力した数値は保持されています。":"";
 }
+function cancelTemporaryScrub(restore=true){
+  scrubMotionToken++;
+  if(scrubMotionFrame)cancelAnimationFrame(scrubMotionFrame);
+  scrubMotionFrame=0;
+  const active=temporaryScrubSpeed!==null;
+  const player=state.player;
+  if(player?.scrubSpeedTimer){
+    clearTimeout(player.scrubSpeedTimer);player.scrubSpeedTimer=null;
+  }
+  temporaryScrubSpeed=null;
+  if(restore&&active){
+    const p=state.player;
+    if(p?.rawPCM&&p.granular&&!p.initializing){
+      p.lastScrubCommand=null;
+      void p.pcmBridge.setSpeed(granular.speed).catch(error=>{
+        if(state.player===p)message("通常速度への復帰失敗: "+error.message,"error");
+      });
+    }
+  }
+}
+function setTemporaryScrubSpeed(value,force=false){
+  temporaryScrubSpeed=validatePlaybackSpeed(value);
+  const p=state.player;
+  if(!p?.rawPCM||!p.granular||p.initializing||p.paused)return;
+  const now=performance.now();
+  // Latest gesture state wins; limit Worklet commands to visual-rate cadence.
+  if(!force&&now-(p.lastScrubCommandAt??-Infinity)<28){
+    // Preserve the LAST movement in a fast pointer burst. Dropping every
+    // event after the first 0x hold would make a quick throw inaudible.
+    if(!p.scrubSpeedTimer){
+      const remaining=Math.max(1,28-(now-p.lastScrubCommandAt));
+      p.scrubSpeedTimer=setTimeout(()=>{
+        p.scrubSpeedTimer=null;
+        if(state.player===p&&temporaryScrubSpeed!==null)
+          setTemporaryScrubSpeed(temporaryScrubSpeed,true);
+      },remaining);
+    }
+    return;
+  }
+  if(Object.is(p.lastScrubCommand,temporaryScrubSpeed))return;
+  p.lastScrubCommandAt=now;p.lastScrubCommand=temporaryScrubSpeed;
+  const bridge=p.pcmBridge;
+  void bridge.setSpeed(temporaryScrubSpeed).catch(error=>{
+    if(state.player===p)message("スクラブ速度の音声反映失敗: "+error.message,"error");
+  });
+}
+function waveformScrubMotion(speed,phase){
+  if(phase==="cancel"){cancelTemporaryScrub();return;}
+  if(phase==="hold"||phase==="move"){
+    // A fresh drag replaces any previous inertia without changing settings.
+    if(scrubMotionFrame){
+      scrubMotionToken++;cancelAnimationFrame(scrubMotionFrame);scrubMotionFrame=0;
+    }
+    setTemporaryScrubSpeed(phase==="hold"?0:speed,phase==="hold");
+    return;
+  }
+  if(phase!=="release")return;
+  scrubMotionToken++;
+  if(scrubMotionFrame)cancelAnimationFrame(scrubMotionFrame);
+  const token=scrubMotionToken,started=performance.now();
+  const from=validatePlaybackSpeed(speed);
+  // A held finger eases out from 0x; a quick throw continues in its signed
+  // direction and smoothly converges to the user's configured playback speed.
+  const frame=()=>{
+    if(token!==scrubMotionToken)return;
+    if(!state.dry){cancelTemporaryScrub(false);return;}
+    const elapsed=performance.now()-started;
+    const target=returnToPlaySpeed(from,granular.speed,elapsed);
+    setTemporaryScrubSpeed(target,elapsed>=480);
+    if(elapsed<480)scrubMotionFrame=requestAnimationFrame(frame);
+    else{
+      scrubMotionFrame=0;
+      temporaryScrubSpeed=null;
+      const p=state.player;
+      if(p?.rawPCM&&p.granular&&!p.initializing){
+        p.lastScrubCommand=null;
+        void p.pcmBridge.setSpeed(granular.speed).catch(error=>{
+          if(state.player===p)message("通常速度への復帰失敗: "+error.message,"error");
+        });
+      }
+    }
+  };
+  scrubMotionFrame=requestAnimationFrame(frame);
+}
 function editGranular(kind,raw){
   const input=$("#granular-"+kind+"-value");
   if(!String(raw).trim()){
@@ -160,6 +247,9 @@ function editGranular(kind,raw){
   const bridge=state.player?.pcmBridge,status=$("#granular-optin-status");
   if(!bridge||bridge.processingMode!=="granular"){
     status.textContent="設定保持中。次の実験再生時に適用します。";return;
+  }
+  if(kind==="speed"&&temporaryScrubSpeed!==null){
+    status.textContent="設定速度を保持しました。スクラブ終了後に反映します。";return;
   }
   status.textContent="処理へ設定を要求しました（音声反映は未確認）。";
   void (kind==="speed"?bridge.setSpeed(value):bridge.setPitch(value))
@@ -740,6 +830,7 @@ waveSurface.addEventListener("pointerdown",e=>{
   if(e.pointerType==="mouse"&&e.button!==0)return;
   if(activeWavePointer!==null)return;
   if((GRANULAR_EXPERIMENT||mainTab()==="player")&&e.isTrusted){
+    cancelTemporaryScrub();
     activeWavePointer=e.pointerId;
     try{waveSurface.setPointerCapture(e.pointerId);}catch{}
   }
@@ -777,6 +868,7 @@ detailWaveEditor=createPlayerWaveEditor({
   zoomLabel:$("#wave-zoom-label"),
   visibleStart:$("#wave-visible-start"),visibleEnd:$("#wave-visible-end"),
   getPosition:()=>playPosition(),
+  onScrubMotion:waveformScrubMotion,
   onScrubState:active=>{
     // Running Worklet source time can be ahead of the last commanded seek.
     // Capture it BEFORE selecting gesture-owned state.seek, or the central
@@ -960,6 +1052,7 @@ async function setMainPlayerPaused(paused){
   const p=state.player;
   if(!p?.rawPCM||p.mode!=="player"||p.initializing||
      p.pauseBusy||Boolean(p.paused)===paused)return;
+  if(paused)cancelTemporaryScrub();
   const epoch=state.transportEpoch;
   p.pauseBusy=true;
   controls.main.disabled=true;
@@ -1051,6 +1144,7 @@ async function mediaBridge(player){
   }
 }
 async function stop(){
+  cancelTemporaryScrub(false);
   // Fence any pending async AudioContext/WASM/Worklet launch. A successful
   // file replacement and explicit stop must never be undone by an old click.
   state.transportEpoch++;
@@ -1171,7 +1265,7 @@ async function play(mode="wet",offset=null){
       const at=clamp(offset===null?state.seek:offset,0,Math.max(0,duration()-1/sourceRate));
       // Preserve the values supplied to an asynchronous Worklet startup; user
       // edits during addModule() must be replayed before starting playback.
-      const initialSpeed=granularActive?granular.speed:1;
+      const initialSpeed=granularActive?(temporaryScrubSpeed??granular.speed):1;
       const initialPitch=granularActive?granular.pitch:0;
       const initialLoop={...ab};
       bridge=await createSourcePCMBridge({
@@ -1239,8 +1333,8 @@ async function play(mode="wet",offset=null){
         // Assign ownership first: later edits now go straight to this bridge.
         // Commands issued here precede the play command; never silently start
         // with an obsolete captured speed/pitch while the UI shows new values.
-        if(!Object.is(initialSpeed,granular.speed))
-          await bridge.setSpeed(granular.speed);
+        if(!Object.is(initialSpeed,temporaryScrubSpeed??granular.speed))
+          await bridge.setSpeed(temporaryScrubSpeed??granular.speed);
         if(launchEpoch!==state.transportEpoch||state.player!==player)return;
         if(!Object.is(initialPitch,granular.pitch))
           await bridge.setPitch(granular.pitch);
@@ -1281,7 +1375,17 @@ async function play(mode="wet",offset=null){
       await bridge.play();
       if(launchEpoch!==state.transportEpoch||state.player!==player)return;
       player.initializing=false;
-      if(granularActive)syncLoopToPlayer(player);
+      if(granularActive){
+        // Account for gesture changes while the Worklet was starting.
+        const desired=temporaryScrubSpeed??granular.speed;
+        if(!Object.is(desired,initialSpeed)){
+          player.lastScrubCommand=null;
+          void bridge.setSpeed(desired).catch(error=>{
+            if(state.player===player)message("スクラブ開始速度の反映失敗: "+error.message,"error");
+          });
+        }
+        syncLoopToPlayer(player);
+      }
       // If the pointer continued moving during the final async await,
       // follow it immediately through the bounded live scrub queue.
       if(granularActive&&state.seek!==initializedAt)seek(state.seek);

@@ -122,6 +122,22 @@ test("one-sample A/B stays sample-accurate; musical pitch is not promised",()=>{
       "one-source-sample loop is a held sample, not a new musical oscillator");
 });
 
+test("initial shifted-pitch one-frame loop has no artificial fade-in",()=>{
+  const frame=90037;
+  assert.ok(Math.abs(source[0][frame])>.05);
+  const g=createGranularTimePitch({
+    sourceSampleRate:SR,outputSampleRate:SR,pitchSemitones:7,channelCount:2
+  });
+  const out=[new Float32Array(128),new Float32Array(128)];
+  const r=g.render(out,{sourceFrame:frame,speed:0,
+    loopEnabled:true,loopStartFrame:frame,loopEndFrame:frame+1},
+    (ch,index)=>source[ch][index],FRAMES);
+  assert.equal(r.missingFrames,0);
+  for(let ch=0;ch<2;ch++)for(const sample of out[ch])
+    assert.ok(Math.abs(sample-source[ch][frame])<.00001,
+      "initial pitch setting must not fade a held exact source sample");
+});
+
 test("bounded-source misses are measured, not hidden as successful DSP",()=>{
   const renderer=createSourcePCMRenderer({
     sourceFrames:FRAMES,sourceSampleRate:SR,outputSampleRate:SR,

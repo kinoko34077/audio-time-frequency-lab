@@ -3,6 +3,7 @@
 // duplicated: sample coordinates and callback actions belong to app.mjs.
 // Interaction patterns reference AudioStretch / Apple Voice Memos; no assets
 // or proprietary UI imagery are copied.
+import {scrubSpeed,releaseScrubSpeed} from "./scrub-kinetics.mjs";
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 const timestamp=seconds=>{
   const value=Math.max(0,seconds);
@@ -37,7 +38,8 @@ function peakHierarchy(channels){
 }
 export function createPlayerWaveEditor({
   canvas,wrap,overviewSelection,markerA,markerB,zoomIn,zoomOut,zoomLabel,
-  visibleStart,visibleEnd,getPosition,onPosition,onStart,onAB,onScrubState
+  visibleStart,visibleEnd,getPosition,onPosition,onStart,onAB,onScrubState,
+  onScrubMotion=()=>{}
 }){
   let channels=null,rate=48000,levels=null,frames=0,spanFrames=rate*8;
   let lastDraw=0,lastFrame=NaN,lastSpan=NaN,lastWidth=0,lastHeight=0;
@@ -78,6 +80,7 @@ export function createPlayerWaveEditor({
   }
   function zoom(factor,pivotX=.5){
     if(!frames)return;
+    onScrubMotion(0,"cancel");
     const c=center(),anchor=c+(pivotX-.5)*spanFrames;
     const next=clamp(spanFrames*factor,2,Math.max(2,frames));
     spanFrames=next;
@@ -161,7 +164,14 @@ export function createPlayerWaveEditor({
     const r=canvas.getBoundingClientRect();
     return clamp(e.clientX-r.left,0,r.width);
   }
-  function endGesture(id){
+  function endGesture(id,reason="release"){
+    if(gesture?.type==="pan"&&gesture.id===id){
+      clearTimeout(gesture.idleTimer);
+      if(active){
+        const elapsed=performance.now()-(gesture.lastMovedAt??-Infinity);
+        onScrubMotion(reason==="release"?releaseScrubSpeed(gesture.velocity??0,elapsed):0,reason);
+      }
+    }
     pointers.delete(id);
     try{if(canvas.hasPointerCapture(id))canvas.releasePointerCapture(id);}catch{}
     if(pointers.size===0){gesture=null;wrap.removeAttribute("data-interaction");
@@ -182,6 +192,10 @@ export function createPlayerWaveEditor({
     pointers.set(e.pointerId,{x});
     try{canvas.setPointerCapture(e.pointerId);}catch{}
     if(pointers.size===2){
+      if(active){
+        clearTimeout(gesture?.idleTimer);
+        onScrubMotion(0,"cancel");onScrubState(false);active=false;
+      }
       const pts=[...pointers.values()],mid=(pts[0].x+pts[1].x)/2;
       gesture={type:"pinch",distance:Math.max(1,Math.abs(pts[0].x-pts[1].x)),
         span:spanFrames,center:center(),mid,anchor:center()+(mid/canvas.clientWidth-.5)*spanFrames};
@@ -190,10 +204,13 @@ export function createPlayerWaveEditor({
     const c=center(),w=canvas.clientWidth,{a,b}=onAB();
     const distanceA=Math.abs(boundsToX(a,c,w)-x),distanceB=Math.abs(boundsToX(b,c,w)-x);
     const target=Math.min(distanceA,distanceB)<=24?(distanceA<=distanceB?"a":"b"):"pan";
-    gesture={type:target,id:e.pointerId,x,frame:c,moved:false};
+    if(target!=="pan")onScrubMotion(0,"cancel");
+    gesture={type:target,id:e.pointerId,x,frame:c,moved:false,
+      lastSeekFrame:c,lastMoveTime:performance.now(),lastMovedAt:-Infinity,
+      velocity:0,idleTimer:null};
     wrap.dataset.interaction=target;
     if(target==="pan"){
-      active=true;onScrubState(true);onStart();
+      active=true;onScrubState(true);onScrubMotion(0,"hold");onStart();
     }
     e.preventDefault();
   });
@@ -215,7 +232,24 @@ export function createPlayerWaveEditor({
     if(Math.abs(delta)>3)gesture.moved=true;
     if(!gesture.moved)return;
     if(gesture.type==="pan"){
+      if(!active){ // A deliberate pan after a pinch may begin a new scrub.
+        active=true;onScrubState(true);onScrubMotion(0,"hold");onStart();
+      }
       const next=clamp(Math.round(gesture.frame-delta*spanFrames/canvas.clientWidth),0,frames-1);
+      const now=performance.now();
+      const value=scrubSpeed(gesture.lastSeekFrame,next,now-gesture.lastMoveTime,rate);
+      gesture.lastSeekFrame=next;gesture.lastMoveTime=now;
+      gesture.lastMovedAt=now;gesture.velocity=value;
+      clearTimeout(gesture.idleTimer);
+      // A held finger must freeze source time instead of allowing the last
+      // movement velocity (or saved transport speed) to continue drifting.
+      const captured=gesture;
+      gesture.idleTimer=setTimeout(()=>{
+        if(active&&gesture===captured){
+          captured.velocity=0;onScrubMotion(0,"hold");
+        }
+      },90);
+      onScrubMotion(value,"move");
       onPosition(next/rate,{start:false});
     }else{
       const pointerFrame=clamp(Math.round(center()+(pos(e)/canvas.clientWidth-.5)*spanFrames),0,frames);
@@ -233,19 +267,20 @@ export function createPlayerWaveEditor({
       const x=pos(e),where=center()+(x/canvas.clientWidth-.5)*spanFrames;
       onPosition(clamp(where,0,frames-1)/rate,{start:false});
     }
-    endGesture(e.pointerId);
+    endGesture(e.pointerId,"release");
   });
   for(const name of ["pointercancel","lostpointercapture"])
-    canvas.addEventListener(name,e=>{if(pointers.has(e.pointerId))endGesture(e.pointerId);});
+    canvas.addEventListener(name,e=>{if(pointers.has(e.pointerId))endGesture(e.pointerId,"cancel");});
   canvas.addEventListener("wheel",e=>{
     if(!frames)return;
-    e.preventDefault();
+    e.preventDefault();onScrubMotion(0,"cancel");
     if(e.ctrlKey||e.metaKey)zoom(Math.exp(e.deltaY*.004),pos(e)/canvas.clientWidth);
     else onPosition(clamp(center()+e.deltaY*spanFrames/canvas.clientWidth,0,frames-1)/rate,{start:false});
     refresh(true);
   },{passive:false});
   canvas.addEventListener("keydown",e=>{
     if(!frames)return;
+    onScrubMotion(0,"cancel");
     if(e.key==="+"||e.key==="="){zoom(.5);e.preventDefault();return;}
     if(e.key==="-"){zoom(2);e.preventDefault();return;}
     let next=null;
