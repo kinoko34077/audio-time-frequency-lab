@@ -149,7 +149,7 @@ test("atomic scratch preserves Granular overlap and renders the held destination
   p.port.onmessage({data:{type:"window",requestId:1,start:0,channels}});
   p.port.onmessage({data:{type:"command",op:"play",requestId:2}});
   for(let i=0;i<4;i++)
-    p.process([],[new Float32Array(128),new Float32Array(128)]);
+    p.process([],[[new Float32Array(128),new Float32Array(128)]]);
   const grainEpoch=p.granular.state.outputFrames;
   assert.ok(grainEpoch>=512);
   p.port.onmessage({data:{type:"scrub",requestId:3,frame:40000,speed:0}});
@@ -161,7 +161,7 @@ test("atomic scratch preserves Granular overlap and renders the held destination
   let output;
   for(let i=0;i<3;i++){
     output=[new Float32Array(128),new Float32Array(128)];
-    p.process([],[...output]);
+    p.process([],[output]);
   }
   assert.ok(output[0].every(x=>Math.abs(x-.63)<.015),
     {output:Array.from(output[0].slice(0,4))});
@@ -173,7 +173,7 @@ test("atomic scratch preserves Granular overlap and renders the held destination
   p.port.onmessage({data:{type:"scrub",requestId:4,frame:40000,speed:-1}});
   assert.equal(messages.find(m=>m.type==="command-accepted"&&m.requestId===4).speed,-1);
   assert.equal(p.granular.state.outputFrames,grainEpoch+384);
-  p.process([],[new Float32Array(128),new Float32Array(128)]);
+  p.process([],[[new Float32Array(128),new Float32Array(128)]]);
   assert.ok(p.renderer.timeline.state.sourceFrame<40000,
     "reverse scratch must advance actual audio source time backwards");
   assert.equal(messages.filter(m=>m.type==="error").length,0);
