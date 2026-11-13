@@ -250,6 +250,148 @@ test("full real CC0 stereo orchestral song: three musical sections, L/R output, 
         observations.push(result);
       }
     }
+    // Follow-up #36 R2: apply the user's *actual complete stereo song* to
+    // sample-precise A/B loops rather than using the mono note as a surrogate.
+    // For RAW, verify BOTH channels against the original 48k decoded song
+    // cyclic sample by sample, including legitimate original A/B edge steps.
+    // Granular pitch on a 1-sample source interval cannot imply musical
+    // fundamental or subjective clickless sound; check only 2ch transport
+    // continuity, finite output, source misses and render receipts.
+    const ultra=[],spans=[1,2,16,127,128,129,256];
+    for(const mode of ["raw","granular"]){
+      await page.evaluate(async mode=>{
+        const s=window.__music;
+        s.bridge.dispose();
+        s.events=[];
+        const a=s.anchors[1].at;
+        s.bridge=await s.createSourcePCMBridge({
+          ctx:s.ctx,sourceChannels:s.sourceChannels,sourceSampleRate:48000,
+          startFrame:a,loopStartFrame:a,loopEndFrame:a+256,
+          loopEnabled:true,speed:1,processingMode:mode,
+          pitchSemitones:mode==="granular"?7.1234:0,
+          onEvent:e=>{
+            if(["render-applied","error","fatal-error","underrun"].includes(e.type))
+              s.events.push(e);
+          }
+        });
+        s.bridge.connect(s.probe);
+        await s.bridge.play();
+        s.activeMode=mode;
+      },mode);
+      const regions=mode==="raw"?[0,1,2]:[1];
+      for(const region of regions){
+        for(const span of spans){
+          for(const speed of [-1,0,1]){
+            const result=await page.evaluate(async ({region,span,speed,mode})=>{
+              const s=window.__music,b=s.bridge;
+              const a=s.anchors[region].at,end=a+span;
+              const from=s.events.length;
+              await b.setLoopBounds(a,end);
+              await b.setSpeed(speed);
+              await b.seek(speed<0?end-1:a);
+              await new Promise(resolve=>setTimeout(resolve,55));
+              const firstMissing=b.latest?.missingFrames??0;
+              await s.measure("arm",2048);
+              await new Promise(resolve=>setTimeout(resolve,68));
+              const snap=await s.measure("snapshot");
+              const lastMissing=b.latest?.missingFrames??0;
+              const left=snap.channels[0]?.captured||[];
+              const right=snap.channels[1]?.captured||[];
+              if(snap.inputChannels!==2||left.length!==2048||
+                 right.length!==2048)
+                throw Error("A/B stereo Worklet probe must capture both L/R");
+              const complete=s.events.slice(from);
+              let maxOracleError=null,phase=null,sourceMaxStep=null,
+                outputMaxStep=null;
+              if(mode==="raw"){
+                const source=s.sourceChannels;
+                let best=Infinity;
+                for(let candidate=0;candidate<span;candidate++){
+                  let error=0;
+                  for(let i=0;i<2048;i+=256){
+                    const j=((candidate+i*speed)%span+span)%span;
+                    const x=source[0][a+j]-left[i],
+                      y=source[1][a+j]-right[i];
+                    error+=x*x+y*y;
+                  }
+                  if(error<best){best=error;phase=candidate;}
+                }
+                maxOracleError=0;outputMaxStep=0;sourceMaxStep=0;
+                for(let i=0;i<2048;i++){
+                  const j=((phase+i*speed)%span+span)%span;
+                  maxOracleError=Math.max(maxOracleError,
+                    Math.abs(source[0][a+j]-left[i]),
+                    Math.abs(source[1][a+j]-right[i]));
+                  if(i){
+                    outputMaxStep=Math.max(outputMaxStep,
+                      Math.abs(left[i]-left[i-1]),
+                      Math.abs(right[i]-right[i-1]));
+                  }
+                }
+                for(let j=0;j<span;j++){
+                  const k=((j+speed)%span+span)%span;
+                  sourceMaxStep=Math.max(sourceMaxStep,
+                    Math.abs(source[0][a+k]-source[0][a+j]),
+                    Math.abs(source[1][a+k]-source[1][a+j]));
+                }
+              }
+              const stats=s.metrics(left,right,0,2048);
+              return {mode,region,span,speed,
+                observedSourceFrame:a,firstPhase:phase,
+                sourceBoundaryStepL:Math.abs(
+                  s.sourceChannels[0][end-1]-s.sourceChannels[0][a]),
+                sourceBoundaryStepR:Math.abs(
+                  s.sourceChannels[1][end-1]-s.sourceChannels[1][a]),
+                maxOracleError,sourceMaxStep,outputMaxStep,
+                finite:left.every(Number.isFinite)&&right.every(Number.isFinite),
+                sampleCount:2048,outputRmsL:stats.rmsL,
+                outputRmsR:stats.rmsR,outputSideMid:stats.sideMid,
+                missing: lastMissing-firstMissing,
+                renderReceipts:complete.filter(e=>e.type==="render-applied").length,
+                receiptMisses:complete.filter(e=>e.type==="render-applied")
+                  .map(e=>e.missingFramesInBlock),
+                errors:complete.filter(e=>
+                  ["error","fatal-error","underrun"].includes(e.type))
+                  .map(e=>e.type)
+              };
+            },{region,span,speed,mode});
+            assert.ok(result.finite&&result.sampleCount===2048,result);
+            assert.equal(result.missing,0,result);
+            assert.deepEqual(result.errors,[],result);
+            assert.ok(result.renderReceipts>0,result);
+            assert.ok(result.receiptMisses.every(x=>x===0),result);
+            if(mode==="raw"){
+              assert.ok(result.maxOracleError<1e-6,
+                "both song channels must equal original cyclic PCM, not generated gaps: "+
+                JSON.stringify(result));
+              assert.ok(Math.abs(result.outputMaxStep-result.sourceMaxStep)<1e-5,
+                "any loop click must be original PCM A/B derivative, not an injected step: "+
+                JSON.stringify(result));
+            }
+            ultra.push(result);
+          }
+        }
+      }
+    }
+    const rawCases=ultra.filter(x=>x.mode==="raw"),
+      granularCases=ultra.filter(x=>x.mode==="granular");
+    assert.equal(rawCases.length,63);
+    assert.equal(granularCases.length,21);
+    console.log("R2_REAL_STEREO_MUSIC_ULTRASHORT "+JSON.stringify({
+      sourceSha:sha,title:"Determined Pursuit complete 108s stereo orchestral recording",
+      sourceSampleRate:44100,workletSampleRate:48000,
+      lengthsSourceFrames:spans,speeds:[-1,0,1],musicalRegions:[0,1,2],
+      raw:{count:rawCases.length,maxSourceSampleError:Math.max(...rawCases.map(x=>x.maxOracleError)),
+        maxUnexpectedStep:Math.max(...rawCases.map(x=>Math.abs(x.outputMaxStep-x.sourceMaxStep))),
+        missing:rawCases.reduce((n,x)=>n+x.missing,0)},
+      granular:{count:granularCases.length,missing:granularCases.reduce((n,x)=>n+x.missing,0),
+        minLrPower:Math.min(...granularCases.map(x=>Math.min(x.outputRmsL,x.outputRmsR)))},
+      rawConditions:rawCases.map(x=>({region:x.region,span:x.span,
+        speed:x.speed,maxSourceSampleError:x.maxOracleError,
+        naturalABStepL:round(x.sourceBoundaryStepL),
+        naturalABStepR:round(x.sourceBoundaryStepR)})),
+      note:"Original musical A/B seam steps are permitted and MUST remain distinct from newly inserted silence/click. Granular 1-source-sample pitch is not perceptually meaningful; the test makes no subjective sound-quality claim."
+    }));
     await page.evaluate(async()=>{
       const s=window.__music;
       await s.bridge.pause();s.bridge.dispose();s.probe.disconnect();
