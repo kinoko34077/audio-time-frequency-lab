@@ -148,3 +148,119 @@ test("CC0 actual upright-piano source feeds raw and granular renderers with obje
     limitations:"Single real MONO piano A0 recording; not multitrack, speech, stereo, iPhone, CPU/GC realtime or DAC timing"
   }));
 });
+
+/* #36 R2/R3: derive short-loop transport evidence from the SAME rights-cleared
+ * actual piano recording. Read the unmodified source by its accepted WAV hash.
+ * Raw PCM has a sample-exact independent oracle; pitched granular output
+ * cannot correctly be expected to equal raw samples or be clickless when
+ * the source interval itself is discontinuous. */
+test("recorded piano source: 1..256-frame signed/zero loops distinguish source boundary from underrun",async()=>{
+  const wav=await readFile(FIXTURE);
+  assert.equal(createHash("sha256").update(wav).digest("hex"),EXPECT_SHA);
+  const pcm=recordedPCM(wav);
+  // Pick a genuinely present piano peak in the middle of this recording,
+  // rather than asserting that a quiet one-frame A/B interval is audible.
+  let anchor=60000,peak=0;
+  for(let i=60000;i<Math.min(pcm.length-1024,120000);i++){
+    const amplitude=Math.abs(pcm[i]);
+    if(amplitude>peak){anchor=i;peak=amplitude;}
+  }
+  assert.ok(peak>.01,{anchor,peak});
+  const spanValues=[1,2,16,127,128,129,256];
+  const block=128,frames=1024;
+  const summaries={raw:[],granular:[]};
+  const loopSource=(a,b,start,speed,i)=>{
+    const size=b-a;
+    return a+(((start-a+i*speed)%size)+size)%size;
+  };
+  const makeRenderer=(a,b,speed)=>{
+    const startFrame=speed<0?b-1:a;
+    const renderer=createSourcePCMRenderer({
+      sourceFrames:pcm.length,sourceSampleRate:RATE,outputSampleRate:RATE,
+      channelCount:1,speed,startFrame,
+      loopEnabled:true,loopStartFrame:a,loopEndFrame:b
+    });
+    // Source windows are from the original recording, never a repeated
+    // synthetic loop sample. Adjacent true source PCM is cached.
+    const winStart=Math.max(0,Math.min(pcm.length-SOURCE_WINDOW_FRAMES,a-2048));
+    renderer.installWindow(winStart,[pcm.slice(winStart,winStart+SOURCE_WINDOW_FRAMES)]);
+    return {renderer,startFrame};
+  };
+  const qualityStats=(out)=>{
+    let energy=0,peak=0,maxJump=0,run=0,maxZeroRun=0;
+    for(let i=0;i<out.length;i++){
+      const sample=out[i],abs=Math.abs(sample);
+      energy+=sample*sample;
+      peak=Math.max(peak,abs);
+      if(i)maxJump=Math.max(maxJump,Math.abs(sample-out[i-1]));
+      if(abs<1e-7){run++;maxZeroRun=Math.max(maxZeroRun,run);}
+      else run=0;
+    }
+    return {rms:round(Math.sqrt(energy/out.length)),peak:round(peak),
+      maxAdjacentStep:round(maxJump),maxZeroRun};
+  };
+  for(const span of spanValues){
+    const a=anchor,b=a+span;
+    const naturalBoundary=round(Math.abs(pcm[b-1]-pcm[a]));
+    for(const speed of [-8,-1,0,1,8]){
+      const {renderer,startFrame}=makeRenderer(a,b,speed);
+      const output=new Float32Array(frames);
+      let missing=0,largestError=0;
+      for(let pos=0;pos<frames;pos+=block){
+        const pcmBlock=[new Float32Array(block)];
+        missing+=renderer.render(pcmBlock);
+        output.set(pcmBlock[0],pos);
+      }
+      assert.equal(missing,0,{span,speed,mode:"raw"});
+      assert.equal(renderer.statistics.missingFrames,0);
+      for(let i=0;i<frames;i++){
+        const expected=pcm[loopSource(a,b,startFrame,speed,i)];
+        largestError=Math.max(largestError,Math.abs(output[i]-expected));
+      }
+      assert.ok(largestError<1e-6,{span,speed,largestError});
+      const measured=qualityStats(output);
+      summaries.raw.push({span,speed,
+        sourceBoundaryStep:naturalBoundary,
+        largestError:round(largestError),missing,...measured});
+      // This equality is the actual zero-insertion oracle: legitimate
+      // source zeros, held 0x and boundary clicks stay part of reference.
+    }
+    for(const speed of [-1,0,1]){
+      for(const pitch of [0,7.1234]){
+        const {renderer}=makeRenderer(a,b,speed);
+        const grain=createGranularTimePitch({
+          sourceSampleRate:RATE,outputSampleRate:RATE,
+          channelCount:1,pitchSemitones:pitch
+        });
+        const output=new Float32Array(frames),blockDurations=[];
+        let missing=0;
+        for(let pos=0;pos<frames;pos+=block){
+          const buf=[new Float32Array(block)],t=performance.now();
+          missing+=renderer.renderGranular(buf,grain);
+          blockDurations.push(performance.now()-t);
+          output.set(buf[0],pos);
+        }
+        assert.equal(missing,0,{span,speed,pitch,mode:"granular"});
+        assert.equal(renderer.statistics.missingFrames,0);
+        assert.ok(output.every(Number.isFinite),{span,speed,pitch});
+        const ordered=blockDurations.sort((x,y)=>x-y);
+        const stats=qualityStats(output);
+        summaries.granular.push({span,speed,pitch,
+          sourceBoundaryStep:naturalBoundary,
+          missing,renderP95Ms:round(ordered[Math.floor(ordered.length*.95)]),
+          renderMaxMs:round(ordered.at(-1)),
+          ...stats});
+      }
+    }
+  }
+  assert.equal(summaries.raw.length,35);
+  assert.equal(summaries.granular.length,42);
+  console.log("RECORDED_ULTRASHORT_BOUNDARY_AUDIT "+JSON.stringify({
+    fixtureSha:EXPECT_SHA,source:"Meta Piano A0 CC0",
+    anchor,sourcePeak:round(peak),sourceRate:RATE,outputQuantum:block,
+    outputFramesPerCase:frames,outputQuantumBudgetMs:round(block/RATE*1000),
+    raw:summaries.raw,granular:summaries.granular,
+    acceptance:"RAW_SOURCE_REFERENCE_EXACT_AND_NO_CACHE_MISSES; GRANULAR_FINITE_AND_NO_CACHE_MISSES_ONLY",
+    caveats:"Source-implied boundary discontinuities are allowed; a one-frame loop has no musical pitch guarantee; Node wall-clock time is not realtime audio-thread CPU or subjective sound-quality proof"
+  }));
+});
