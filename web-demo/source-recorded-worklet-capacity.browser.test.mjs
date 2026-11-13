@@ -255,12 +255,32 @@ test("recorded ultrashort loops: real Chrome Worklet PCM, source oracle and WebA
       traceNames.set(key,(traceNames.get(key)||0)+1);
     }
     const durations=workletSlices.map(x=>x.dur).sort((a,b)=>a-b);
+    // Chromium emits a Process slice for each AudioWorkletProcessor node.
+    // Here the graph contains the source PCM renderer AND the test-only
+    // pass-through probe: neither can silently be called a standalone
+    // 'source DSP process' without node-identity metadata.
+    const processEvents=workletSlices.filter(e=>
+      e.name==="AudioWorkletProcessor::Process");
+    const authorEvents=workletSlices.filter(e=>
+      e.name==="AudioWorkletProcessor::Process (author script execution)");
+    const taskMetrics=items=>{
+      const d=items.map(e=>e.dur).sort((a,b)=>a-b);
+      return {count:d.length,maxUs:d.at(-1)??null,
+        p50Us:d.length?d[Math.floor(d.length*.5)]:null,
+        p95Us:d.length?d[Math.floor(d.length*.95)]:null,
+        overQuantumBudget:d.filter(n=>n>2666.667).length,
+        sampledArgs:items[0]?.args||null};
+    };
+    assert.ok(processEvents.length>100&&authorEvents.length>100,
+      "actual AudioWorkletProcessor callbacks must be identifiable");
     console.log("R2_CHROME_WORKLET_TRACE "+JSON.stringify({
       traceEvents:traceEvents.length,traceBytes:byteCount,
       traceCategoryNames:[...traceNames].sort((a,b)=>b[1]-a[1]).slice(0,25),
       threadLabels:threadNames.filter(e=>
         /audio|worklet/i.test(e.args.name)).map(e=>e.args.name).slice(0,16),
       audioWorkletThreads:workletThreads.length,
+      tracedProcessorCallbacks:taskMetrics(processEvents),
+      tracedAuthorScriptCalls:taskMetrics(authorEvents),
       workletCompleteTasks:durations.length,
       maxCompleteTaskUs:durations.at(-1)??null,
       p95CompleteTaskUs:durations.length?
