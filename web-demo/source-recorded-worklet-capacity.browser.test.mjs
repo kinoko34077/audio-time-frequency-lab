@@ -203,6 +203,94 @@ test("recorded ultrashort loops: real Chrome Worklet PCM, source oracle and WebA
         }
       }
     }
+    // Chromium's own scheduler/Worklet task trace supplements the
+    // smoothed WebAudio graph capacity, which can conceal short spikes.
+    // Trace profiling has overhead: observed task slices are diagnostic,
+    // not a portable DAC deadline or benchmark.
+    const traceDone=new Promise((resolve,reject)=>{
+      const timeout=setTimeout(()=>reject(Error("Chrome trace flush timeout")),15000);
+      cdp.once("Tracing.tracingComplete",data=>{
+        clearTimeout(timeout);resolve(data);
+      });
+    });
+    await cdp.send("Tracing.start",{
+      categories:"audio,webaudio,v8.execute,blink_gc,disabled-by-default-audio-worklet",
+      transferMode:"ReturnAsStream"
+    });
+    await sleep(1150); // steady granular speed=+1/pitch=+7.1234, 256-frame loop
+    await cdp.send("Tracing.end");
+    const {stream,dataLossOccurred}=await traceDone;
+    assert.ok(stream&&!dataLossOccurred,
+      "Chrome must deliver a complete trace with no lost events");
+    const traceChunks=[];
+    let byteCount=0;
+    for(;;){
+      const part=await cdp.send("IO.read",{handle:stream,size:131072});
+      const chunk=part.base64Encoded?
+        Buffer.from(part.data||"","base64").toString("utf8"):part.data||"";
+      traceChunks.push(chunk);
+      byteCount+=Buffer.byteLength(chunk);
+      assert.ok(byteCount<50_000_000,
+        "bounded Chrome worklet tracing output must remain below 50 MB");
+      if(part.eof)break;
+    }
+    await cdp.send("IO.close",{handle:stream});
+    const trace=JSON.parse(traceChunks.join(""));
+    const traceEvents=trace.traceEvents||[];
+    assert.ok(traceEvents.length>20,
+      "actual Chrome audio tracing should produce real trace events");
+    const threadNames=traceEvents.filter(e=>
+      e.ph==="M"&&e.name==="thread_name"&&typeof e.args?.name==="string");
+    const workletThreads=threadNames.filter(e=>
+      /AudioWorklet|Audio.Worklet/i.test(e.args.name));
+    const selectedThreads=new Set(workletThreads.map(e=>e.pid+":"+e.tid));
+    const workletSlices=traceEvents.filter(e=>
+      selectedThreads.has(e.pid+":"+e.tid)&&
+      e.ph==="X"&&Number.isFinite(e.dur)&&e.dur>=0);
+    const traceNames=new Map();
+    for(const e of traceEvents){
+      if(!/audio|worklet|v8.execute|blink_gc/i.test(
+        String(e.cat||"")+" "+String(e.name||"")))continue;
+      const key=String(e.name||"<unknown>");
+      traceNames.set(key,(traceNames.get(key)||0)+1);
+    }
+    const durations=workletSlices.map(x=>x.dur).sort((a,b)=>a-b);
+    // Chromium emits a Process slice for each AudioWorkletProcessor node.
+    // Here the graph contains the source PCM renderer AND the test-only
+    // pass-through probe: neither can silently be called a standalone
+    // 'source DSP process' without node-identity metadata.
+    const processEvents=workletSlices.filter(e=>
+      e.name==="AudioWorkletProcessor::Process");
+    const authorEvents=workletSlices.filter(e=>
+      e.name==="AudioWorkletProcessor::Process (author script execution)");
+    const taskMetrics=items=>{
+      const d=items.map(e=>e.dur).sort((a,b)=>a-b);
+      return {count:d.length,maxUs:d.at(-1)??null,
+        p50Us:d.length?d[Math.floor(d.length*.5)]:null,
+        p95Us:d.length?d[Math.floor(d.length*.95)]:null,
+        overQuantumBudget:d.filter(n=>n>2666.667).length,
+        sampledArgs:items[0]?.args||null};
+    };
+    assert.ok(processEvents.length>100&&authorEvents.length>100,
+      "actual AudioWorkletProcessor callbacks must be identifiable");
+    console.log("R2_CHROME_WORKLET_TRACE "+JSON.stringify({
+      traceEvents:traceEvents.length,traceBytes:byteCount,
+      traceCategoryNames:[...traceNames].sort((a,b)=>b[1]-a[1]).slice(0,25),
+      threadLabels:threadNames.filter(e=>
+        /audio|worklet/i.test(e.args.name)).map(e=>e.args.name).slice(0,16),
+      audioWorkletThreads:workletThreads.length,
+      tracedProcessorCallbacks:taskMetrics(processEvents),
+      tracedAuthorScriptCalls:taskMetrics(authorEvents),
+      workletCompleteTasks:durations.length,
+      maxCompleteTaskUs:durations.at(-1)??null,
+      p95CompleteTaskUs:durations.length?
+        durations[Math.floor(durations.length*.95)]:null,
+      tasksOver2666Us:durations.filter(x=>x>2666.667).length,
+      longWorkletTasks:workletSlices.filter(e=>e.dur>2000)
+        .sort((a,b)=>b.dur-a.dur)
+        .slice(0,8).map(e=>({name:e.name,durationUs:e.dur,cat:e.cat})),
+      caveat:"Whole thread task slices include nested/GC work; no direct per-quantum process() or DAC latency equivalence without callback event identification."
+    }));
     await page.evaluate(async()=>{
       const s=window.__r2;
       await s.bridge.pause();
