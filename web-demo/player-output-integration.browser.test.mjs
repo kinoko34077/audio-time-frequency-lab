@@ -28,14 +28,21 @@ test("recorded piano main player: gesture/parameter receipts AND actual output P
     page.on("pageerror",error=>errors.push(error.message));
     await page.evaluateOnNewDocument(()=>{
       const nativeConnect=AudioNode.prototype.connect;
-      window.__outputProbes=[];
+      window.__audioOutputPaths=[];
       AudioNode.prototype.connect=function(destination,...rest){
-        if(destination===this.context.destination){
-          const probe=this.context.createAnalyser();
-          probe.fftSize=2048;
-          nativeConnect.call(this,probe,...rest);
-          nativeConnect.call(probe,destination);
-          window.__outputProbes.push(probe);
+        const direct=destination===this.context.destination;
+        const media=(typeof MediaStreamAudioDestinationNode!=="undefined"&&
+          destination instanceof MediaStreamAudioDestinationNode);
+        if(direct||media){
+          // Audio Lab routes EITHER to AudioContext.destination OR via an
+          // HTMLMediaElement backed by MediaStreamAudioDestinationNode.
+          // Observing only the first route incorrectly reports silence after
+          // the production media route becomes active.
+          const analyser=this.context.createAnalyser();
+          analyser.fftSize=2048;
+          nativeConnect.call(this,analyser,...rest);
+          nativeConnect.call(analyser,destination);
+          window.__audioOutputPaths.push({kind:media?"media":"direct",analyser});
           return destination;
         }
         return nativeConnect.call(this,destination,...rest);
@@ -71,7 +78,7 @@ test("recorded piano main player: gesture/parameter receipts AND actual output P
     await page.click("#play-main");
     await page.waitForFunction(()=>document.querySelector("#granular-optin-status")
       ?.dataset.renderRunning==="true",{timeout:20000});
-    await page.waitForFunction(()=>window.__outputProbes?.length>0,{timeout:20000});
+    await page.waitForFunction(()=>window.__audioOutputPaths?.length>=2,{timeout:20000});
     const nodeStarts=await page.$eval("#rt-telemetry",
       el=>Number(el.dataset.pcmNodeStarts));
     assert.equal(nodeStarts,1);
@@ -93,21 +100,29 @@ test("recorded piano main player: gesture/parameter receipts AND actual output P
       for(let n=0;n<10;n++){
         await sleep(45);
         const value=await page.evaluate(()=>{
-          const p=window.__outputProbes.at(-1);
-          if(!p)return null;
-          const data=new Float32Array(p.fftSize);
-          p.getFloatTimeDomainData(data);
-          let power=0,peak=0,zeros=0;
-          for(const v of data){power+=v*v;peak=Math.max(peak,Math.abs(v));if(v===0)zeros++;}
-          return {rms:Math.sqrt(power/data.length),peak,zeros};
+          const paths=window.__audioOutputPaths||[];
+          if(!paths.length)return null;
+          const readings=paths.map(({kind,analyser})=>{
+            const data=new Float32Array(analyser.fftSize);
+            analyser.getFloatTimeDomainData(data);
+            let power=0,peak=0,zeros=0;
+            for(const v of data){power+=v*v;peak=Math.max(peak,Math.abs(v));if(v===0)zeros++;}
+            return {kind,rms:Math.sqrt(power/data.length),peak,zeros};
+          });
+          return {rms:Math.max(...readings.map(x=>x.rms)),
+            peak:Math.max(...readings.map(x=>x.peak)),
+            paths:readings,
+            htmlMediaRunning:!document.querySelector("#background-output")?.paused};
         });
         assert.ok(value,"the real Web Audio output node must be observable");
         samples.push(value);
       }
-      const active=samples.filter(x=>x.rms>1e-5);
+      const active=samples.filter(x=>x.rms>1e-4);
       const result={tag,expectedSpeed,expectedPitch,active:active.length,
         maxRms:Math.max(...samples.map(x=>x.rms)),
         maxPeak:Math.max(...samples.map(x=>x.peak)),
+        outputPaths:samples.at(-1).paths.map(x=>x.kind),
+        mediaStarted:samples.some(x=>x.htmlMediaRunning),
         lastFrame:Number(await page.$eval("#granular-optin-status",
           el=>el.dataset.renderFrame)),
         nodeStarts:await page.$eval("#rt-telemetry",
