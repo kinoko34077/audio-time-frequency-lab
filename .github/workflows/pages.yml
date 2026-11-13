@@ -67,6 +67,9 @@ jobs:
       - name: Native Chrome R4 playback-first real-file and A/B/tab-state regression
         run: |
           node --test web-demo/player-first.browser.test.mjs
+      - name: Native Chrome main-player recorded sound output and gesture integration (R2/R3)
+        run: |
+          node --test web-demo/player-output-integration.browser.test.mjs
       - name: Native Chrome UI visual audit with desktop and mobile screenshots
         if: always()
         run: |
