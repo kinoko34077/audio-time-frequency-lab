@@ -204,6 +204,13 @@ test("diagnostic known 440/660Hz musical partials disambiguate pitch ridge from 
           centsError:Number((1200*Math.log2(peak.hz/target)).toFixed(3)),
           amplitude:Number(peak.amp.toFixed(6))};
       });
+      for(const partial of partials){
+        // These existing deterministic tones have KNOWN exact input
+        // frequencies. Guard their output pitch ratio within the bounded
+        // 6,144-frame Hann/0.1%-grid measurement precision (not MOS).
+        assert.ok(Math.abs(partial.centsError)<12,
+          {speed,semitones,partial,contract:"steady-known-partial pitch ratio"});
+      }
       rows.push({speed,semitones,partials});
     }
   }
