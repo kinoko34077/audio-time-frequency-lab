@@ -260,23 +260,39 @@ function syncLoopToPlayer(player=state.player){
   });
 }
 function editAB(edge,raw){
-  const input=$("#player-loop-"+edge),other=edge==="a"?ab.b:ab.a;
-  const frames=state.dry?.[0].length||0;
+  const input=$("#player-loop-"+edge),frames=state.dry?.[0].length||0;
   const value=Number(raw);
-  const valid=String(raw).trim()!==""&&Number.isSafeInteger(value)&&
-    (edge==="a"?value>=0&&value<other:value>other&&value<=frames);
-  if(!valid){
-    input.setCustomValidity(edge==="a"?
-      "開始Aは0以上・B未満の整数サンプルです":
-      "終端BはAより大きく・音源長以下の整数サンプルです");
-    input.reportValidity();
-    $("#player-loop-hint").textContent="A は B より小さくしてください（1サンプル区間可）。";
+  // The user's chosen endpoint takes precedence. Crossing the OTHER
+  // endpoint is a normal interval-edit operation, not an input error:
+  // carry the previous duration when possible and clip at source edges.
+  if(!frames||String(raw).trim()===""||!Number.isSafeInteger(value)){
+    input.setCustomValidity("");
+    $("#player-loop-hint").textContent="区間は整数サンプルで指定してください。元の区間を保持しています。";
     return;
   }
+  const span=ab.b-ab.a;
+  const frame=clamp(value,edge==="a"?0:1,edge==="a"?frames-1:frames);
+  let nextA=ab.a,nextB=ab.b;
+  if(edge==="a"){
+    nextA=frame;
+    if(nextA>=nextB)nextB=Math.min(frames,nextA+span);
+  }else{
+    nextB=frame;
+    if(nextB<=nextA)nextA=Math.max(0,nextB-span);
+  }
+  // An end-exclusive interval always includes at least one real sample.
+  // These conditions hold even for the first/last frame and a 1-frame A/B.
+  if(!(nextA>=0&&nextA<nextB&&nextB<=frames))
+    throw Error("invalid A/B interval after automatic adjustment");
   input.setCustomValidity("");
-  if(ab[edge]===value){refreshAB();return;}
-  ab[edge]=value;
-  $("#player-loop-hint").textContent="区間の反映を要求しました。";
+  if(document.activeElement===input)
+    input.value=String(edge==="a"?nextA:nextB);
+  if(ab.a===nextA&&ab.b===nextB){refreshAB();return;}
+  const movedPeer=edge==="a"?nextB!==ab.b:nextA!==ab.a;
+  ab.a=nextA;ab.b=nextB;
+  $("#player-loop-hint").textContent=movedPeer?
+    "指定位置を"+edge.toUpperCase()+"に設定し、もう一方の端点も自動調整しました。":
+    "区間の反映を要求しました。";
   refreshAB();syncLoopToPlayer();
 }
 for(const edge of ["a","b"]){
