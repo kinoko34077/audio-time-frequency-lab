@@ -92,6 +92,18 @@ export function createSourceTimeline({
       if(!Object.is(old,position)||wasEnded!==ended)revision++;
       return state();
     },
+    // One scratch action updates frame + velocity as a single transport
+    // revision. Do not expose an intermediate old-speed/new-position state.
+    scrub(p,s){
+      if(!frame(p)||p>=sourceFrames)throw RangeError("invalid scratch frame");
+      const next=validatePlaybackSpeed(s),oldPosition=position,oldRate=rate,
+        wasEnded=ended;
+      position=p;rate=next;ended=false;endedDirection=0;
+      reconcile();
+      if(!Object.is(oldPosition,position)||!Object.is(oldRate,rate)||
+         wasEnded!==ended)revision++;
+      return state();
+    },
     setSpeed(s){
       const next=validatePlaybackSpeed(s);
       if(Object.is(rate,next))return state();
