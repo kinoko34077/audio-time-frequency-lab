@@ -34,6 +34,9 @@ const granular={speed:1,pitch:0,railMax:8};
 let detailWaveEditor=null,detailWaveScrubbing=false;
 // Scrub speed temporarily overrides transport; it never edits canonical speed.
 let temporaryScrubSpeed=null,scrubMotionToken=0,scrubMotionFrame=0;
+// A non-pressed mouse hover auditions the source sample under the cursor,
+// without overwriting the user-selected playback speed or model settings.
+let hoverWave=null,hoverLaunching=false;
 const ab={a:0,b:0,enabled:true};
 function mainTab(){
   return document.body.dataset.mainTab==="model"?"model":"player";
@@ -763,7 +766,7 @@ let activeWavePointer=null;
 function playPosition(){
   // During a native gesture the latest finger/mouse position is the UI source
   // of truth; callback progress/command ACK can lag behind the dragged point.
-  if(activeWavePointer!==null||detailWaveScrubbing)return state.seek;
+  if(activeWavePointer!==null||detailWaveScrubbing||hoverWave!==null)return state.seek;
   if(!state.player||!state.ctx||!duration())return state.seek;
   if(state.player.labStream)return state.player.stream.sourcePositionAt(state.ctx.currentTime);
   if(state.player.rawPCM){
@@ -789,6 +792,56 @@ function refreshPlayhead(){
   $("#playhead").style.left=(duration()?clamp(seconds/duration(),0,1)*100:0)+"%";
   detailWaveEditor?.refresh();
   state.raf=requestAnimationFrame(refreshPlayhead);
+}
+function waveHoverEnd(owner,restore=true){
+  if(hoverWave?.owner!==owner)return;
+  clearTimeout(hoverWave.idleTimer);
+  hoverWave=null;
+  if(restore)waveformScrubMotion(0,"release");
+}
+function waveHoverSample(owner,sourceFrame){
+  // Only a real, unpressed mouse over a playable granular track is a hover.
+  // Never silently switch a selected Rust/Worker/Dry engine, or unpause after
+  // the user explicitly paused playback.
+  if(!state.dry||activeWavePointer!==null||detailWaveScrubbing||
+     (state.player&&(!state.player.rawPCM||!state.player.granular||
+       state.player.paused)))return false;
+  if(!state.player&&navigator.userActivation &&
+     !navigator.userActivation.hasBeenActive&&state.ctx?.state!=="running"){
+    $("#granular-optin-status").textContent=
+      "ブラウザの音声開始制限: 最初に再生を押すと、非押下ホバーで試聴できます。";
+    return false;
+  }
+  const frame=clamp(Math.round(sourceFrame),0,state.dry[0].length-1);
+  const now=performance.now();
+  if(hoverWave?.owner!==owner){
+    if(hoverWave)waveHoverEnd(hoverWave.owner,false);
+    hoverWave={owner,lastFrame:frame,lastTime:now,
+      velocity:0,idleTimer:null};
+    waveformScrubMotion(0,"hold",frame);
+  }else{
+    const h=hoverWave;
+    const speed=scrubSpeed(h.lastFrame,frame,now-h.lastTime,
+      state.decoded.sampleRate);
+    h.lastFrame=frame;h.lastTime=now;h.velocity=speed;
+    waveformScrubMotion(speed,"move",frame);
+  }
+  state.seek=frame/state.decoded.sampleRate;
+  refreshStatusSeek();
+  const h=hoverWave;
+  clearTimeout(h.idleTimer);
+  h.idleTimer=setTimeout(()=>{
+    if(hoverWave===h){
+      h.velocity=0;waveformScrubMotion(0,"hold",h.lastFrame);
+    }
+  },90);
+  if(!state.player&&!hoverLaunching){
+    hoverLaunching=true;
+    void play("player",state.seek).catch(error=>{
+      message("ホバー試聴の開始に失敗: "+error.message,"error");
+    }).finally(()=>{hoverLaunching=false;});
+  }
+  return true;
 }
 function waveFrameFromPointer(e){
   if(!state.dry)return 0;
@@ -829,7 +882,9 @@ waveSurface.addEventListener("pointerdown",e=>{
   if(activeWavePointer!==null)return;
   if((GRANULAR_EXPERIMENT||mainTab()==="player")&&e.isTrusted&&
      (!state.player||(state.player.rawPCM&&state.player.granular))){
-    // Native model/dry engines retain the original seek contract.
+    // A deliberate press takes ownership from hover; no hover-leave easing
+    // may race with this finger/mouse drag's first 0× hold.
+    waveHoverEnd("overview",false);
     cancelTemporaryScrub();
     activeWavePointer=e.pointerId;
     const frame=waveFrameFromPointer(e),now=performance.now();
@@ -848,6 +903,17 @@ if(PLAYER_GRANULAR_AVAILABLE){
   $("#wave-hint").textContent="波形を押したまま動かしてスクラブ";
   waveSurface.setAttribute("aria-label",
     "波形をタップまたはドラッグして音源位置を移動");
+  const overviewHover=e=>{
+    if(!e.isTrusted||e.pointerType!=="mouse"||e.buttons!==0||
+       activeWavePointer!==null)return;
+    if(waveHoverSample("overview",waveFrameFromPointer(e)))e.preventDefault();
+  };
+  waveSurface.addEventListener("pointerenter",overviewHover);
+  waveSurface.addEventListener("pointermove",overviewHover);
+  waveSurface.addEventListener("pointerleave",e=>{
+    if(e.pointerType==="mouse"&&activeWavePointer===null)
+      waveHoverEnd("overview");
+  });
   waveSurface.addEventListener("pointermove",e=>{
     if(activeWavePointer!==e.pointerId||!overviewGesture)return;
     const g=overviewGesture,now=performance.now(),frame=waveFrameFromPointer(e);
@@ -896,6 +962,8 @@ detailWaveEditor=createPlayerWaveEditor({
   visibleStart:$("#wave-visible-start"),visibleEnd:$("#wave-visible-end"),
   getPosition:()=>playPosition(),
   onScrubMotion:waveformScrubMotion,
+  onHoverFrame:frame=>waveHoverSample("detail",frame),
+  onHoverEnd:restore=>waveHoverEnd("detail",restore),
   onScrubState:active=>{
     // Running Worklet source time can be ahead of the last commanded seek.
     // Capture it BEFORE selecting gesture-owned state.seek, or the central
@@ -1175,6 +1243,7 @@ async function mediaBridge(player){
   }
 }
 async function stop(){
+  if(hoverWave)waveHoverEnd(hoverWave.owner,false);
   cancelTemporaryScrub(false);
   // Fence any pending async AudioContext/WASM/Worklet launch. A successful
   // file replacement and explicit stop must never be undone by an old click.
