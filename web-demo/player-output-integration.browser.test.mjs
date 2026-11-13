@@ -200,6 +200,34 @@ test("recorded piano main player: gesture/parameter receipts AND actual output P
       "actual waveform scrub must move the canonical source-time viewport");
     assert.equal(await page.$eval("#rt-telemetry",
       el=>Number(el.dataset.pcmNodeStarts)),nodeStarts);
+    // The full-song overview must also issue atomic sample+speed scrub:
+    // old #wave pointermove still used seek-window and reset the grain state.
+    await page.$eval("#wave",e=>e.scrollIntoView({block:"center"}));
+    const overviewBox=await page.$eval("#wave",e=>{
+      const r=e.getBoundingClientRect();
+      return {x:r.x,y:r.y,width:r.width,height:r.height};
+    });
+    const startOfOverview=await page.evaluate(()=>window.__scratchProtocol.length);
+    await page.mouse.move(overviewBox.x+overviewBox.width*.52,
+      overviewBox.y+overviewBox.height*.45);
+    await page.mouse.down();
+    await page.mouse.move(overviewBox.x+overviewBox.width*.58,
+      overviewBox.y+overviewBox.height*.45,{steps:8});
+    await page.mouse.up();
+    await page.waitForFunction(i=>window.__scratchProtocol?.slice(i)
+      .some(m=>m.type==="scrub"),{timeout:10000},startOfOverview);
+    const overviewCommands=await page.evaluate(i=>
+      window.__scratchProtocol.slice(i),startOfOverview);
+    assert.ok(overviewCommands.some(x=>x.type==="scrub"&&x.bytes>0),
+      "overview touch must prime the actual audio scratch window");
+    assert.equal(overviewCommands.filter(x=>x.type==="seek-window").length,0,
+      "overview must not reset sound grain epoch on each pointer movement");
+    console.log("ATOMIC_OVERVIEW_SCRATCH "+JSON.stringify({
+      commands:overviewCommands.length,
+      transfers:overviewCommands.filter(x=>x.bytes>0).length,
+      positive:overviewCommands.some(x=>x.speed>0),
+      negative:overviewCommands.some(x=>x.speed<0)
+    }));
     // Explicitly distinguish the browser's audio samples, render receipt,
     // and the lack of actual mobile-device acoustic/latency measurement.
     assert.deepEqual(errors,[]);
