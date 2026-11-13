@@ -185,14 +185,14 @@ function setTemporaryScrubSpeed(value,_force=false,frame=null){
   if(!p?.rawPCM||!p.granular||p.initializing||p.paused)return;
   queueScrubCommand(p,temporaryScrubSpeed,frame);
 }
-function waveformScrubMotion(speed,phase,frame=null){
+function waveformScrubMotion(speed,phase,sourceFrame=null){
   if(phase==="cancel"){cancelTemporaryScrub();return;}
   if(phase==="hold"||phase==="move"){
     // A fresh drag replaces any previous inertia without changing settings.
     if(scrubMotionFrame){
       scrubMotionToken++;cancelAnimationFrame(scrubMotionFrame);scrubMotionFrame=0;
     }
-    setTemporaryScrubSpeed(phase==="hold"?0:speed,phase==="hold",frame);
+    setTemporaryScrubSpeed(phase==="hold"?0:speed,phase==="hold",sourceFrame);
     return;
   }
   if(phase!=="release")return;
