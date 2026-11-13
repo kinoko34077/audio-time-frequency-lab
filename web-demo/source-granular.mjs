@@ -38,7 +38,8 @@ export function createGranularTimePitch({
       pitch=semitones;factor=2**(pitch/12);revision++;
       // A new grain configuration is a new synthesis epoch, but not a new
       // AudioWorklet node or source-time coordinate.
-      beginTransition();
+      // Initial nonzero pitch is not a change between audible epochs.
+      if(outputFrames>0)beginTransition();
       grains.clear();outputFrames=0;
     }
     return {pitchSemitones:pitch,pitchRatio:factor,pitchRevision:revision};
