@@ -205,6 +205,10 @@ test("R3 opt-in real page applies precise signed speed/pitch without replacing t
     }));
     assert.ok(duringDrag.head>75&&duringDrag.head<85,
       "live playhead should follow the finger, not a stale render ACK");
+    // This assertion checks the held 0× sample, not a DJ-style flick.
+    // Releasing immediately after movement intentionally continues inertia;
+    // hold before lifting to distinguish the two user actions.
+    await new Promise(resolve=>setTimeout(resolve,160));
     await page.mouse.up();
     const finalExpected=Math.round(sourceRate*2*.8);
     await page.waitForFunction(expected=>Math.abs(Number(document.querySelector(
