@@ -67,10 +67,17 @@ jobs:
       - name: Native Chrome R4 playback-first real-file and A/B/tab-state regression
         run: |
           node --test web-demo/player-first.browser.test.mjs
+      - name: Native Chrome main-player recorded sound output and gesture integration (R2/R3)
+        run: |
+          node --test web-demo/player-output-integration.browser.test.mjs
       - name: Native Chrome UI visual audit with desktop and mobile screenshots
         if: always()
         run: |
           node --test web-demo/player-visual.browser.test.mjs
+      - name: Cross-viewport Chrome gesture and UX audit (320px to desktop incl Android-size)
+        if: always()
+        run: |
+          node --test web-demo/player-cross-viewport.browser.test.mjs
       - name: Preserve UI screenshots for human visual review
         if: always()
         uses: actions/upload-artifact@v4

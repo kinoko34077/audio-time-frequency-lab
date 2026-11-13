@@ -1126,3 +1126,14 @@ body.model-lab[data-main-tab="model"] .workspace-grid:has(.model-legacy-fold:not
   body.model-lab[data-main-tab="player"] .player-tune-inputs input[type=range]{min-height:31px}
   body.model-lab[data-main-tab="player"] .player-tune-inputs input[type=number]{min-height:33px}
 }
+
+
+/* Small landscape-height/compact phones: make the main playback action
+   visible before the first vertical scroll, not merely reachable after it.
+   Preserve the 172+px waveform on taller windows. */
+@media(max-width:600px) and (max-height:650px){
+  body.model-lab[data-main-tab="player"] #main-player-panel>.wave-editor .wave-detail-wrap{
+    height:154px!important;
+    min-height:154px!important;
+  }
+}
