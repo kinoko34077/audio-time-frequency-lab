@@ -2,7 +2,7 @@ import {QUALITY,mixWet} from "./dsp.mjs";
 import {liveFactors,fullBandPartialOptions} from "./lab-contract.mjs";
 import {createModelStream} from "./lab-stream.mjs";
 import {createSourcePCMBridge} from "./source-pcm-bridge.mjs";
-import {returnToPlaySpeed} from "./scrub-kinetics.mjs";
+import {returnToPlaySpeed,scrubSpeed,releaseScrubSpeed} from "./scrub-kinetics.mjs";
 import {createPlayerWaveEditor} from "./player-wave-editor.mjs";
 import {validatePlaybackSpeed,validateSpeedRailRange,speedOnRail,formatPlaybackSpeed} from "./source-timeline.mjs";
 import {frequencyFromSlider,sliderFromFrequency,holdFromFrequency,drawCrusherPreview} from "./crusher-visual.mjs";
@@ -790,18 +790,23 @@ function refreshPlayhead(){
   detailWaveEditor?.refresh();
   state.raf=requestAnimationFrame(refreshPlayhead);
 }
-function playheadFromPointer(e,startIfStopped=true){
+function waveFrameFromPointer(e){
+  if(!state.dry)return 0;
+  const rect=$("#wave").getBoundingClientRect();
+  const fraction=clamp((e.clientX-rect.left)/rect.width,0,.999999);
+  return Math.min(state.dry[0].length-1,
+    Math.max(0,Math.round(fraction*state.dry[0].length)));
+}
+function playheadFromPointer(e,startIfStopped=true,scrub=false){
   if(!state.dry)return;
   const rect=$("#wave").getBoundingClientRect();
   const frac=clamp((e.clientX-rect.left)/rect.width,0,.999999);
   state.seek=frac*duration();
   if(state.player){
-    // A bridge registered but not yet started must reconcile its final
-    // gesture coordinate BEFORE the first audible quantum.
-    if(!state.player.initializing)seek(state.seek);
+    // Detailed and overview gestures own a single atomic scratch cursor+
+    // speed transaction. Do not send an extra reset-heavy seek-window.
+    if(!scrub&&!state.player.initializing)seek(state.seek);
   }else if(startIfStopped){
-    // A drag beginning while stopped launches exactly one player. Moves that
-    // occur during async AudioWorklet registration merely replace state.seek.
     const launchAt=state.seek;
     void play(preferredWaveMode(),launchAt)
       .catch(err=>message("再生失敗: "+err.message,"error"));
@@ -813,19 +818,27 @@ function refreshStatusSeek(){
   $("#playhead").style.left=(duration()?100*state.seek/duration():0)+"%";
   detailWaveEditor?.refresh(true);
 }
-// Opt-in R3 scrub: one captured pointer, with real touch/mouse moves; legacy
-// modes retain the existing single-tap seek. Synthetic legacy fixture events
-// still make a single seek, without opening an unended drag session.
+// The WHOLE-TRACK overview and detailed fixed-playhead editor must share the
+// same atomic scratch behavior; before #66 this overview still called seek()
+// on every pointermove and erased granular overlap even after detail was fixed.
+let overviewGesture=null;
 const waveSurface=$("#wave");
 waveSurface.addEventListener("pointerdown",e=>{
-  if(e.pointerType==="mouse"&&e.button!==0)return;
+  if(!state.dry||(e.pointerType==="mouse"&&e.button!==0))return;
   if(activeWavePointer!==null)return;
   if((GRANULAR_EXPERIMENT||mainTab()==="player")&&e.isTrusted){
     cancelTemporaryScrub();
     activeWavePointer=e.pointerId;
+    const frame=waveFrameFromPointer(e),now=performance.now();
+    overviewGesture={frame,lastFrame:frame,lastTime:now,lastMovedAt:-Infinity,
+      velocity:0,idleTimer:null};
+    waveformScrubMotion(0,"hold",frame);
     try{waveSurface.setPointerCapture(e.pointerId);}catch{}
+    playheadFromPointer(e,true,true);
+  }else{
+    // Preserve legacy one-click seek without stealing a synthetic pointer.
+    playheadFromPointer(e);
   }
-  playheadFromPointer(e);
 });
 if(PLAYER_GRANULAR_AVAILABLE){
   waveSurface.style.touchAction="none";
@@ -833,14 +846,34 @@ if(PLAYER_GRANULAR_AVAILABLE){
   waveSurface.setAttribute("aria-label",
     "波形をタップまたはドラッグして音源位置を移動");
   waveSurface.addEventListener("pointermove",e=>{
-    if(activeWavePointer!==e.pointerId)return;
-    playheadFromPointer(e,false);
+    if(activeWavePointer!==e.pointerId||!overviewGesture)return;
+    const g=overviewGesture,now=performance.now(),frame=waveFrameFromPointer(e);
+    const speed=scrubSpeed(g.lastFrame,frame,now-g.lastTime,
+      state.decoded.sampleRate);
+    g.velocity=speed;g.lastMovedAt=now;g.lastTime=now;g.lastFrame=frame;
+    clearTimeout(g.idleTimer);
+    g.idleTimer=setTimeout(()=>{
+      if(activeWavePointer===e.pointerId&&overviewGesture===g){
+        g.velocity=0;
+        waveformScrubMotion(0,"hold",g.lastFrame);
+      }
+    },90);
+    waveformScrubMotion(speed,"move",frame);
+    playheadFromPointer(e,false,true);
     e.preventDefault();
   });
   const finishWave=e=>{
     if(activeWavePointer!==e.pointerId)return;
-    if(e.type==="pointerup")playheadFromPointer(e,false);
-    activeWavePointer=null;
+    const g=overviewGesture;
+    if(g){
+      clearTimeout(g.idleTimer);
+      if(e.type==="pointerup"){
+        playheadFromPointer(e,false,true);
+        waveformScrubMotion(releaseScrubSpeed(g.velocity,
+          performance.now()-g.lastMovedAt),"release");
+      }else waveformScrubMotion(0,"cancel");
+    }
+    overviewGesture=null;activeWavePointer=null;
     try{
       if(waveSurface.hasPointerCapture(e.pointerId))
         waveSurface.releasePointerCapture(e.pointerId);
