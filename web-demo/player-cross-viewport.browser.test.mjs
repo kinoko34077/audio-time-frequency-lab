@@ -67,6 +67,10 @@ test("real recorded waveform UX across mobile, Android-size, tablet and desktop 
           "waveform must be operable on "+profile.name);
         assert.ok(geometry.play.height>=40,
           "main play target must be touch accessible on "+profile.name);
+        if(profile.name==="compact-320")
+          assert.ok(geometry.play.bottom<=geometry.height-4,
+            "compact phone must reveal the main Play button without scrolling: "+
+            JSON.stringify(geometry.play));
         assert.ok(geometry.wave.top<geometry.play.top&&
           geometry.play.top<geometry.speed.top&&
           geometry.speed.top<geometry.pitch.bottom,
