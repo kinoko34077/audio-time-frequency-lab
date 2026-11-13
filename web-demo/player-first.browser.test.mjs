@@ -179,7 +179,8 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, swit
       const original=MessagePort.prototype.postMessage;
       if(!MessagePort.prototype.__scratchObserved){
         MessagePort.prototype.postMessage=function(data,...args){
-          if(data?.type==="command"&&data.op==="speed")
+          if((data?.type==="command"&&data.op==="speed")||
+             data?.type==="scrub")
             window.__scratchSpeeds?.push(data.speed);
           return original.call(this,data,...args);
         };

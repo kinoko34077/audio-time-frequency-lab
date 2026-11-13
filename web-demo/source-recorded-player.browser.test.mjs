@@ -70,6 +70,10 @@ test("recorded CC0 upright piano goes through the real granular file picker and 
     await page.mouse.down();
     for(let n=1;n<=8;n++)
       await page.mouse.move(box.left+box.width*(.15+.50*n/8),y);
+    // A quick pointer-up is now intentionally a DJ throw: it keeps moving.
+    // To test exact held-source-frame seeking, keep the finger still long
+    // enough to suppress inertia before lifting.
+    await new Promise(resolve=>setTimeout(resolve,160));
     await page.mouse.up();
     const expected=Math.round(decodedRate*3*.65);
     await page.waitForFunction(frame=>Math.abs(Number(

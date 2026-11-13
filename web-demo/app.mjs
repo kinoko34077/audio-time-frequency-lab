@@ -2,7 +2,7 @@ import {QUALITY,mixWet} from "./dsp.mjs";
 import {liveFactors,fullBandPartialOptions} from "./lab-contract.mjs";
 import {createModelStream} from "./lab-stream.mjs";
 import {createSourcePCMBridge} from "./source-pcm-bridge.mjs";
-import {returnToPlaySpeed} from "./scrub-kinetics.mjs";
+import {returnToPlaySpeed,scrubSpeed,releaseScrubSpeed} from "./scrub-kinetics.mjs";
 import {createPlayerWaveEditor} from "./player-wave-editor.mjs";
 import {validatePlaybackSpeed,validateSpeedRailRange,speedOnRail,formatPlaybackSpeed} from "./source-timeline.mjs";
 import {frequencyFromSlider,sliderFromFrequency,holdFromFrequency,drawCrusherPreview} from "./crusher-visual.mjs";
@@ -144,60 +144,55 @@ function refreshGranular(){
   $("#granular-rail-note").textContent=Math.abs(granular.speed)>granular.railMax?
     "指定速度はレール外です。直接入力した数値は保持されています。":"";
 }
+// All waveform-scrub commands share one queue: an old seek must NEVER apply
+// after the gesture's newest speed or after its kinetic release.
+function queueScrubCommand(player,speed,frame=null){
+  if(state.player!==player)return;
+  const held=player.scratchQueued?.frame;
+  player.scratchQueued={speed,frame:frame??held??null};
+  if(player.scratchBusy)return;
+  player.scratchBusy=true;
+  void (async()=>{
+    while(state.player===player&&player.scratchQueued){
+      const next=player.scratchQueued;
+      player.scratchQueued=null;
+      if(next.frame!==null)
+        await player.pcmBridge.scrub(next.frame,next.speed);
+      else
+        await player.pcmBridge.setSpeed(next.speed);
+    }
+  })().catch(error=>{
+    if(state.player===player)
+      message("波形スクラブの音声反映失敗: "+error.message,"error");
+  }).finally(()=>{player.scratchBusy=false;});
+}
 function cancelTemporaryScrub(restore=true){
   scrubMotionToken++;
   if(scrubMotionFrame)cancelAnimationFrame(scrubMotionFrame);
   scrubMotionFrame=0;
-  const active=temporaryScrubSpeed!==null;
-  const player=state.player;
-  if(player?.scrubSpeedTimer){
-    clearTimeout(player.scrubSpeedTimer);player.scrubSpeedTimer=null;
+  const active=temporaryScrubSpeed!==null,p=state.player;
+  if(p){
+    if(p.scrubSpeedTimer){clearTimeout(p.scrubSpeedTimer);p.scrubSpeedTimer=null;}
+    p.scratchQueued=null;
   }
   temporaryScrubSpeed=null;
-  if(restore&&active){
-    const p=state.player;
-    if(p?.rawPCM&&p.granular&&!p.initializing){
-      p.lastScrubCommand=null;
-      void p.pcmBridge.setSpeed(granular.speed).catch(error=>{
-        if(state.player===p)message("通常速度への復帰失敗: "+error.message,"error");
-      });
-    }
-  }
+  if(restore&&active&&p?.rawPCM&&p.granular&&!p.initializing)
+    queueScrubCommand(p,granular.speed);
 }
-function setTemporaryScrubSpeed(value,force=false){
+function setTemporaryScrubSpeed(value,_force=false,frame=null){
   temporaryScrubSpeed=validatePlaybackSpeed(value);
   const p=state.player;
   if(!p?.rawPCM||!p.granular||p.initializing||p.paused)return;
-  const now=performance.now();
-  // Latest gesture state wins; limit Worklet commands to visual-rate cadence.
-  if(!force&&now-(p.lastScrubCommandAt??-Infinity)<28){
-    // Preserve the LAST movement in a fast pointer burst. Dropping every
-    // event after the first 0x hold would make a quick throw inaudible.
-    if(!p.scrubSpeedTimer){
-      const remaining=Math.max(1,28-(now-p.lastScrubCommandAt));
-      p.scrubSpeedTimer=setTimeout(()=>{
-        p.scrubSpeedTimer=null;
-        if(state.player===p&&temporaryScrubSpeed!==null)
-          setTemporaryScrubSpeed(temporaryScrubSpeed,true);
-      },remaining);
-    }
-    return;
-  }
-  if(Object.is(p.lastScrubCommand,temporaryScrubSpeed))return;
-  p.lastScrubCommandAt=now;p.lastScrubCommand=temporaryScrubSpeed;
-  const bridge=p.pcmBridge;
-  void bridge.setSpeed(temporaryScrubSpeed).catch(error=>{
-    if(state.player===p)message("スクラブ速度の音声反映失敗: "+error.message,"error");
-  });
+  queueScrubCommand(p,temporaryScrubSpeed,frame);
 }
-function waveformScrubMotion(speed,phase){
+function waveformScrubMotion(speed,phase,sourceFrame=null){
   if(phase==="cancel"){cancelTemporaryScrub();return;}
   if(phase==="hold"||phase==="move"){
     // A fresh drag replaces any previous inertia without changing settings.
     if(scrubMotionFrame){
       scrubMotionToken++;cancelAnimationFrame(scrubMotionFrame);scrubMotionFrame=0;
     }
-    setTemporaryScrubSpeed(phase==="hold"?0:speed,phase==="hold");
+    setTemporaryScrubSpeed(phase==="hold"?0:speed,phase==="hold",sourceFrame);
     return;
   }
   if(phase!=="release")return;
@@ -218,12 +213,8 @@ function waveformScrubMotion(speed,phase){
       scrubMotionFrame=0;
       temporaryScrubSpeed=null;
       const p=state.player;
-      if(p?.rawPCM&&p.granular&&!p.initializing){
-        p.lastScrubCommand=null;
-        void p.pcmBridge.setSpeed(granular.speed).catch(error=>{
-          if(state.player===p)message("通常速度への復帰失敗: "+error.message,"error");
-        });
-      }
+      if(p?.rawPCM&&p.granular&&!p.initializing)
+        queueScrubCommand(p,granular.speed);
     }
   };
   scrubMotionFrame=requestAnimationFrame(frame);
@@ -799,18 +790,24 @@ function refreshPlayhead(){
   detailWaveEditor?.refresh();
   state.raf=requestAnimationFrame(refreshPlayhead);
 }
-function playheadFromPointer(e,startIfStopped=true){
+function waveFrameFromPointer(e){
+  if(!state.dry)return 0;
+  const rect=$("#wave").getBoundingClientRect();
+  const fraction=clamp((e.clientX-rect.left)/rect.width,0,.999999);
+  return Math.min(state.dry[0].length-1,
+    Math.max(0,Math.round(fraction*state.dry[0].length)));
+}
+function playheadFromPointer(e,startIfStopped=true,scrub=false){
   if(!state.dry)return;
   const rect=$("#wave").getBoundingClientRect();
   const frac=clamp((e.clientX-rect.left)/rect.width,0,.999999);
   state.seek=frac*duration();
   if(state.player){
-    // A bridge registered but not yet started must reconcile its final
-    // gesture coordinate BEFORE the first audible quantum.
-    if(!state.player.initializing)seek(state.seek);
+    // Detailed and overview gestures own a single atomic scratch cursor+
+    // speed transaction. Do not send an extra reset-heavy seek-window.
+    if((!scrub||!state.player.rawPCM||!state.player.granular||
+        state.player.paused)&&!state.player.initializing)seek(state.seek);
   }else if(startIfStopped){
-    // A drag beginning while stopped launches exactly one player. Moves that
-    // occur during async AudioWorklet registration merely replace state.seek.
     const launchAt=state.seek;
     void play(preferredWaveMode(),launchAt)
       .catch(err=>message("再生失敗: "+err.message,"error"));
@@ -822,19 +819,29 @@ function refreshStatusSeek(){
   $("#playhead").style.left=(duration()?100*state.seek/duration():0)+"%";
   detailWaveEditor?.refresh(true);
 }
-// Opt-in R3 scrub: one captured pointer, with real touch/mouse moves; legacy
-// modes retain the existing single-tap seek. Synthetic legacy fixture events
-// still make a single seek, without opening an unended drag session.
+// The WHOLE-TRACK overview and detailed fixed-playhead editor must share the
+// same atomic scratch behavior; before #66 this overview still called seek()
+// on every pointermove and erased granular overlap even after detail was fixed.
+let overviewGesture=null;
 const waveSurface=$("#wave");
 waveSurface.addEventListener("pointerdown",e=>{
-  if(e.pointerType==="mouse"&&e.button!==0)return;
+  if(!state.dry||(e.pointerType==="mouse"&&e.button!==0))return;
   if(activeWavePointer!==null)return;
-  if((GRANULAR_EXPERIMENT||mainTab()==="player")&&e.isTrusted){
+  if((GRANULAR_EXPERIMENT||mainTab()==="player")&&e.isTrusted&&
+     (!state.player||(state.player.rawPCM&&state.player.granular))){
+    // Native model/dry engines retain the original seek contract.
     cancelTemporaryScrub();
     activeWavePointer=e.pointerId;
+    const frame=waveFrameFromPointer(e),now=performance.now();
+    overviewGesture={frame,lastFrame:frame,lastTime:now,lastMovedAt:-Infinity,
+      velocity:0,idleTimer:null};
+    waveformScrubMotion(0,"hold",frame);
     try{waveSurface.setPointerCapture(e.pointerId);}catch{}
+    playheadFromPointer(e,true,true);
+  }else{
+    // Preserve legacy one-click seek without stealing a synthetic pointer.
+    playheadFromPointer(e);
   }
-  playheadFromPointer(e);
 });
 if(PLAYER_GRANULAR_AVAILABLE){
   waveSurface.style.touchAction="none";
@@ -842,14 +849,34 @@ if(PLAYER_GRANULAR_AVAILABLE){
   waveSurface.setAttribute("aria-label",
     "波形をタップまたはドラッグして音源位置を移動");
   waveSurface.addEventListener("pointermove",e=>{
-    if(activeWavePointer!==e.pointerId)return;
-    playheadFromPointer(e,false);
+    if(activeWavePointer!==e.pointerId||!overviewGesture)return;
+    const g=overviewGesture,now=performance.now(),frame=waveFrameFromPointer(e);
+    const speed=scrubSpeed(g.lastFrame,frame,now-g.lastTime,
+      state.decoded.sampleRate);
+    g.velocity=speed;g.lastMovedAt=now;g.lastTime=now;g.lastFrame=frame;
+    clearTimeout(g.idleTimer);
+    g.idleTimer=setTimeout(()=>{
+      if(activeWavePointer===e.pointerId&&overviewGesture===g){
+        g.velocity=0;
+        waveformScrubMotion(0,"hold",g.lastFrame);
+      }
+    },90);
+    waveformScrubMotion(speed,"move",frame);
+    playheadFromPointer(e,false,true);
     e.preventDefault();
   });
   const finishWave=e=>{
     if(activeWavePointer!==e.pointerId)return;
-    if(e.type==="pointerup")playheadFromPointer(e,false);
-    activeWavePointer=null;
+    const g=overviewGesture;
+    if(g){
+      clearTimeout(g.idleTimer);
+      if(e.type==="pointerup"){
+        playheadFromPointer(e,false,true);
+        waveformScrubMotion(releaseScrubSpeed(g.velocity,
+          performance.now()-g.lastMovedAt),"release");
+      }else waveformScrubMotion(0,"cancel");
+    }
+    overviewGesture=null;activeWavePointer=null;
     try{
       if(waveSurface.hasPointerCapture(e.pointerId))
         waveSurface.releasePointerCapture(e.pointerId);
@@ -880,10 +907,14 @@ detailWaveEditor=createPlayerWaveEditor({
     if(!state.dry||state.player)return;
     void play("player",state.seek).catch(error=>message("スクラブ再生失敗: "+error.message,"error"));
   },
-  onPosition:seconds=>{
+  onPosition:(seconds,{scrub=false}={})=>{
     if(!state.dry)return;
     state.seek=clamp(seconds,0,Math.max(0,duration()-1/state.decoded.sampleRate));
-    if(state.player&&!state.player.initializing)seek(state.seek);
+    // Scratch already sends cursor+velocity atomically to the Worklet.
+    // The old extra seek-window here reset grains on every pointermove.
+    if(state.player&&!state.player.initializing&&
+       (!scrub||!state.player.rawPCM||!state.player.granular||
+        state.player.paused))seek(state.seek);
     else refreshStatusSeek();
   },
   onAB:(edge,frame)=>{
@@ -1376,14 +1407,12 @@ async function play(mode="wet",offset=null){
       if(launchEpoch!==state.transportEpoch||state.player!==player)return;
       player.initializing=false;
       if(granularActive){
-        // Account for gesture changes while the Worklet was starting.
+        // During async initialization the final finger location is
+        // reconciled before play; afterwards only the atomic scratch queue
+        // owns simultaneous velocity/position updates.
         const desired=temporaryScrubSpeed??granular.speed;
-        if(!Object.is(desired,initialSpeed)){
-          player.lastScrubCommand=null;
-          void bridge.setSpeed(desired).catch(error=>{
-            if(state.player===player)message("スクラブ開始速度の反映失敗: "+error.message,"error");
-          });
-        }
+        if(!Object.is(desired,initialSpeed))
+          queueScrubCommand(player,desired);
         syncLoopToPlayer(player);
       }
       // If the pointer continued moving during the final async await,

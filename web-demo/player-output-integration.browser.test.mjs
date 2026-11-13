@@ -155,16 +155,95 @@ test("recorded piano main player: gesture/parameter receipts AND actual output P
       const r=el.getBoundingClientRect();
       return {x:r.x,y:r.y,width:r.width,height:r.height};
     });
-    await page.mouse.move(box.x+box.width*.68,box.y+box.height*.73);
+    // #63 regression: proof must reach the actual output and the atomic
+    // Worklet port, not just a signed-speed command or an aria label.
+    await page.evaluate(()=>{
+      window.__scratchProtocol=[];
+      const native=MessagePort.prototype.postMessage;
+      MessagePort.prototype.postMessage=function(m,...args){
+        if(m?.type==="scrub"||m?.type==="seek-window")
+          window.__scratchProtocol.push({type:m.type,frame:m.frame,
+            speed:m.speed,bytes:m.channels?.reduce((n,c)=>n+c.byteLength,0)||0});
+        return native.call(this,m,...args);
+      };
+    });
+    // A/B handles have their own pointer capture within 24px. Select a
+    // real pan position far from both handles, not one that drags an endpoint.
+    const panStart=await page.evaluate(()=>{
+      const canvas=document.querySelector("#wave-detail");
+      const r=canvas.getBoundingClientRect();
+      const bounds=["#wave-a-marker","#wave-b-marker"].map(selector=>{
+        const el=document.querySelector(selector);
+        return el?.hidden?null:el.getBoundingClientRect().left-r.left;
+      }).filter(x=>x!==null);
+      return [.20,.35,.50,.65,.80].map(fraction=>({
+        fraction,distance:Math.min(...bounds.map(x=>Math.abs(fraction*r.width-x)),r.width)
+      })).sort((a,b)=>b.distance-a.distance)[0].fraction;
+    });
+    await page.mouse.move(box.x+box.width*panStart,box.y+box.height*.73);
     await page.mouse.down();
-    await page.mouse.move(box.x+box.width*.42,box.y+box.height*.73,{steps:10});
+    await page.mouse.move(box.x+box.width*(panStart-.12),
+      box.y+box.height*.73,{steps:10});
     await page.mouse.up();
+    await page.waitForFunction(()=>window.__scratchProtocol
+      ?.some(x=>x.type==="scrub"&&x.speed>0),{timeout:10000});
+    const actualScratch=await page.evaluate(()=>{
+      const log=window.__scratchProtocol;
+      const analyserPaths=window.__audioOutputPaths||[];
+      const rms=analyserPaths.map(({analyser})=>{
+        const pcm=new Float32Array(analyser.fftSize);
+        analyser.getFloatTimeDomainData(pcm);
+        return Math.sqrt(pcm.reduce((n,v)=>n+v*v,0)/pcm.length);
+      });
+      return {log,rms,renderFrame:document.querySelector(
+        "#granular-optin-status")?.dataset.renderFrame};
+    });
+    assert.ok(actualScratch.log.some(x=>x.type==="scrub"&&x.speed>0));
+    assert.ok(actualScratch.log.some(x=>x.type==="scrub"&&x.bytes>0),
+      "initial scratch must prime its PCM cache");
+    assert.ok(actualScratch.log.some(x=>x.type==="scrub"&&x.bytes===0),
+      "consecutive pointer positions must reuse PCM cache");
+    assert.equal(actualScratch.log.filter(x=>x.type==="seek-window").length,0,
+      "waveform drag must not separately reset granular synthesis per move");
+    assert.ok(Math.max(...actualScratch.rms)>.0001,
+      "rendered output must remain audible during/after the scratch");
+    console.log("ATOMIC_REAL_OUTPUT_SCRATCH "+JSON.stringify(actualScratch));
     const afterFrame=await page.$eval("#wave-detail",
       el=>Number(el.getAttribute("aria-valuenow")));
     assert.notEqual(afterFrame,beforeFrame,
       "actual waveform scrub must move the canonical source-time viewport");
     assert.equal(await page.$eval("#rt-telemetry",
       el=>Number(el.dataset.pcmNodeStarts)),nodeStarts);
+    // The full-song overview must also issue atomic sample+speed scrub:
+    // old #wave pointermove still used seek-window and reset the grain state.
+    await page.$eval("#wave",e=>e.scrollIntoView({block:"center"}));
+    const overviewBox=await page.$eval("#wave",e=>{
+      const r=e.getBoundingClientRect();
+      return {x:r.x,y:r.y,width:r.width,height:r.height};
+    });
+    const startOfOverview=await page.evaluate(()=>window.__scratchProtocol.length);
+    await page.mouse.move(overviewBox.x+overviewBox.width*.52,
+      overviewBox.y+overviewBox.height*.45);
+    await page.mouse.down();
+    await page.mouse.move(overviewBox.x+overviewBox.width*.58,
+      overviewBox.y+overviewBox.height*.45,{steps:8});
+    await page.mouse.up();
+    await page.waitForFunction(i=>window.__scratchProtocol?.slice(i)
+      .some(m=>m.type==="scrub"),{timeout:10000},startOfOverview);
+    const overviewCommands=await page.evaluate(i=>
+      window.__scratchProtocol.slice(i),startOfOverview);
+    // The overview can legitimately reuse the detail editor's prior PCM
+    // cache. Requiring a redundant copy here would regress the optimization.
+    assert.ok(overviewCommands.some(x=>x.type==="scrub"),
+      "overview touch must reach the atomic audio scratch handler");
+    assert.equal(overviewCommands.filter(x=>x.type==="seek-window").length,0,
+      "overview must not reset sound grain epoch on each pointer movement");
+    console.log("ATOMIC_OVERVIEW_SCRATCH "+JSON.stringify({
+      commands:overviewCommands.length,
+      transfers:overviewCommands.filter(x=>x.bytes>0).length,
+      positive:overviewCommands.some(x=>x.speed>0),
+      negative:overviewCommands.some(x=>x.speed<0)
+    }));
     // Explicitly distinguish the browser's audio samples, render receipt,
     // and the lack of actual mobile-device acoustic/latency measurement.
     assert.deepEqual(errors,[]);

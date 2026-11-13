@@ -11,6 +11,7 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
     super();
     const props=options.processorOptions||{};
     this.renderer=createSourcePCMRenderer({...props,outputSampleRate:sampleRate});
+    this.sourceFrames=props.sourceFrames;
     const mode=props.processingMode??"raw";
     if(mode!=="raw"&&mode!=="granular")
       throw RangeError("unknown PCM processing mode");
@@ -58,6 +59,36 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
           this.queueRenderReceipt(m.requestId,st);
           this.port.postMessage({type:"command-accepted",
             requestId:m.requestId,op:"seek",sourceFrame:st.sourceFrame,
+            revision:st.revision,
+            processingMode:this.processingMode,
+            pitchRevision:this.granular?.state.pitchRevision??null,
+            rawPCM:this.processingMode==="raw"});
+          return;
+        }
+        if(m.type==="scrub"){
+          const t=this.renderer.timeline;
+          // A gesture's exact sample position and instantaneous signed speed
+          // must become one audio-thread transaction. The old pair of
+          // seek-window+speed commands cleared the granular history at every
+          // pointer move and could render an interim, wrong-speed quantum.
+          if(!Number.isSafeInteger(m.frame)||m.frame<0||
+             m.frame>=this.sourceFrames||
+             typeof m.speed!=="number"||!Number.isFinite(m.speed)||
+             m.speed<-8||m.speed>8)
+            throw RangeError("invalid atomic scratch frame/speed");
+          if(m.channels){
+            this.renderer.installWindow(m.start,m.channels,null,"seek");
+          }
+          if(!this.renderer.hasFrame(m.frame))
+            throw RangeError("scratch source window missing");
+          const previous=t.state.sourceFrame;
+          const st=t.scrub(m.frame,m.speed);
+          this.granular?.shiftSource(st.sourceFrame-previous);
+          this.pendingRequest=null;
+          this.queueRenderReceipt(m.requestId,st);
+          this.port.postMessage({type:"command-accepted",
+            requestId:m.requestId,op:"scrub",
+            sourceFrame:st.sourceFrame,speed:st.speed,
             revision:st.revision,
             processingMode:this.processingMode,
             pitchRevision:this.granular?.state.pitchRevision??null,

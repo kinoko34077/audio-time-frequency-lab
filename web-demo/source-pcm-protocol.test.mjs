@@ -135,3 +135,46 @@ test("pause receipt reports a silent output quantum without pretending sound pla
   assert.equal(observed.running,false);
   assert.equal(observed.missingFramesInBlock,0);
 });
+
+test("atomic scratch preserves Granular overlap and renders the held destination PCM",()=>{
+  const frames=65536,sr=48000;
+  const channels=[new Float32Array(frames),new Float32Array(frames)];
+  for(let i=0;i<frames;i++){
+    const value=i<32768?.17:.63;
+    channels[0][i]=value;
+    channels[1][i]=-value*.5;
+  }
+  const {p,messages}=processor({sourceFrames:frames,sourceSampleRate:sr,
+    channelCount:2,startFrame:10000,speed:0,processingMode:"granular"});
+  p.port.onmessage({data:{type:"window",requestId:1,start:0,channels}});
+  p.port.onmessage({data:{type:"command",op:"play",requestId:2}});
+  for(let i=0;i<4;i++)
+    p.process([],[[new Float32Array(128),new Float32Array(128)]]);
+  const grainEpoch=p.granular.state.outputFrames;
+  assert.ok(grainEpoch>=512);
+  p.port.onmessage({data:{type:"scrub",requestId:3,frame:40000,speed:0}});
+  const ack=messages.find(m=>m.type==="command-accepted"&&m.requestId===3);
+  assert.equal(ack.op,"scrub");assert.equal(ack.speed,0);
+  assert.equal(ack.sourceFrame,40000);
+  assert.equal(p.granular.state.outputFrames,grainEpoch,
+    "scrubbing must not clear the overlap epoch at every pointer movement");
+  let output;
+  for(let i=0;i<3;i++){
+    output=[new Float32Array(128),new Float32Array(128)];
+    p.process([],[output]);
+  }
+  assert.ok(output[0].every(x=>Math.abs(x-.63)<.015),
+    {output:Array.from(output[0].slice(0,4))});
+  assert.ok(output[1].every(x=>Math.abs(x+.315)<.015));
+  assert.equal(p.renderer.statistics.missingFrames,0);
+  const receipt=messages.find(m=>m.type==="render-applied"&&m.requestId===3);
+  assert.equal(receipt.missingFramesInBlock,0);
+  assert.equal(receipt.running,true);
+  p.port.onmessage({data:{type:"scrub",requestId:4,frame:40000,speed:-1}});
+  assert.equal(messages.find(m=>m.type==="command-accepted"&&m.requestId===4).speed,-1);
+  assert.equal(p.granular.state.outputFrames,grainEpoch+384);
+  p.process([],[[new Float32Array(128),new Float32Array(128)]]);
+  assert.ok(p.renderer.timeline.state.sourceFrame<40000,
+    "reverse scratch must advance actual audio source time backwards");
+  assert.equal(messages.filter(m=>m.type==="error").length,0);
+});

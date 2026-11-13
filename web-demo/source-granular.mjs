@@ -51,6 +51,15 @@ export function createGranularTimePitch({
       pitchRevision:revision,outputFrames
     };},
     setPitch,beginTransition,
+    // An intentional scratch displacement moves each still-active grain's
+    // source anchor by the same amount. Do not erase the overlap epoch: the
+    // next render must join the preceding audible sample, not restart.
+    shiftSource(delta){
+      if(!Number.isFinite(delta))throw RangeError("invalid scratch displacement");
+      if(delta===0)return;
+      if(Math.abs(delta)>16)beginTransition();
+      for(const [k,anchor] of grains)grains.set(k,anchor+delta);
+    },
     reset(){beginTransition();grains.clear();outputFrames=0;},
     render(output,state,read,sourceFrames){
       if(!Array.isArray(output)||output.length!==channelCount||
