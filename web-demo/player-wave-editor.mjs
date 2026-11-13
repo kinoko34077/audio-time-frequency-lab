@@ -210,7 +210,7 @@ export function createPlayerWaveEditor({
       velocity:0,idleTimer:null};
     wrap.dataset.interaction=target;
     if(target==="pan"){
-      active=true;onScrubState(true);onScrubMotion(0,"hold");onStart();
+      active=true;onScrubState(true);onScrubMotion(0,"hold",c);onStart();
     }
     e.preventDefault();
   });
@@ -233,7 +233,7 @@ export function createPlayerWaveEditor({
     if(!gesture.moved)return;
     if(gesture.type==="pan"){
       if(!active){ // A deliberate pan after a pinch may begin a new scrub.
-        active=true;onScrubState(true);onScrubMotion(0,"hold");onStart();
+        active=true;onScrubState(true);onScrubMotion(0,"hold",center());onStart();
       }
       const next=clamp(Math.round(gesture.frame-delta*spanFrames/canvas.clientWidth),0,frames-1);
       const now=performance.now();
@@ -246,11 +246,13 @@ export function createPlayerWaveEditor({
       const captured=gesture;
       gesture.idleTimer=setTimeout(()=>{
         if(active&&gesture===captured){
-          captured.velocity=0;onScrubMotion(0,"hold");
+          captured.velocity=0;onScrubMotion(0,"hold",captured.lastSeekFrame);
         }
       },90);
-      onScrubMotion(value,"move");
-      onPosition(next/rate,{start:false});
+      // One atomic source-frame + signed-velocity transaction owns audio.
+      // The following display update MUST NOT send another reset/seek.
+      onScrubMotion(value,"move",next);
+      onPosition(next/rate,{start:false,scrub:true});
     }else{
       const pointerFrame=clamp(Math.round(center()+(pos(e)/canvas.clientWidth-.5)*spanFrames),0,frames);
       // The shared A/B owner reconciles crossed handles atomically.
