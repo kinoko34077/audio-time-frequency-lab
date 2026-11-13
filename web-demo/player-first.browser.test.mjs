@@ -202,6 +202,11 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, swit
       "kinetic throw must restore canonical playback speed");
     assert.equal(await page.$eval("#granular-speed-value",el=>el.value),"1",
       "scrub override must not rewrite the user's saved speed");
+    // Restore the existing R4 test's 0x baseline for later positional checks.
+    await page.evaluate(()=>{
+      const speed=document.querySelector("#granular-speed-value");
+      speed.value="0";speed.dispatchEvent(new Event("change",{bubbles:true}));
+    });
     await page.waitForFunction(prev=>Number(document.querySelector("#wave-detail")
       ?.getAttribute("aria-valuenow"))>prev,{timeout:15000},beforePan);
     assert.equal(await page.$eval("#rt-telemetry",el=>Number(el.dataset.pcmNodeStarts)),starts,
