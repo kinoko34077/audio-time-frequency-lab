@@ -54,6 +54,54 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, swit
       ?.dataset.renderRunning==="true",{timeout:20000});
     const starts=await page.$eval("#rt-telemetry",el=>Number(el.dataset.pcmNodeStarts));
     assert.equal(starts,1);
+    // Real user function (R4), not another R2 quality benchmark: a single
+    // primary button pauses and resumes without destroying the player or
+    // losing pitch/tempo, A/B bounds or the canonical source position.
+    await page.evaluate(()=>{
+      const speed=document.getElementById("granular-speed-value");
+      speed.value="1";speed.dispatchEvent(new Event("change",{bubbles:true}));
+    });
+    await page.waitForFunction(()=>document.querySelector("#granular-optin-status")
+      ?.dataset.renderRunning==="true",{timeout:15000});
+    await page.click("#play-main");
+    await page.waitForFunction(()=>document.querySelector("#play-main")
+      ?.textContent.includes("再開")&&
+      document.querySelector("#granular-optin-status")?.dataset.renderRunning==="false",
+      {timeout:15000});
+    const paused=await page.evaluate(()=>({
+      frame:Number(document.querySelector("#wave-detail")?.getAttribute("aria-valuenow")),
+      speed:document.querySelector("#granular-speed-value")?.value,
+      pitch:document.querySelector("#granular-pitch-value")?.value,
+      a:document.querySelector("#player-loop-a")?.value,
+      b:document.querySelector("#player-loop-b")?.value,
+      worklets:Number(document.querySelector("#rt-telemetry")?.dataset.pcmNodeStarts),
+      media:navigator.mediaSession?.playbackState
+    }));
+    await new Promise(resolve=>setTimeout(resolve,100));
+    const still=Number(await page.$eval("#wave-detail",
+      e=>e.getAttribute("aria-valuenow")));
+    assert.ok(Math.abs(still-paused.frame)<=2,{paused,still});
+    assert.equal(paused.worklets,starts);
+    assert.equal(paused.speed,"1");
+    assert.equal(paused.pitch,"7.1234");
+    assert.equal(paused.a,"1000");
+    assert.equal(paused.b,"3000");
+    if(paused.media)assert.equal(paused.media,"paused");
+    await page.click("#play-main");
+    await page.waitForFunction(()=>document.querySelector("#play-main")
+      ?.textContent.includes("一時停止")&&
+      document.querySelector("#granular-optin-status")?.dataset.renderRunning==="true",
+      {timeout:15000});
+    assert.equal(await page.$eval("#rt-telemetry",
+      el=>Number(el.dataset.pcmNodeStarts)),starts,
+      "main pause/resume must reuse the identical audio worklet");
+    assert.equal(await page.$eval("#granular-pitch-value",e=>e.value),"7.1234");
+    await page.evaluate(()=>{
+      const speed=document.getElementById("granular-speed-value");
+      speed.value="0";speed.dispatchEvent(new Event("change",{bubbles:true}));
+    });
+    await page.waitForFunction(()=>document.querySelector("#granular-optin-status")
+      ?.dataset.renderRunning==="true",{timeout:10000});
     await page.evaluate(()=>{
       const a=document.getElementById("player-loop-a");
       // Grow the interval's end first; a transient A>=B is invalid by contract.
