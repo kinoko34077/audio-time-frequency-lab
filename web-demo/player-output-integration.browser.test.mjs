@@ -52,18 +52,22 @@ test("recorded piano main player: gesture/parameter receipts AND actual output P
     const decodedRate=Number((await page.$eval("#file-meta",el=>el.textContent))
       .match(/(\d+)Hz/)?.[1]);
     assert.ok(decodedRate>=8000&&decodedRate<=192000);
-    await page.evaluate(()=>{
+    // The recorded piano begins around 1.5 s; the first 0.18 s is almost
+    // silent. Use an objectively non-silent recorded section instead of
+    // treating legitimate source silence as an audio-rendering defect.
+    const loopA=Math.round(decodedRate*1.65);
+    const loopB=Math.round(decodedRate*2.15);
+    await page.evaluate(({loopA,loopB})=>{
       const set=(id,value)=>{
         const e=document.getElementById(id);
         e.value=String(value);
         e.dispatchEvent(new Event("change",{bubbles:true}));
       };
-      set("player-loop-b",20000);
-      set("player-loop-a",8000);
-      set("player-loop-b",16000);
+      set("player-loop-b",loopB);
+      set("player-loop-a",loopA);
       set("granular-speed-value",1);
       set("granular-pitch-value",0);
-    });
+    },{loopA,loopB});
     await page.click("#play-main");
     await page.waitForFunction(()=>document.querySelector("#granular-optin-status")
       ?.dataset.renderRunning==="true",{timeout:20000});
