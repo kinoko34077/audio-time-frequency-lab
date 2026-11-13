@@ -149,6 +149,10 @@ function cancelTemporaryScrub(restore=true){
   if(scrubMotionFrame)cancelAnimationFrame(scrubMotionFrame);
   scrubMotionFrame=0;
   const active=temporaryScrubSpeed!==null;
+  const player=state.player;
+  if(player?.scrubSpeedTimer){
+    clearTimeout(player.scrubSpeedTimer);player.scrubSpeedTimer=null;
+  }
   temporaryScrubSpeed=null;
   if(restore&&active){
     const p=state.player;
@@ -166,7 +170,19 @@ function setTemporaryScrubSpeed(value,force=false){
   if(!p?.rawPCM||!p.granular||p.initializing||p.paused)return;
   const now=performance.now();
   // Latest gesture state wins; limit Worklet commands to visual-rate cadence.
-  if(!force&&now-(p.lastScrubCommandAt??-Infinity)<28)return;
+  if(!force&&now-(p.lastScrubCommandAt??-Infinity)<28){
+    // Preserve the LAST movement in a fast pointer burst. Dropping every
+    // event after the first 0x hold would make a quick throw inaudible.
+    if(!p.scrubSpeedTimer){
+      const remaining=Math.max(1,28-(now-p.lastScrubCommandAt));
+      p.scrubSpeedTimer=setTimeout(()=>{
+        p.scrubSpeedTimer=null;
+        if(state.player===p&&temporaryScrubSpeed!==null)
+          setTemporaryScrubSpeed(temporaryScrubSpeed,true);
+      },remaining);
+    }
+    return;
+  }
   if(Object.is(p.lastScrubCommand,temporaryScrubSpeed))return;
   p.lastScrubCommandAt=now;p.lastScrubCommand=temporaryScrubSpeed;
   const bridge=p.pcmBridge;
