@@ -82,11 +82,9 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
           if(!this.renderer.hasFrame(m.frame))
             throw RangeError("scratch source window missing");
           const previous=t.state.sourceFrame;
-          this.granular?.shiftSource(m.frame-previous);
-          t.seek(m.frame);
-          t.setSpeed(m.speed);
+          const st=t.scrub(m.frame,m.speed);
+          this.granular?.shiftSource(st.sourceFrame-previous);
           this.pendingRequest=null;
-          const st=t.state;
           this.queueRenderReceipt(m.requestId,st);
           this.port.postMessage({type:"command-accepted",
             requestId:m.requestId,op:"scrub",
