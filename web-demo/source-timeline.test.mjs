@@ -173,3 +173,23 @@ test("source/sample rate conversion and malformed inputs",()=>{
   assert.throws(()=>t.seek(.5),RangeError);
   assert.throws(()=>t.sourceFrameAt(NaN),RangeError);
 });
+
+test("one atomic scratch updates source frame and signed velocity exactly once",()=>{
+  const t=createSourceTimeline({sourceFrames:200000,sourceSampleRate:48000,
+    outputSampleRate:48000,speed:1,startFrame:12000});
+  const initial=t.state.revision;
+  const reversed=t.scrub(90000,-2.5);
+  assert.equal(reversed.sourceFrame,90000);
+  assert.equal(reversed.speed,-2.5);
+  assert.equal(reversed.revision,initial+1);
+  assert.equal(t.scrub(90000,-2.5).revision,reversed.revision,
+    "one repeated identical gesture must not double-count revisions");
+  const held=t.scrub(90250,0);
+  assert.equal(held.revision,reversed.revision+1);
+  assert.equal(held.sourceFrame,90250);
+  assert.equal(held.speed,0);
+  assert.throws(()=>t.scrub(200000,-1),RangeError);
+  assert.throws(()=>t.scrub(100,-9),RangeError);
+  assert.equal(t.state.sourceFrame,90250);
+  assert.equal(t.state.speed,0);
+});
