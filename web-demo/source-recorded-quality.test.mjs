@@ -310,17 +310,35 @@ test("recorded piano parameter changes: separate source waveform steps from synt
         renderer.timeline.setSpeed(mode==="freeze0"?0:-1);
         grain.reset();
       }
-      const next=new Float32Array(128);
-      assert.equal(renderer.renderGranular([next],grain),0);
+      // Observe the full next four grain hops, not only the first output
+      // sample: epoch-reset artifacts may occur AFTER the exact join point.
+      const next=new Float32Array(4096);
+      for(let off=0;off<next.length;off+=128){
+        const block=new Float32Array(128);
+        assert.equal(renderer.renderGranular([block],grain),0);
+        next.set(block,off);
+      }
       assert.ok(next.every(Number.isFinite));
       const postStep=Math.abs(next[0]-previous);
       const excess=Math.max(0,postStep-unmodifiedSourceStep);
+      const changes=[];
+      for(let i=1;i<next.length;i++)
+        changes.push(Math.abs(next[i]-next[i-1]));
+      const ordered=changes.slice().sort((a,b)=>a-b);
+      const sourceWindow=pcm.subarray(lastSource-4096,lastSource+4096);
+      const sourceDerivative=maxStep(sourceWindow);
+      const grainJoins=[1024,2048,3072].map(i=>Math.abs(next[i]-next[i-1]));
       observations.push({mode,anchor,
         sourceStep:round(unmodifiedSourceStep),
         preBlockMaxStep:round(preDerivative),
+        sourceLocalMaxStep:round(sourceDerivative),
         afterResetStep:round(postStep),
         addedStepAboveSource:round(excess),
         excessVsSource:round(excess/Math.max(unmodifiedSourceStep,1e-5)),
+        postMaxStep:round(ordered.at(-1)),
+        postP99Step:round(ordered[Math.floor(ordered.length*.99)]),
+        grainHopSteps:grainJoins.map(round),
+        postStepOverSource:round(ordered.at(-1)/Math.max(sourceDerivative,1e-5)),
         nextBlockRms:round(rms(next))
       });
     }
@@ -332,7 +350,9 @@ test("recorded piano parameter changes: separate source waveform steps from synt
       maxStep:Math.max(...steps),
       medianStep:steps[Math.floor(steps.length/2)],
       maxSourceStep:Math.max(...rows.map(x=>x.sourceStep)),
-      maxExcessVsSource:Math.max(...rows.map(x=>x.excessVsSource))
+      maxExcessVsSource:Math.max(...rows.map(x=>x.excessVsSource)),
+      maxPostToSourceStepRatio:Math.max(...rows.map(x=>x.postStepOverSource)),
+      maxPostJoinStep:Math.max(...rows.flatMap(x=>x.grainHopSteps))
     };
   });
   console.log("RECORDED_PARAMETER_CHANGE_CLICK_DIAGNOSTIC "+JSON.stringify({
