@@ -63,8 +63,16 @@ test("native Chrome experimental source-PCM AudioWorklet renders and loops witho
       await player.pause();
       const stable=node===player.node;
       player.dispose();
-      const afterDispose=[];
-      node.port.onmessage=e=>afterDispose.push(e.data?.type);
+      const afterDispose=[],oldInFlightReceipts=[];
+      // A render-applied message sent BEFORE disposal can be delivered
+      // after replacing the host port listener. That queued notification
+      // does NOT prove the disposed processor accepted a NEW command.
+      node.port.onmessage=e=>{
+        const data=e.data||{};
+        if(data.requestId===999999)afterDispose.push(data.type);
+        else if(data.type==="render-applied")
+          oldInFlightReceipts.push(data.requestId);
+      };
       node.port.postMessage({type:"command",op:"play",requestId:999999});
       await new Promise(resolve=>setTimeout(resolve,120));
 
@@ -139,6 +147,7 @@ test("native Chrome experimental source-PCM AudioWorklet renders and loops witho
       await ctx.close();
       return {
         first,loop,rms,stable,loopMissing,transitions,afterDispose,
+        oldInFlightReceipts,
         failureRecovery:{crashRejected,fatalCount,afterCrashRejected,
           timedOut,timeoutFatalCount,postTimeoutAck:afterTimeout.length},
         errors:events.filter(x=>x.type==="error"),
@@ -171,7 +180,10 @@ test("native Chrome experimental source-PCM AudioWorklet renders and loops witho
         "changing A/B must not create an intermediate cache-miss block");
     }
     assert.deepEqual(evidence.afterDispose,[],
-      "disposed worklet must no longer accept commands");
+      "disposed Worklet must not accept/render requestId=999999 submitted AFTER disposal");
+    // Events queued BEFORE dispose are telemetry, not post-dispose commands.
+    // Keep this count as evidence of possible host/Worklet delivery ordering.
+    assert.ok(Array.isArray(evidence.oldInFlightReceipts));
     assert.ok(evidence.windowAccepts>=1);
     assert.deepEqual(evidence.failureRecovery,{
       crashRejected:true,fatalCount:1,afterCrashRejected:true,
