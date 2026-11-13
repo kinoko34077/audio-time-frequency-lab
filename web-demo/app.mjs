@@ -830,6 +830,7 @@ waveSurface.addEventListener("pointerdown",e=>{
   if(e.pointerType==="mouse"&&e.button!==0)return;
   if(activeWavePointer!==null)return;
   if((GRANULAR_EXPERIMENT||mainTab()==="player")&&e.isTrusted){
+    cancelTemporaryScrub();
     activeWavePointer=e.pointerId;
     try{waveSurface.setPointerCapture(e.pointerId);}catch{}
   }
@@ -1051,6 +1052,7 @@ async function setMainPlayerPaused(paused){
   const p=state.player;
   if(!p?.rawPCM||p.mode!=="player"||p.initializing||
      p.pauseBusy||Boolean(p.paused)===paused)return;
+  if(paused)cancelTemporaryScrub();
   const epoch=state.transportEpoch;
   p.pauseBusy=true;
   controls.main.disabled=true;
