@@ -155,10 +155,45 @@ test("recorded piano main player: gesture/parameter receipts AND actual output P
       const r=el.getBoundingClientRect();
       return {x:r.x,y:r.y,width:r.width,height:r.height};
     });
+    // #63 regression: proof must reach the actual output and the atomic
+    // Worklet port, not just a signed-speed command or an aria label.
+    await page.evaluate(()=>{
+      window.__scratchProtocol=[];
+      const native=MessagePort.prototype.postMessage;
+      MessagePort.prototype.postMessage=function(m,...args){
+        if(m?.type==="scrub"||m?.type==="seek-window")
+          window.__scratchProtocol.push({type:m.type,frame:m.frame,
+            speed:m.speed,bytes:m.channels?.reduce((n,c)=>n+c.byteLength,0)||0});
+        return native.call(this,m,...args);
+      };
+    });
     await page.mouse.move(box.x+box.width*.68,box.y+box.height*.73);
     await page.mouse.down();
     await page.mouse.move(box.x+box.width*.42,box.y+box.height*.73,{steps:10});
     await page.mouse.up();
+    await page.waitForFunction(()=>window.__scratchProtocol
+      ?.some(x=>x.type==="scrub"&&x.speed>0),{timeout:10000});
+    const actualScratch=await page.evaluate(()=>{
+      const log=window.__scratchProtocol;
+      const analyserPaths=window.__audioOutputPaths||[];
+      const rms=analyserPaths.map(({analyser})=>{
+        const pcm=new Float32Array(analyser.fftSize);
+        analyser.getFloatTimeDomainData(pcm);
+        return Math.sqrt(pcm.reduce((n,v)=>n+v*v,0)/pcm.length);
+      });
+      return {log,rms,renderFrame:document.querySelector(
+        "#granular-optin-status")?.dataset.renderFrame};
+    });
+    assert.ok(actualScratch.log.some(x=>x.type==="scrub"&&x.speed>0));
+    assert.ok(actualScratch.log.some(x=>x.type==="scrub"&&x.bytes>0),
+      "initial scratch must prime its PCM cache");
+    assert.ok(actualScratch.log.some(x=>x.type==="scrub"&&x.bytes===0),
+      "consecutive pointer positions must reuse PCM cache");
+    assert.equal(actualScratch.log.filter(x=>x.type==="seek-window").length,0,
+      "waveform drag must not separately reset granular synthesis per move");
+    assert.ok(Math.max(...actualScratch.rms)>.0001,
+      "rendered output must remain audible during/after the scratch");
+    console.log("ATOMIC_REAL_OUTPUT_SCRATCH "+JSON.stringify(actualScratch));
     const afterFrame=await page.$eval("#wave-detail",
       el=>Number(el.getAttribute("aria-valuenow")));
     assert.notEqual(afterFrame,beforeFrame,
