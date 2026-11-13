@@ -270,3 +270,94 @@ test("recorded piano source: 1..256-frame signed/zero loops distinguish source b
     caveats:"Source-implied boundary discontinuities are allowed; a one-frame loop has no musical pitch guarantee; Node wall-clock time is not realtime audio-thread CPU or subjective sound-quality proof"
   }));
 });
+
+
+/* #36 R2 real-recording sonic boundary diagnostic.
+ * A parameter change is delivered between two output blocks in the actual
+ * DSP route; a processor reset may introduce a NEW waveform step that is
+ * absent from the input source. Measure it before choosing any repair.
+ * These measurements alone are not an absolute hearing/MOS standard.
+ */
+test("recorded piano parameter changes: separate source waveform steps from synthesis reset spikes",async()=>{
+  const wav=await readFile(FIXTURE);
+  assert.equal(createHash("sha256").update(wav).digest("hex"),EXPECT_SHA);
+  const pcm=recordedPCM(wav);
+  const anchors=[70000,76000,82000,88000,94000,100000,106000,112000,118000];
+  const modes=["pitch+7.1234","freeze0","reverse-1"];
+  const observations=[];
+  for(const anchor of anchors){
+    for(const mode of modes){
+      const renderer=createSourcePCMRenderer({
+        sourceFrames:pcm.length,sourceSampleRate:RATE,outputSampleRate:RATE,
+        channelCount:1,startFrame:anchor,speed:1,loopEnabled:false
+      });
+      for(let at=0;at<pcm.length;at+=SOURCE_WINDOW_FRAMES)
+        renderer.installWindow(at,[pcm.slice(at,Math.min(pcm.length,at+SOURCE_WINDOW_FRAMES))]);
+      const grain=createGranularTimePitch({
+        sourceSampleRate:RATE,outputSampleRate:RATE,channelCount:1,
+        pitchSemitones:0
+      });
+      const tail=new Float32Array(128);
+      for(let i=0;i<24;i++)assert.equal(renderer.renderGranular([tail],grain),0);
+      const previous=tail[127],lastSource=anchor+24*128-1;
+      // Same source PCM, at exactly the true change boundary.
+      const unmodifiedSourceStep=Math.abs(pcm[lastSource+1]-pcm[lastSource]);
+      let preDerivative=0;
+      for(let i=1;i<tail.length;i++)
+        preDerivative=Math.max(preDerivative,Math.abs(tail[i]-tail[i-1]));
+      if(mode==="pitch+7.1234")grain.setPitch(7.1234);
+      else{
+        renderer.timeline.setSpeed(mode==="freeze0"?0:-1);
+        grain.reset();
+      }
+      // Observe the full next four grain hops, not only the first output
+      // sample: epoch-reset artifacts may occur AFTER the exact join point.
+      const next=new Float32Array(4096);
+      for(let off=0;off<next.length;off+=128){
+        const block=new Float32Array(128);
+        assert.equal(renderer.renderGranular([block],grain),0);
+        next.set(block,off);
+      }
+      assert.ok(next.every(Number.isFinite));
+      const postStep=Math.abs(next[0]-previous);
+      const excess=Math.max(0,postStep-unmodifiedSourceStep);
+      const changes=[];
+      for(let i=1;i<next.length;i++)
+        changes.push(Math.abs(next[i]-next[i-1]));
+      const ordered=changes.slice().sort((a,b)=>a-b);
+      const sourceWindow=pcm.subarray(lastSource-4096,lastSource+4096);
+      const sourceDerivative=maxStep(sourceWindow);
+      const grainJoins=[1024,2048,3072].map(i=>Math.abs(next[i]-next[i-1]));
+      observations.push({mode,anchor,
+        sourceStep:round(unmodifiedSourceStep),
+        preBlockMaxStep:round(preDerivative),
+        sourceLocalMaxStep:round(sourceDerivative),
+        afterResetStep:round(postStep),
+        addedStepAboveSource:round(excess),
+        excessVsSource:round(excess/Math.max(unmodifiedSourceStep,1e-5)),
+        postMaxStep:round(ordered.at(-1)),
+        postP99Step:round(ordered[Math.floor(ordered.length*.99)]),
+        grainHopSteps:grainJoins.map(round),
+        postStepOverSource:round(ordered.at(-1)/Math.max(sourceDerivative,1e-5)),
+        nextBlockRms:round(rms(next))
+      });
+    }
+  }
+  const summary=modes.map(mode=>{
+    const rows=observations.filter(x=>x.mode===mode);
+    const steps=rows.map(x=>x.afterResetStep).sort((a,b)=>a-b);
+    return {mode,count:rows.length,
+      maxStep:Math.max(...steps),
+      medianStep:steps[Math.floor(steps.length/2)],
+      maxSourceStep:Math.max(...rows.map(x=>x.sourceStep)),
+      maxExcessVsSource:Math.max(...rows.map(x=>x.excessVsSource)),
+      maxPostToSourceStepRatio:Math.max(...rows.map(x=>x.postStepOverSource)),
+      maxPostJoinStep:Math.max(...rows.flatMap(x=>x.grainHopSteps))
+    };
+  });
+  console.log("RECORDED_PARAMETER_CHANGE_CLICK_DIAGNOSTIC "+JSON.stringify({
+    source:"real CC0 Meta Piano A0",sha:EXPECT_SHA,
+    anchors,summary,observations,
+    interpretation:"Observed reset/sample join vs original source step; not subjective click proof or a prechosen arbitrary pass threshold"
+  }));
+});
