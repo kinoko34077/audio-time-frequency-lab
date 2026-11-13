@@ -67,7 +67,7 @@ export async function createSourcePCMBridge({
     }
   });
   // Do not copy entire track to the worklet; these small snapshots are moved.
-  let requestId=0,closed=false,latest=null;
+  let requestId=0,closed=false,latest=null,scratchCached=null;
   const pending=new Map();
   const rejectPending=error=>{
     for(const ticket of pending.values()){
@@ -181,6 +181,37 @@ export async function createSourcePCMBridge({
       catch(error){return Promise.reject(error);}
       return command("speed",{speed:currentSpeed});
     },
+    async scrub(frame,speed){
+      if(!Number.isSafeInteger(frame)||frame<0||frame>=frames)
+        throw RangeError("invalid scratch sample frame");
+      const wantedSpeed=validatePlaybackSpeed(speed);
+      if(closed)throw Error("PCM bridge disposed");
+      currentSpeed=wantedSpeed;
+      // No 64k-frame PCM copy for each pointermove. The first scratch
+      // positions the source cache, subsequent moves within that interval
+      // transmit just a frame+speed pair (tens of bytes).
+      const margin=4096;
+      const needsCache=!scratchCached||
+        frame<scratchCached.start+(scratchCached.start>0?margin:0)||
+        frame>=scratchCached.end-(scratchCached.end<frames?margin:0);
+      const send=()=>{
+        const {start,channels}=windowSlice(frame,wantedSpeed);
+        scratchCached={start,end:start+channels[0].length};
+        return submit({type:"scrub",op:"scrub",start,channels,
+          frame,speed:wantedSpeed},channels.map(c=>c.buffer));
+      };
+      if(needsCache)return send();
+      try{
+        return await submit({type:"scrub",op:"scrub",frame,speed:wantedSpeed});
+      }catch(error){
+        // The AudioWorklet cache can evict a former pointer window while
+        // honoring A/B pins or forward prefetch. Retry with an atomic window
+        // instead of treating a valid finger position as a fatal DSP error.
+        if(!/scratch source window missing/.test(error.message))throw error;
+        scratchCached=null;
+        return send();
+      }
+    },
     setPitch(next){
       if(processingMode!=="granular")
         return Promise.reject(Error("independent pitch requires granular mode"));
@@ -206,7 +237,7 @@ export async function createSourcePCMBridge({
     get processingMode(){return processingMode;},
     dispose(){
       if(closed)return;
-      closed=true;
+      scratchCached=null;closed=true;
       // Disconnecting a node is NOT a processor lifetime command. Explicitly
       // stop its render loop and release its WorkletGlobalScope PCM windows.
       node.port.postMessage({type:"dispose"});
