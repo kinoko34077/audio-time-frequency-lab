@@ -243,11 +243,17 @@ test("recorded piano source: 1..256-frame signed/zero loops distinguish source b
         assert.equal(missing,0,{span,speed,pitch,mode:"granular"});
         assert.equal(renderer.statistics.missingFrames,0);
         assert.ok(output.every(Number.isFinite),{span,speed,pitch});
-        const ordered=blockDurations.sort((x,y)=>x-y);
+        const startupMs=blockDurations[0];
+        const steady=blockDurations.slice(1).sort((x,y)=>x-y);
+        const ordered=blockDurations.slice().sort((x,y)=>x-y);
+        const budgetMs=block/RATE*1000;
         const stats=qualityStats(output);
         summaries.granular.push({span,speed,pitch,
           sourceBoundaryStep:naturalBoundary,
-          missing,renderP95Ms:round(ordered[Math.floor(ordered.length*.95)]),
+          missing,firstCallbackMs:round(startupMs),
+          subsequentP95Ms:round(steady[Math.floor(steady.length*.95)]),
+          overBudgetCallbacks:blockDurations.filter(ms=>ms>budgetMs).length,
+          renderP95Ms:round(ordered[Math.floor(ordered.length*.95)]),
           renderMaxMs:round(ordered.at(-1)),
           ...stats});
       }
