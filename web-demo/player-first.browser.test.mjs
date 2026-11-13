@@ -172,10 +172,36 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, swit
     // Move the waveform under the fixed head (as opposed to moving a head
     // over a static whole-song overview).
     const beforePan=Number(await page.$eval("#wave-detail",el=>el.getAttribute("aria-valuenow")));
+    // #63 U9/U10: observe REAL commands reaching the Worklet port during a
+    // held waveform gesture and after the finger is thrown and released.
+    await page.evaluate(()=>{
+      window.__scratchSpeeds=[];
+      const original=MessagePort.prototype.postMessage;
+      if(!MessagePort.prototype.__scratchObserved){
+        MessagePort.prototype.postMessage=function(data,...args){
+          if(data?.type==="command"&&data.op==="speed")
+            window.__scratchSpeeds?.push(data.speed);
+          return original.call(this,data,...args);
+        };
+        MessagePort.prototype.__scratchObserved=true;
+      }
+      const control=document.querySelector("#granular-speed-value");
+      control.value="1";control.dispatchEvent(new Event("change",{bubbles:true}));
+    });
     await page.mouse.move(editingWave.x+editingWave.width*.20,editingWave.y+editingWave.height*.65);
     await page.mouse.down();
+    await page.waitForFunction(()=>window.__scratchSpeeds?.includes(0),{timeout:8000});
     await page.mouse.move(editingWave.x+editingWave.width*.10,editingWave.y+editingWave.height*.65,{steps:8});
+    await page.waitForFunction(()=>window.__scratchSpeeds?.some(v=>v>1.5),{timeout:8000});
     await page.mouse.up();
+    await page.waitForFunction(()=>window.__scratchSpeeds?.length>=4&&
+      window.__scratchSpeeds.at(-1)===1,{timeout:10000});
+    const scratchSpeeds=await page.evaluate(()=>window.__scratchSpeeds);
+    assert.ok(scratchSpeeds.some(v=>v>1.5),scratchSpeeds);
+    assert.equal(scratchSpeeds.at(-1),1,
+      "kinetic throw must restore canonical playback speed");
+    assert.equal(await page.$eval("#granular-speed-value",el=>el.value),"1",
+      "scrub override must not rewrite the user's saved speed");
     await page.waitForFunction(prev=>Number(document.querySelector("#wave-detail")
       ?.getAttribute("aria-valuenow"))>prev,{timeout:15000},beforePan);
     assert.equal(await page.$eval("#rt-telemetry",el=>Number(el.dataset.pcmNodeStarts)),starts,
