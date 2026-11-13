@@ -167,9 +167,23 @@ test("recorded piano main player: gesture/parameter receipts AND actual output P
         return native.call(this,m,...args);
       };
     });
-    await page.mouse.move(box.x+box.width*.68,box.y+box.height*.73);
+    // A/B handles have their own pointer capture within 24px. Select a
+    // real pan position far from both handles, not one that drags an endpoint.
+    const panStart=await page.evaluate(()=>{
+      const canvas=document.querySelector("#wave-detail");
+      const r=canvas.getBoundingClientRect();
+      const bounds=["#wave-a-marker","#wave-b-marker"].map(selector=>{
+        const el=document.querySelector(selector);
+        return el?.hidden?null:el.getBoundingClientRect().left-r.left;
+      }).filter(x=>x!==null);
+      return [.20,.35,.50,.65,.80].map(fraction=>({
+        fraction,distance:Math.min(...bounds.map(x=>Math.abs(fraction*r.width-x)),r.width)
+      })).sort((a,b)=>b.distance-a.distance)[0].fraction;
+    });
+    await page.mouse.move(box.x+box.width*panStart,box.y+box.height*.73);
     await page.mouse.down();
-    await page.mouse.move(box.x+box.width*.42,box.y+box.height*.73,{steps:10});
+    await page.mouse.move(box.x+box.width*(panStart-.12),
+      box.y+box.height*.73,{steps:10});
     await page.mouse.up();
     await page.waitForFunction(()=>window.__scratchProtocol
       ?.some(x=>x.type==="scrub"&&x.speed>0),{timeout:10000});
