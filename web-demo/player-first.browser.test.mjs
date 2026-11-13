@@ -192,6 +192,12 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, swit
     await page.mouse.down();
     await page.waitForFunction(()=>window.__scratchSpeeds?.includes(0),{timeout:8000});
     await page.mouse.move(editingWave.x+editingWave.width*.10,editingWave.y+editingWave.height*.65,{steps:8});
+    console.log("U9_SCRUB_TRACE "+JSON.stringify(await page.evaluate(()=>({
+      speeds:window.__scratchSpeeds,gesture:document.querySelector(".wave-detail-wrap")?.dataset.interaction,
+      center:document.querySelector("#wave-detail")?.getAttribute("aria-valuenow"),
+      span:document.querySelector("#wave-zoom-label")?.textContent,
+      appliedSpeed:document.querySelector("#granular-optin-status")?.textContent
+    }))));
     await page.waitForFunction(()=>window.__scratchSpeeds?.some(v=>v>1.5),{timeout:8000});
     await page.mouse.up();
     await page.waitForFunction(()=>window.__scratchSpeeds?.length>=4&&
