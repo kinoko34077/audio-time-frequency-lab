@@ -361,3 +361,157 @@ test("recorded piano parameter changes: separate source waveform steps from synt
     interpretation:"Observed reset/sample join vs original source step; not subjective click proof or a prechosen arbitrary pass threshold"
   }));
 });
+
+
+/* #36 R2/R3 — same REAL recorded CC0 piano, matched reference and render.
+ * This is a bounded diagnostic, not an arbitrary perceptual 'pass' score.
+ * Each source harmonic is measured at its ACTUAL recorded frequency first:
+ * physical piano strings are not guaranteed to have exactly 27.500 Hz
+ * fundamental or perfectly harmonic partials. Only then compare pitch ratios.
+ */
+test("recorded piano independently measures cent shift, harmonic energy and attack-envelope displacement",async()=>{
+  const wav=await readFile(FIXTURE);
+  assert.equal(createHash("sha256").update(wav).digest("hex"),EXPECT_SHA);
+  const pcm=recordedPCM(wav);
+  const warm=2048,analysisFrames=16384,outFrames=warm+analysisFrames;
+  const anchorForward=85000,anchorBackward=115000;
+  const analysisWindow=new Float64Array(analysisFrames);
+  for(let i=0;i<analysisFrames;i++)
+    analysisWindow[i]=.5-.5*Math.cos(2*Math.PI*i/(analysisFrames-1));
+  const windowSum=analysisWindow.reduce((a,b)=>a+b,0);
+  function goertzelAmplitude(input,hz){
+    const omega=2*Math.PI*hz/RATE,coef=2*Math.cos(omega);
+    let a=0,b=0;
+    for(let i=0;i<input.length;i++){
+      const next=input[i]*analysisWindow[i]+coef*a-b;
+      b=a;a=next;
+    }
+    return 2*Math.sqrt(Math.max(0,a*a+b*b-coef*a*b))/windowSum;
+  }
+  function bandPeak(signal,near,range=.1){
+    const lo=near*(1-range),hi=near*(1+range);
+    const steps=Math.ceil((hi-lo)/.2);
+    let best={hz:lo,amplitude:-Infinity};
+    for(let i=0;i<=steps;i++){
+      const hz=lo+(hi-lo)*i/steps;
+      const amplitude=goertzelAmplitude(signal,hz);
+      if(amplitude>best.amplitude)best={hz,amplitude};
+    }
+    return best;
+  }
+  function renderLong(startFrame,speed,pitch,length=outFrames){
+    const renderer=createSourcePCMRenderer({
+      sourceFrames:pcm.length,sourceSampleRate:RATE,outputSampleRate:RATE,
+      channelCount:1,startFrame,speed,
+      loopEnabled:false
+    });
+    for(let at=0;at<pcm.length;at+=SOURCE_WINDOW_FRAMES)
+      renderer.installWindow(at,[pcm.slice(at,Math.min(pcm.length,at+SOURCE_WINDOW_FRAMES))]);
+    const granular=createGranularTimePitch({
+      sourceSampleRate:RATE,outputSampleRate:RATE,channelCount:1,
+      pitchSemitones:pitch
+    });
+    const result=new Float32Array(length);
+    for(let at=0;at<length;at+=BLOCK){
+      const block=[new Float32Array(Math.min(BLOCK,length-at))];
+      const missing=renderer.renderGranular(block,granular);
+      assert.equal(missing,0,{startFrame,speed,pitch,at});
+      result.set(block[0],at);
+    }
+    assert.equal(renderer.statistics.missingFrames,0);
+    assert.ok(result.every(Number.isFinite));
+    return result;
+  }
+  // The A0 recording has inharmonic partials and a nonstationary envelope.
+  // Measure all partial peaks on the matching original time region; do not
+  // treat the dominant second/third partial as the literal fundamental.
+  const sourceRef=pcm.subarray(anchorForward+warm,
+    anchorForward+warm+analysisFrames);
+  const sourcePeaks=[2,3,4,5].map(k=>{
+    const peak=bandPeak(sourceRef,27.5*k,.10);
+    return {harmonic:k,hz:peak.hz,amplitude:peak.amplitude};
+  });
+  const cases=[],modes=[{speed:1,startFrame:anchorForward},
+    {speed:.5,startFrame:anchorForward},
+    {speed:-1,startFrame:anchorBackward}];
+  for(const {speed,startFrame} of modes){
+    for(const pitch of [0,7.1234,-5]){
+      const output=renderLong(startFrame,speed,pitch);
+      if(speed===1&&pitch===0||speed===-1&&pitch===0){
+        // Neutral reverse/forward remains a separate exact sample contract.
+        let error=0;
+        for(let i=warm;i<outFrames;i++)
+          error=Math.max(error,Math.abs(output[i]-pcm[startFrame+i*speed]));
+        assert.ok(error<1e-5,{speed,pitch,error});
+      }
+      const segment=output.subarray(warm);
+      const relativeRms=rms(segment)/rms(sourceRef);
+      assert.ok(relativeRms>.05&&relativeRms<20,{speed,pitch,relativeRms});
+      const factor=2**(pitch/12);
+      const harmonics=sourcePeaks.map(({harmonic,hz,amplitude})=>{
+        const peak=bandPeak(segment,hz*factor,.12);
+        return {harmonic,
+          sourceHz:round(hz),outputHz:round(peak.hz),
+          sourceAmplitude:round(amplitude),
+          outputAmplitude:round(peak.amplitude),
+          observedShiftCents:round(1200*Math.log2(peak.hz/hz)),
+          shiftErrorCents:round(1200*Math.log2(peak.hz/(hz*factor))),
+          normalizedHarmonicDb:round(20*Math.log10(
+            Math.max(peak.amplitude/rms(segment),1e-12)/
+            Math.max(amplitude/rms(sourceRef),1e-12)))
+        };
+      });
+      const weightedError=harmonics.reduce((sum,h)=>
+        sum+Math.abs(h.shiftErrorCents)*Math.max(h.sourceAmplitude,1e-6),0)/
+        harmonics.reduce((sum,h)=>sum+Math.max(h.sourceAmplitude,1e-6),0);
+      cases.push({speed,pitch,sourceFrame:startFrame,
+        outputRms:round(rms(segment)),relativeRms:round(relativeRms),
+        weightedAbsoluteCentError:round(weightedError),
+        harmonics});
+    }
+  }
+  // Find the largest real positive 512-frame RMS jump (recorded attack)
+  // instead of inventing a synthetic click or assuming onset at time zero.
+  const envelope=[];
+  for(let i=0;i+512<=pcm.length;i+=512)
+    envelope.push(rms(pcm.subarray(i,i+512)));
+  let attackBin=-1,best=0;
+  for(let i=2;i<envelope.length-5;i++){
+    const increase=envelope[i]-envelope[i-1];
+    if(increase>best&&envelope[i]>.002){best=increase;attackBin=i;}
+  }
+  assert.ok(attackBin>=3&&best>.001,
+    "real recording must have a measurable transient");
+  const onsetFrame=attackBin*512;
+  const transientStart=onsetFrame-2048;
+  const base=pcm.subarray(transientStart,transientStart+8192);
+  const blockRms=(x,offset,count)=>rms(x.subarray(offset,offset+count));
+  const attacks=[];
+  for(const pitch of [0,7.1234,-5]){
+    const output=renderLong(transientStart,1,pitch,8192);
+    const sourcePre=blockRms(base,1024,1024),
+      sourcePost=blockRms(base,2048,1024);
+    const processedPre=blockRms(output,1024,1024),
+      processedPost=blockRms(output,2048,1024);
+    attacks.push({pitch,
+      sourcePrePostRatio:round(sourcePre/Math.max(sourcePost,1e-9)),
+      outputPrePostRatio:round(processedPre/Math.max(processedPost,1e-9)),
+      beforeRms:round(processedPre),afterRms:round(processedPost),
+      attackContrastDb:round(20*Math.log10(
+        Math.max(processedPost/Math.max(processedPre,1e-9),1e-12))),
+      sourceAttackContrastDb:round(20*Math.log10(
+        Math.max(sourcePost/Math.max(sourcePre,1e-9),1e-12)))
+    });
+  }
+  console.log("R2_REAL_PIANO_SPECTRAL_TRANSIENT_AUDIT "+JSON.stringify({
+    fixtureSha:EXPECT_SHA,source:"CC0 Meta Piano A0 real recording",
+    referenceWindow:[anchorForward+warm,anchorForward+outFrames],
+    referencePeaks:sourcePeaks.map(p=>({harmonic:p.harmonic,hz:round(p.hz),
+      amplitude:round(p.amplitude)})),
+    sourceRms:round(rms(sourceRef)),
+    cases,attack:{frame:onsetFrame,positiveRmsJump:round(best),
+      sourcePrevBinRms:round(envelope[attackBin-1]),
+      sourceAttackBinRms:round(envelope[attackBin]),cases:attacks},
+    limitations:"One real mono piano A0; individual spectral peaks may be modulation sidebands, not proof of true F0; cent and harmonic measurements are relative to the actual recording; transient measures describe envelope changes but not calibrated subjective quality. Audio path is existing renderer, not browser DAC."
+  }));
+});
