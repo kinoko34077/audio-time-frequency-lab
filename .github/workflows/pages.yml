@@ -64,6 +64,16 @@ jobs:
       - name: Native Chrome recorded CC0 upright piano file-to-R3 Worklet (real recording)
         run: |
           node --test web-demo/source-recorded-player.browser.test.mjs
+      - name: Fetch complete CC0 stereo orchestral music (test-only, not published)
+        run: |
+          set -euo pipefail
+          curl --fail --location --silent --show-error --retry 3 --retry-delay 3 --connect-timeout 20 --max-time 180             --user-agent 'Mozilla/5.0'             'https://opengameart.org/sites/default/files/determined_pursuit_loop.wav'             --output web-demo/test-fixtures/determined-pursuit-cc0-full-stereo.wav
+          test "$(stat -c%s web-demo/test-fixtures/determined-pursuit-cc0-full-stereo.wav)" -gt 4000000
+          sha256sum web-demo/test-fixtures/determined-pursuit-cc0-full-stereo.wav
+          file web-demo/test-fixtures/determined-pursuit-cc0-full-stereo.wav
+      - name: Native Chrome COMPLETE real stereo orchestral song, musical sections, L-R fidelity and mobile player (R2)
+        run: |
+          node --test web-demo/source-stereo-music.browser.test.mjs
       - name: Native Chrome realtime graph capacity and recorded ultrashort output PCM (R2)
         run: |
           node --test web-demo/source-recorded-worklet-capacity.browser.test.mjs
