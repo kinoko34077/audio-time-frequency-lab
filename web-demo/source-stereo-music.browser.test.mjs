@@ -13,6 +13,7 @@ import puppeteer from "puppeteer-core";
 // must never include the copyrighted/CC0 musical fixture in public Pages.
 const FILE=path.resolve("web-demo/test-fixtures/determined-pursuit-cc0-full-stereo.wav");
 const NAME="determined-pursuit-cc0-full-stereo.wav";
+const PINNED_SHA="e4f3be098b50213b56a60aefe60fffae79cd9f7c9008088f93c187ef1bbc856b";
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const round=x=>Number(x.toFixed(6));
 
@@ -24,8 +25,8 @@ test("full real CC0 stereo orchestral song: three musical sections, L/R output, 
   const sha=createHash("sha256").update(data).digest("hex");
   // SHA becomes hard-pinned after the first successful original-source
   // acquisition. Until then this is exploratory, not accepted provenance.
-  const expected=process.env.STEREO_SONG_SHA256;
-  if(expected)assert.equal(sha,expected,"musical fixture source SHA changed");
+  assert.equal(sha,PINNED_SHA,
+    "original complete CC0 orchestral music source has changed; do not substitute it");
   const fixtureSize=(await stat(FILE)).size;
   const sourceServer=spawn("python3",["-m","http.server","18827","--bind","127.0.0.1"],{
     cwd:path.resolve("web-demo"),stdio:"ignore"
@@ -125,6 +126,14 @@ test("full real CC0 stereo orchestral song: three musical sections, L/R output, 
     },sha);
     assert.equal(source.channels,2);
     assert.ok(source.anchors.every(x=>x.rmsL>.002&&x.rmsR>.002));
+    console.log("R2_FULL_STEREO_SOURCE_METADATA "+JSON.stringify({
+      sha256:sha,bytes:fixtureSize,channels:source.channels,
+      durationSeconds:round(source.duration),sampleRate:source.sampleRate,
+      sourceRegions:source.anchors.map(x=>({
+        frame:x.at,rmsL:round(x.rmsL),rmsR:round(x.rmsR),
+        sideMid:round(x.sideMid),correlation:round(x.correlation)
+      }))
+    }));
     const observations=[];
     const variants=[
       {mode:"raw",speed:1,pitch:0},
@@ -161,6 +170,7 @@ test("full real CC0 stereo orchestral song: three musical sections, L/R output, 
         const result=await page.evaluate(async ({variant,region})=>{
           const s=window.__music,b=s.bridge;
           const anchor=s.anchors[region].at;
+          const evtFrom=s.events.length;
           await b.setSpeed(variant.speed);
           if(variant.mode==="granular")await b.setPitch(variant.pitch);
           await b.seek(anchor);
@@ -168,7 +178,6 @@ test("full real CC0 stereo orchestral song: three musical sections, L/R output, 
           // before observing the true post-render stereo graph.
           await new Promise(resolve=>setTimeout(resolve,95));
           const missing0=b.latest?.missingFrames??0;
-          const evtFrom=s.events.length;
           await s.measure("arm",2048);
           await new Promise(resolve=>setTimeout(resolve,85));
           const stats=await s.measure("snapshot");
