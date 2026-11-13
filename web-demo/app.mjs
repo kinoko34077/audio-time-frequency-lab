@@ -805,7 +805,8 @@ function playheadFromPointer(e,startIfStopped=true,scrub=false){
   if(state.player){
     // Detailed and overview gestures own a single atomic scratch cursor+
     // speed transaction. Do not send an extra reset-heavy seek-window.
-    if(!scrub&&!state.player.initializing)seek(state.seek);
+    if((!scrub||!state.player.rawPCM||!state.player.granular||
+        state.player.paused)&&!state.player.initializing)seek(state.seek);
   }else if(startIfStopped){
     const launchAt=state.seek;
     void play(preferredWaveMode(),launchAt)
@@ -826,7 +827,9 @@ const waveSurface=$("#wave");
 waveSurface.addEventListener("pointerdown",e=>{
   if(!state.dry||(e.pointerType==="mouse"&&e.button!==0))return;
   if(activeWavePointer!==null)return;
-  if((GRANULAR_EXPERIMENT||mainTab()==="player")&&e.isTrusted){
+  if((GRANULAR_EXPERIMENT||mainTab()==="player")&&e.isTrusted&&
+     (!state.player||(state.player.rawPCM&&state.player.granular))){
+    // Native model/dry engines retain the original seek contract.
     cancelTemporaryScrub();
     activeWavePointer=e.pointerId;
     const frame=waveFrameFromPointer(e),now=performance.now();
@@ -909,7 +912,9 @@ detailWaveEditor=createPlayerWaveEditor({
     state.seek=clamp(seconds,0,Math.max(0,duration()-1/state.decoded.sampleRate));
     // Scratch already sends cursor+velocity atomically to the Worklet.
     // The old extra seek-window here reset grains on every pointermove.
-    if(!scrub&&state.player&&!state.player.initializing)seek(state.seek);
+    if(state.player&&!state.player.initializing&&
+       (!scrub||!state.player.rawPCM||!state.player.granular||
+        state.player.paused))seek(state.seek);
     else refreshStatusSeek();
   },
   onAB:(edge,frame)=>{
