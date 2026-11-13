@@ -219,10 +219,10 @@ export function createPlayerWaveEditor({
       onPosition(next/rate,{start:false});
     }else{
       const pointerFrame=clamp(Math.round(center()+(pos(e)/canvas.clientWidth-.5)*spanFrames),0,frames);
-      const {a,b}=onAB();
-      const frame=gesture.type==="a"?Math.min(pointerFrame,b-1):
-        Math.max(pointerFrame,a+1);
-      onAB(gesture.type,frame);
+      // The shared A/B owner reconciles crossed handles atomically.
+      // Do not pin A to old B-1 (or B to old A+1): dragging the user's
+      // chosen handle beyond its peer must move that peer automatically.
+      onAB(gesture.type,pointerFrame);
     }
     refresh(true);e.preventDefault();
   });
