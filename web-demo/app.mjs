@@ -670,6 +670,9 @@ function playPosition(){
   if(!state.player||!state.ctx||!duration())return state.seek;
   if(state.player.labStream)return state.player.stream.sourcePositionAt(state.ctx.currentTime);
   if(state.player.rawPCM){
+    // The command-acknowledged paused source position is canonical. A stale
+    // asynchronous progress event must not drag the fixed playhead backward.
+    if(state.player.paused)return state.seek;
     const progress=state.player.pcmBridge.latest;
     // Worklet render receipts can arrive before its next 8-quantum progress
     // event. Never repaint the head at an OLD progress frame after a precise
@@ -917,7 +920,7 @@ function seek(seconds){
   const rightEdge=p?.rawPCM&&state.decoded?
     duration()-1/state.decoded.sampleRate:duration()-.001;
   const where=clamp(seconds,0,Math.max(0,rightEdge));
-  state.seek=where;mediaStatus(Boolean(p));
+  state.seek=where;mediaStatus(Boolean(p&&!p.paused));
   if(!p)return;
   if(p.labStream){void stop().then(()=>play("wet",where));return;}
   if(p.rawPCM){
@@ -934,6 +937,42 @@ function seek(seconds){
   p.master.gain.setTargetAtTime(1,now+.040,.02);
   message("波形位置 "+fmtTime(where)+" から再生します。","info");
 }
+// Reuse the existing persistent PCM Worklet rather than stopping/rebuilding
+// the main player on every play/pause. This is user-facing transport, not an
+// audio-quality investigation or a new DSP implementation.
+async function setMainPlayerPaused(paused){
+  const p=state.player;
+  if(!p?.rawPCM||p.mode!=="player"||p.initializing||
+     p.pauseBusy||Boolean(p.paused)===paused)return;
+  const epoch=state.transportEpoch;
+  p.pauseBusy=true;
+  controls.main.disabled=true;
+  try{
+    const receipt=paused?await p.pcmBridge.pause():await p.pcmBridge.play();
+    if(state.player!==p||state.transportEpoch!==epoch)return;
+    p.paused=paused;
+    if(paused&&Number.isFinite(receipt.sourceFrame))
+      state.seek=clamp(receipt.sourceFrame/state.decoded.sampleRate,0,duration());
+    controls.main.textContent=paused?"▶ 再開":"⏸ 一時停止";
+    controls.main.setAttribute("aria-label",paused?"同じ位置から再生を再開":"再生を一時停止");
+    mediaStatus(!paused);
+    indicator(paused?"一時停止中 · 再生位置と設定を保持":"再生中 · 速度/音程・区間を保持");
+    refreshStatusSeek();
+  }catch(error){
+    if(state.player===p&&state.transportEpoch===epoch)
+      message("再生/一時停止の切替失敗: "+error.message,"error");
+  }finally{
+    p.pauseBusy=false;
+    if(state.player===p&&state.transportEpoch===epoch)
+      controls.main.disabled=false;
+  }
+}
+function toggleMainPlayer(){
+  const p=state.player;
+  if(p?.rawPCM&&p.mode==="player")
+    return setMainPlayerPaused(!Boolean(p.paused));
+  return play("player");
+}
 function mediaStatus(playing){
   const session=navigator.mediaSession;
   if(!session)return;
@@ -946,8 +985,10 @@ function installMediaControls(){
   const session=navigator.mediaSession;
   if(!session?.setActionHandler)return;
   for(const [name,fn] of [
-    ["play",()=>play(state.player?.mode||"wet",state.seek)],
-    ["pause",()=>stop()],
+    ["play",()=>state.player?.rawPCM&&state.player.mode==="player"
+      ?setMainPlayerPaused(false):play(state.player?.mode||"wet",state.seek)],
+    ["pause",()=>state.player?.rawPCM&&state.player.mode==="player"
+      ?setMainPlayerPaused(true):stop()],
     ["stop",()=>stop()],
     ["seekto",event=>seek(event.seekTime||0)]
   ])try{session.setActionHandler(name,fn);}catch{}
@@ -997,6 +1038,8 @@ async function stop(){
   // Fence any pending async AudioContext/WASM/Worklet launch. A successful
   // file replacement and explicit stop must never be undone by an old click.
   state.transportEpoch++;
+  controls.main.textContent="▶ 再生";
+  controls.main.setAttribute("aria-label","再生");
   activeWavePointer=null;
   if(state.rebuildTimer){clearTimeout(state.rebuildTimer);state.rebuildTimer=null;}
   const p=state.player;
@@ -1174,7 +1217,7 @@ async function play(mode="wet",offset=null){
       const player={rawPCM:true,directDry:true,pcmBridge:bridge,mode,granular:granularActive,
         labRealtime:false,labProcessed:false,master,directRoute,bridgeRoute:null,
         outputRoute:"direct",offset:at,at:ctx.currentTime,
-        initializing:granularActive};
+        paused:false,pauseBusy:false,initializing:granularActive};
       state.player=player;
       if(granularActive){
         // Assign ownership first: later edits now go straight to this bridge.
@@ -1228,6 +1271,8 @@ async function play(mode="wet",offset=null){
       if(granularActive&&state.seek!==initializedAt)seek(state.seek);
       mediaStatus(true);void mediaBridge(player);
       controls.stop.disabled=false;
+      controls.main.textContent=mode==="player"?"⏸ 一時停止":"▶ 再生";
+      controls.main.setAttribute("aria-label",mode==="player"?"再生を一時停止":"再生");
       controls.main.disabled=false;
       const telemetry=$("#rt-telemetry");
       telemetry.dataset.pcmTransport=granularActive?"granular-experimental":"raw-experimental";
@@ -1698,7 +1743,7 @@ for(const id of ["crusher-enabled","crusher-bits","crusher-hold"]){
   });
 }
 
-controls.main.addEventListener("click",()=>play("player"));
+controls.main.addEventListener("click",()=>void toggleMainPlayer());
 controls.dry.addEventListener("click",()=>play("dry"));
 controls.wet.addEventListener("click",()=>play("wet"));
 controls.stop.addEventListener("click",()=>stop());
