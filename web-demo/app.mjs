@@ -804,6 +804,7 @@ function waveHoverSample(owner,sourceFrame){
   // Never silently switch a selected Rust/Worker/Dry engine, or unpause after
   // the user explicitly paused playback.
   if(!state.dry||activeWavePointer!==null||detailWaveScrubbing||
+     (!state.player&&mainTab()!=="player")||
      (state.player&&(!state.player.rawPCM||!state.player.granular||
        state.player.paused)))return false;
   if(!state.player&&navigator.userActivation &&
@@ -885,7 +886,7 @@ waveSurface.addEventListener("pointerdown",e=>{
     // A deliberate press takes ownership from hover; no hover-leave easing
     // may race with this finger/mouse drag's first 0× hold.
     waveHoverEnd("overview",false);
-    cancelTemporaryScrub();
+    cancelTemporaryScrub(false);
     activeWavePointer=e.pointerId;
     const frame=waveFrameFromPointer(e),now=performance.now();
     overviewGesture={frame,lastFrame:frame,lastTime:now,lastMovedAt:-Infinity,
