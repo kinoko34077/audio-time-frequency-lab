@@ -33,18 +33,19 @@ try:
         page.locator('html[data-fw-boot=ready]').wait_for(timeout=15000)
         page.locator('#audio-file').set_input_files(path)
         page.get_by_text('読み込み完了。再生できます。',exact=False).wait_for(timeout=25000)
-        # R4: existing models are in the explicit model tab, not the
-        # default playback-first workspace.
+        # The player owns the only editable speed/pitch controls. Select
+        # models in their dedicated tab, without duplicate field proxies.
+        assert page.locator("#lab-speed,#lab-pitch").count()==0
+        page.locator('#granular-speed-value').evaluate("(e)=>{e.value='0.5';e.dispatchEvent(new Event('change',{bubbles:true}));}")
+        page.locator('#granular-pitch-value').evaluate("(e)=>{e.value='3';e.dispatchEvent(new Event('change',{bubbles:true}));}")
         page.locator('#main-tab-model').click()
         assert page.locator('#audio-lab').is_visible()
-        page.locator('#lab-speed').evaluate("(e)=>{e.value='0.5';e.dispatchEvent(new Event('change',{bubbles:true}));}")
-        page.locator('#lab-pitch').evaluate("(e)=>{e.value='3';e.dispatchEvent(new Event('change',{bubbles:true}));}")
         page.locator('#lab-short').evaluate("(e)=>{e.value='8';e.dispatchEvent(new Event('change',{bubbles:true}));}")
         page.locator('#lab-long').evaluate("(e)=>{e.value='10';e.dispatchEvent(new Event('change',{bubbles:true}));}")
         page.locator('#lab-windows').evaluate("(e)=>{e.value='2';e.dispatchEvent(new Event('change',{bubbles:true}));}")
         for model in ('pv','wsola','dual','am'):
             page.locator('#lab-model').select_option(model)
-            page.locator('#play-wet').click()
+            page.locator('#play-main').click()
             try:
                 page.locator('#rt-indicator').get_by_text('モデル再生中',exact=False).wait_for(timeout=25000)
             except Exception as err:
@@ -61,7 +62,11 @@ try:
             # Seek directly to mid-song; replacement preview must start at
             # the requested source timeline without waiting for full render.
             if model=='wsola':
+                # A single waveform remains on the player tab; model playback
+                # continues across tab navigation, and seek uses that one view.
+                page.locator('#main-tab-player').click()
                 page.locator('#wave').evaluate("(el)=>{const r=el.getBoundingClientRect();el.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,clientX:r.left+r.width*.67,clientY:r.top+20}));}")
+                page.locator('#main-tab-model').click()
                 page.locator('#rt-indicator').get_by_text('モデル再生中',exact=False).wait_for(timeout=25000)
             page.locator('#stop').click()
             print('PASS long-track automatic bounded model:',model,flush=True)
