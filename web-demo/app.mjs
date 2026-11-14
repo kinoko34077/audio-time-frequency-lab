@@ -291,11 +291,11 @@ if(PLAYER_GRANULAR_AVAILABLE){
 // surfaces without re-registering listeners or duplicating player state.
 const playerActionsSlot=$("#player-actions-slot");
 const modelTransportHost=$("#model-transport-host");
-const sharedActions=playerActionsSlot.querySelector(".actions");
+const sharedTransport=playerActionsSlot.querySelector("#shared-transport");
 function selectWorkspaceTab(target){
   if(target!=="player"&&target!=="model")return;
   document.body.dataset.mainTab=target;
-  (target==="model"?modelTransportHost:playerActionsSlot).appendChild(sharedActions);
+  (target==="model"?modelTransportHost:playerActionsSlot).appendChild(sharedTransport);
   if(target==="model")$("#model-audio-note").textContent=state.dry?
     state.fileMeta:"音源は「再生」タブで選択してください。";
   for(const mode of ["player","model"]){
