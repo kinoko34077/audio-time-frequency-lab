@@ -29,6 +29,13 @@ test('full Chrome: inherited Rust AudioWorklet live independent speed/pitch UI',
   assert.equal(await page.$eval('body',e=>e.dataset.mainTab),'model');
   await (await page.$('#audio-file')).uploadFile(audioFile);
   await page.waitForFunction(()=>!document.querySelector('#play-wet').disabled,{timeout:20000});
+  // Granular is now the explicit main default. Enter an FFT model before
+  // exercising the research-only individual-wave controls.
+  await page.$eval('#lab-model',el=>{
+    el.value='pv';el.dispatchEvent(new Event('change',{bubbles:true}));
+  });
+  await page.waitForFunction(()=>document.querySelector('#lab-model').value==='pv'&&
+    !document.querySelector('#lab-individual-periods').disabled,{timeout:10000});
   // Native Chrome UI contract: opt-in controls a real slider; log2 positions
   // select half through 32 cycles and switching OFF restores legacy mode.
   assert.equal(await page.$eval('#lab-period-cycles-field',e=>e.hidden),true);
