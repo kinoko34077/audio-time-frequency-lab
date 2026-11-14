@@ -4,6 +4,7 @@ import {createModelStream} from "./lab-stream.mjs";
 import {createSourcePCMBridge} from "./source-pcm-bridge.mjs";
 import {returnToPlaySpeed,scrubSpeed,releaseScrubSpeed} from "./scrub-kinetics.mjs";
 import {createPlayerWaveEditor} from "./player-wave-editor.mjs";
+import {primaryModelCapability} from "./model-route.mjs";
 import {validatePlaybackSpeed,validateSpeedRailRange,speedOnRail,formatPlaybackSpeed} from "./source-timeline.mjs";
 import {frequencyFromSlider,sliderFromFrequency,holdFromFrequency,drawCrusherPreview} from "./crusher-visual.mjs";
 import {drawFrequencyGraph} from "./graph.mjs";
@@ -42,7 +43,8 @@ function mainTab(){
   return document.body.dataset.mainTab==="model"?"model":"player";
 }
 function preferredWaveMode(){
-  return mainTab()==="player"?"player":GRANULAR_EXPERIMENT?"dry":"wet";
+  return mainTab()==="player"?(lab.mode==="granular"?"player":"wet"):
+    GRANULAR_EXPERIMENT?"dry":"wet";
 }
 let graphMax=2000;
 let graphAlphaBeforeZoom=0;
@@ -59,8 +61,9 @@ const state={
   precise:Object.create(null),
   effective:{low:20,high:16000},raf:0,lastStats:null,mathCore:null,wasmPromise:null,rebuildTimer:null,sine:null,loadToken:0,transportEpoch:0
 };
-const lab={mode:"live",speed:1,semitones:0,fftSize:2048,shortFftSize:512,longFftSize:2048,referenceWindows:8,periodCycles:8,individual:false,processed:null,worker:null,job:0};
-const labReady=()=>lab.mode!=="live"&&lab.processed?.model===lab.mode&&lab.processed?.speed===lab.speed&&lab.processed?.semitones===lab.semitones;
+const lab={mode:"granular",speed:1,semitones:0,fftSize:2048,shortFftSize:512,longFftSize:2048,referenceWindows:8,periodCycles:8,individual:false,processed:null,worker:null,job:0};
+const labReady=()=>!["live","granular"].includes(lab.mode)&&
+  lab.processed?.model===lab.mode&&lab.processed?.speed===lab.speed&&lab.processed?.semitones===lab.semitones;
 
 // Continuous log bands around 20 Hz: 0..200 resolves 0.001..20 Hz,
 // 200..1000 resolves 20..20,000 Hz. Exact typed values remain independent.
@@ -146,6 +149,15 @@ function refreshGranular(){
   $("#granular-range").value=String(granular.railMax);
   $("#granular-rail-note").textContent=Math.abs(granular.speed)>granular.railMax?
     "指定速度はレール外です。直接入力した数値は保持されています。":"";
+  // The research-model tab is a second VIEW of these same user values,
+  // never an independent speed/pitch state that disagrees with main audio.
+  const ls=$("#lab-speed"),lp=$("#lab-pitch");
+  if(ls&&document.activeElement!==ls)ls.value=String(granular.speed);
+  if(lp&&document.activeElement!==lp)lp.value=String(granular.pitch);
+  if($("#lab-speed-output"))
+    $("#lab-speed-output").textContent=formatPlaybackSpeed(granular.speed)+"×";
+  if($("#lab-pitch-output"))
+    $("#lab-pitch-output").textContent=String(granular.pitch)+" 半音";
 }
 // All waveform-scrub commands share one queue: an old seek must NEVER apply
 // after the gesture's newest speed or after its kinetic release.
@@ -222,7 +234,7 @@ function waveformScrubMotion(speed,phase,sourceFrame=null){
   };
   scrubMotionFrame=requestAnimationFrame(frame);
 }
-function editGranular(kind,raw){
+function editGranular(kind,raw,fromModelTab=false){
   const input=$("#granular-"+kind+"-value");
   if(!String(raw).trim()){
     input.setCustomValidity("値を入力してください");input.reportValidity();return;
@@ -240,7 +252,11 @@ function editGranular(kind,raw){
   granular[kind]=value;refreshGranular();
   const bridge=state.player?.pcmBridge,status=$("#granular-optin-status");
   if(!bridge||bridge.processingMode!=="granular"){
-    status.textContent="設定保持中。次の実験再生時に適用します。";return;
+    status.textContent="設定保持中。現在の選択モデルで適用するには再生状態を確認してください。";
+    // Main-tab edits also drive the actually selected non-Granular model.
+    if(!fromModelTab&&state.player?.mode==="wet")
+      void labSettingsChanged();
+    return;
   }
   if(kind==="speed"&&temporaryScrubSpeed!==null){
     status.textContent="設定速度を保持しました。スクラブ終了後に反映します。";return;
@@ -804,6 +820,7 @@ function waveHoverSample(owner,sourceFrame){
   // Never silently switch a selected Rust/Worker/Dry engine, or unpause after
   // the user explicitly paused playback.
   if(!state.dry||activeWavePointer!==null||detailWaveScrubbing||
+     lab.mode!=="granular"||
      (!state.player&&mainTab()!=="player")||
      (state.player&&(!state.player.rawPCM||!state.player.granular||
        state.player.paused)))return false;
@@ -881,7 +898,7 @@ const waveSurface=$("#wave");
 waveSurface.addEventListener("pointerdown",e=>{
   if(!state.dry||(e.pointerType==="mouse"&&e.button!==0))return;
   if(activeWavePointer!==null)return;
-  if((GRANULAR_EXPERIMENT||mainTab()==="player")&&e.isTrusted&&
+  if((GRANULAR_EXPERIMENT||mainTab()==="player"&&lab.mode==="granular")&&e.isTrusted&&
      (!state.player||(state.player.rawPCM&&state.player.granular))){
     // A deliberate press takes ownership from hover; no hover-leave easing
     // may race with this finger/mouse drag's first 0× hold.
@@ -974,7 +991,8 @@ detailWaveEditor=createPlayerWaveEditor({
   },
   onStart:()=>{
     if(!state.dry||state.player)return;
-    void play("player",state.seek).catch(error=>message("スクラブ再生失敗: "+error.message,"error"));
+    void play(preferredWaveMode(),state.seek)
+      .catch(error=>message("スクラブ再生失敗: "+error.message,"error"));
   },
   onPosition:(seconds,{scrub=false}={})=>{
     if(!state.dry)return;
@@ -1177,10 +1195,14 @@ async function setMainPlayerPaused(paused){
   }
 }
 function toggleMainPlayer(){
-  const p=state.player;
-  if(p?.rawPCM&&p.mode==="player")
+  const p=state.player,mode=lab.mode==="granular"?"player":"wet";
+  if(p?.rawPCM&&p.mode==="player"&&mode==="player")
     return setMainPlayerPaused(!Boolean(p.paused));
-  return play("player");
+  // The chunked model stream and the legacy Rust graph have no in-place
+  // pause equivalent. Main toolbar explicitly stops rather than pretending
+  // to pause/resume one of those DSPs.
+  if(p&&p.mode==="wet"&&mode==="wet")return stop();
+  return play(mode);
 }
 function mediaStatus(playing){
   const session=navigator.mediaSession;
@@ -1293,6 +1315,12 @@ async function stop(){
 }
 async function play(mode="wet",offset=null){
   if(!state.dry)return;
+  if(mode==="wet"&&lab.mode==="granular")return play("player",offset);
+  if(mode==="wet"&&!primaryModelCapability(lab.mode,granular.speed).supported){
+    const note=primaryModelCapability(lab.mode,granular.speed).reason;
+    labStatusText(note);
+    message("選択モデルで再生できません: "+note,"error");return;
+  }
   if(lab.mode!=="live"&&mode==="wet")return startModelPlayback(offset);
   if(state.player?.labStream){const where=offset??playPosition();await stop();return play(mode,where);}
   if(state.player?.rawPCM){
