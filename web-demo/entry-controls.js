@@ -106,7 +106,7 @@
         summary.textContent=transport+" · モデル設定は適用待ち（指定値を保持）";
       }else if(warning){
         const note=(status.textContent||"").trim()
-          .replace(/^(?:再生中|原音再生中|モデル再生中)[。:：・\\s]+/,"").trim();
+          .replace(/^(?:再生中|原音再生中|モデル再生中)[。:：・\s]+/,"").trim();
         summary.textContent=transport+" · "+(note||"処理上の注意があります。");
       }else{
         // A stopped transport can still be ready to play. File readiness
