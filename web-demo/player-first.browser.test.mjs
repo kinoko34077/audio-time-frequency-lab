@@ -533,8 +533,20 @@ test("U1/U5 primary Play routes to REAL selected live/PV/Granular engines and on
     await set("lab-model","live");
     await page.waitForFunction(()=>document.querySelector("#lab-status")
       ?.textContent.includes("適用待ち"),{timeout:10000});
-    assert.equal(await page.$eval("#play-main",e=>e.textContent.includes("モデル停止")),true,
-      "the previously playing Granular engine should not be destroyed");
+    // Granular's primary button means "Pause", not legacy "モデル停止".
+    // Verify actual render and the still-owned source PCM session instead of
+    // asserting a label belonging to a different engine.
+    const retained=await page.evaluate(()=>({
+      mode:document.querySelector("#rt-telemetry").dataset.pcmTransport,
+      running:document.querySelector("#granular-optin-status").dataset.renderRunning,
+      primary:document.querySelector("#play-main").textContent,
+      stopDisabled:document.querySelector("#stop").disabled
+    }));
+    assert.equal(retained.mode,"granular-experimental",
+      "pending model must retain the actual playing Granular engine: "+JSON.stringify(retained));
+    assert.equal(retained.running,"true",
+      "pending model must not stop the source PCM audio render: "+JSON.stringify(retained));
+    assert.equal(retained.stopDisabled,false);
     assert.equal(await page.$eval("#granular-speed-value",e=>e.value),"0");
     assert.equal(await page.evaluate(()=>window.__engineCreations.length),workletsBefore,
       "unsupported live 0x must not instantiate a substituted DSP");
