@@ -150,15 +150,6 @@ function refreshGranular(){
   $("#granular-range").value=String(granular.railMax);
   $("#granular-rail-note").textContent=Math.abs(granular.speed)>granular.railMax?
     "指定速度はレール外です。直接入力した数値は保持されています。":"";
-  // The research-model tab is a second VIEW of these same user values,
-  // never an independent speed/pitch state that disagrees with main audio.
-  const ls=$("#lab-speed"),lp=$("#lab-pitch");
-  if(ls&&document.activeElement!==ls)ls.value=String(granular.speed);
-  if(lp&&document.activeElement!==lp)lp.value=String(granular.pitch);
-  if($("#lab-speed-output"))
-    $("#lab-speed-output").textContent=formatPlaybackSpeed(granular.speed)+"×";
-  if($("#lab-pitch-output"))
-    $("#lab-pitch-output").textContent=String(granular.pitch)+" 半音";
 }
 // All waveform-scrub commands share one queue: an old seek must NEVER apply
 // after the gesture's newest speed or after its kinetic release.
@@ -254,8 +245,10 @@ function editGranular(kind,raw,fromModelTab=false){
   const bridge=state.player?.pcmBridge,status=$("#granular-optin-status");
   if(!bridge||bridge.processingMode!=="granular"){
     status.textContent="設定保持中。現在の選択モデルで適用するには再生状態を確認してください。";
-    // Main-tab edits also drive the actually selected non-Granular model.
-    if(!fromModelTab&&state.player?.mode==="wet")
+    // Keep selected model parameters synchronized even while stopped.
+    // This also rechecks a pending model when its requested speed becomes
+    // feasible, without changing the canonical value or faking application.
+    if(!fromModelTab&&lab.mode!=="granular")
       void labSettingsChanged();
     return;
   }
@@ -269,6 +262,10 @@ function editGranular(kind,raw,fromModelTab=false){
       status.textContent="未反映: "+error.message;
       message("実験音声設定の反映失敗: "+error.message,"error");
     });
+  // The previously selected model may have been pending; honor it as soon as
+  // its real backend supports the newly entered speed, including during play.
+  if(!fromModelTab&&lab.mode!=="granular")
+    void labSettingsChanged();
 }
 if(PLAYER_GRANULAR_AVAILABLE){
   $("#granular-optin-controls").hidden=false;
@@ -290,9 +287,17 @@ if(PLAYER_GRANULAR_AVAILABLE){
 }
 // Playback / model tab navigation owns presentation only. Existing song,
 // transport, output node, typed edits, research settings stay mounted.
+// Only one transport control group exists. Move that DOM node between tab
+// surfaces without re-registering listeners or duplicating player state.
+const playerActionsSlot=$("#player-actions-slot");
+const modelTransportHost=$("#model-transport-host");
+const sharedActions=playerActionsSlot.querySelector(".actions");
 function selectWorkspaceTab(target){
   if(target!=="player"&&target!=="model")return;
   document.body.dataset.mainTab=target;
+  (target==="model"?modelTransportHost:playerActionsSlot).appendChild(sharedActions);
+  if(target==="model")$("#model-audio-note").textContent=state.dry?
+    state.fileMeta:"音源は「再生」タブで選択してください。";
   for(const mode of ["player","model"]){
     const btn=$("#main-tab-"+mode);
     btn.setAttribute("aria-selected",String(target===mode));
@@ -521,7 +526,11 @@ function settings(){
     aBandBins:Number($("#a-band").value),
     aQuality:Number($("#a-quality").value)
   };
-  if(lab.mode==="live"){
+  // A selected Rust model may be pending while a prior engine continues
+  // rendering at 0/reverse/out-of-range speed. Do not call liveFactors on an
+  // unapplied request: its validated range is still 0.5..2, and status/
+  // graph refresh must never throw or mutate the last-good audio session.
+  if(lab.mode==="live"&&primaryModelCapability("live",lab.speed).supported){
     const ratio=liveFactors(lab.speed,lab.semitones);
     Object.assign(value,{engine:3,rationalEnabled:true,pitchRatio:ratio.spectralRatio,shiftHz:0,
       ...fullBandPartialOptions(runtimeSampleRate),
@@ -1339,7 +1348,7 @@ async function play(mode="wet",offset=null){
   if(mode==="wet"&&!primaryModelCapability(lab.mode,granular.speed).supported){
     const note=primaryModelCapability(lab.mode,granular.speed).reason;
     labStatusText(note);
-    message("選択モデルで再生できません: "+note,"error");return;
+    message("選択したモデルはこの速度にまだ対応していません。指定値は保持されています: "+note,"warning");return;
   }
   if(lab.mode!=="live"&&mode==="wet")return startModelPlayback(offset);
   if(state.player?.labStream){const where=offset??playPosition();await stop();return play(mode,where);}
@@ -1473,7 +1482,7 @@ async function play(mode="wet",offset=null){
       const master=ctx.createGain(),directRoute=ctx.createGain();
       directRoute.gain.value=1;bridge.connect(master);
       master.connect(directRoute);directRoute.connect(ctx.destination);
-      const player={rawPCM:true,directDry:true,pcmBridge:bridge,mode,granular:granularActive,
+      const player={rawPCM:true,directDry:true,pcmBridge:bridge,mode,granular:granularActive,appliedLabMode:granularActive?"granular":null,
         labRealtime:false,labProcessed:false,master,directRoute,bridgeRoute:null,
         outputRoute:"direct",offset:at,at:ctx.currentTime,
         paused:false,pauseBusy:false,initializing:granularActive};
@@ -2369,16 +2378,12 @@ document.documentElement.dataset.fwBoot="ready";
  * live playback. JS phase-vocoder / WSOLA / dual / AM are separately rendered
  * on demand, never claimed to be real-time or physically identifiable.
  */
-const labModel=$("#lab-model"),labSpeed=$("#lab-speed"),labPitch=$("#lab-pitch");
+const labModel=$("#lab-model");
 const labShort=$("#lab-short"),labLong=$("#lab-long"),labWindows=$("#lab-windows"),labStatus=$("#lab-status"),labIndividual=$("#lab-individual-periods");
 const labPeriod=$("#lab-period-cycles"),labPeriodField=$("#lab-period-cycles-field");
 const selectedPeriodCycles=()=>2**Number(labPeriod.value);
 function labStatusText(text){labStatus.textContent=text;}
 function labRefresh(){
-  $("#lab-speed-output").textContent=formatPlaybackSpeed(granular.speed)+"×";
-  $("#lab-pitch-output").textContent=String(granular.pitch)+" 半音";
-  if(document.activeElement!==labSpeed)labSpeed.value=String(granular.speed);
-  if(document.activeElement!==labPitch)labPitch.value=String(granular.pitch);
   $("#lab-short-output").textContent=String(lab.shortFftSize)+" samples";
   $("#lab-long-output").textContent=String(lab.longFftSize)+" samples";
   $("#lab-windows-output").textContent=String(lab.referenceWindows)+" 窓";
@@ -2461,13 +2466,18 @@ async function labSettingsChanged(){
   labInvalidate();
   labRefresh();
   if(!capability.supported){
-    if(state.player&&state.player.mode!=="dry"){
-      await stop();
-      if(ticket!==modelSelectionEpoch)return;
-      state.seek=currentTime;
-    }
-    labStatusText("未適用: "+capability.reason);
-    message("選択モデルは現在の速度を適用できません: "+capability.reason,"error");
+    // A pending model request must not destroy the last-good audio stream.
+    // Keep the requested canonical speed and model; do not silently start a
+    // different DSP or claim that an unsupported render was applied.
+    const playing=state.player&&state.player.mode!=="dry";
+    const active=state.player?.labStream?(state.player.appliedLabMode||previous):
+      state.player?.labRealtime?"live":
+      state.player?.rawPCM&&state.player.granular?"granular":previous;
+    const explanation="この処理モデルは現在の指定速度にまだ対応していません。"+
+      "指定値とモデル選択は保持します。"+(playing?
+      "再生中の"+active+"を維持し、モデル切替は保留しています。":"");
+    labStatusText("適用待ち: "+explanation);
+    message(explanation,"warning");
     return;
   }
   const player=state.player;
@@ -2500,21 +2510,13 @@ async function labSettingsChanged(){
 }
 [labModel,labShort,labLong,labWindows,labIndividual,labPeriod]
   .forEach(node=>node.addEventListener("change",()=>void labSettingsChanged()));
-for(const [control,kind] of [[labSpeed,"speed"],[labPitch,"pitch"]]){
-  control.addEventListener("change",()=>{
-    editGranular(kind,control.value,true);
-    void labSettingsChanged();
-  });
-}
 function liveSliderValue(){
-  $("#lab-speed-output").textContent=formatPlaybackSpeed(Number(labSpeed.value))+"×";
-  $("#lab-pitch-output").textContent=labPitch.value+" 半音";
   $("#lab-short-output").textContent=String(2**Number(labShort.value))+" samples";
   $("#lab-long-output").textContent=String(2**Number(labLong.value))+" samples";
   $("#lab-windows-output").textContent=labWindows.value+" 窓";
   $("#lab-period-cycles-output").textContent=String(selectedPeriodCycles())+"周期";
 }
-[labSpeed,labPitch,labShort,labLong,labWindows,labPeriod].forEach(node=>node.addEventListener("input",liveSliderValue));
+[labShort,labLong,labWindows,labPeriod].forEach(node=>node.addEventListener("input",liveSliderValue));
 async function startModelPlayback(offset=null){
   const where=clamp(offset??(state.player?playPosition():state.seek),0,Math.max(0,duration()-.001));
   if(state.player)await stop();
@@ -2554,7 +2556,7 @@ async function startModelPlayback(offset=null){
         })();
       }
     });
-    player={labStream:true,stream,mode:"wet",offset:where,at:ctx.currentTime,
+    player={labStream:true,stream,mode:"wet",appliedLabMode:lab.mode,offset:where,at:ctx.currentTime,
       sourceTimeRate:lab.speed,master:stream.master};
     state.player=player;controls.stop.disabled=false;
     controls.main.textContent="■ モデル停止";

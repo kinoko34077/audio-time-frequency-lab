@@ -57,33 +57,39 @@ test('full Chrome: inherited Rust AudioWorklet live independent speed/pitch UI',
   assert.equal(await page.$eval('#lab-model',e=>e.disabled),false);
   await page.$eval('#lab-model',e=>{e.value='live';e.dispatchEvent(new Event('change',{bubbles:true}));});
   await page.waitForFunction(()=>document.querySelector('#lab-model').value==='live');
-  await page.$eval('#lab-speed',e=>{e.value='1.5';e.dispatchEvent(new Event('change',{bubbles:true}));});
-  await page.$eval('#lab-pitch',e=>{e.value='5';e.dispatchEvent(new Event('change',{bubbles:true}));});
-  await page.$eval('#play-wet',el=>el.scrollIntoView({block:'center',inline:'nearest'}));
-  const beforeWet=await page.evaluate(()=>{
-    const wet=document.querySelector('#play-wet'),main=document.querySelector('#play-main');
-    window.__wetNativeClicks=0;wet.addEventListener('click',()=>window.__wetNativeClicks++);
-    const rect=wet.getBoundingClientRect(),cx=rect.left+rect.width/2,cy=rect.top+rect.height/2;
-    const hit=document.elementFromPoint(cx,cy);
-    return {wetCenter:{x:Math.round(cx),y:Math.round(cy)},hit:{id:hit?.id,
-      tag:hit?.tagName,cls:String(hit?.className||'').slice(0,110)},
-      wetDisabled:wet.disabled,mainDisabled:main.disabled,
-      wetDisplay:getComputedStyle(wet).display,tab:document.body.dataset.mainTab,
-      file:document.querySelector('#file-meta')?.textContent,
-      labModel:document.querySelector('#lab-model')?.value,
-      individual:document.querySelector('#lab-individual-periods')?.checked,
-      status:document.querySelector('#status')?.textContent};
+  // Audio Time exposes one canonical speed/pitch edit pair. Make the edits
+  // in the player tab, then verify the same real Rust engine from model tab.
+  await page.click('#main-tab-player');
+  await page.$eval('#granular-speed-value',e=>{
+    e.value='1.5';e.dispatchEvent(new Event('change',{bubbles:true}));
   });
-  assert.equal(beforeWet.wetDisabled,false,'Rust wet play must remain enabled: '+JSON.stringify(beforeWet));
-  await (await page.$('#play-wet')).click();
+  await page.$eval('#granular-pitch-value',e=>{
+    e.value='5';e.dispatchEvent(new Event('change',{bubbles:true}));
+  });
+  await page.click('#main-tab-model');
+  const stateBefore=await page.evaluate(()=>{
+    const main=document.querySelector('#play-main');
+    const r=main.getBoundingClientRect(),hit=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);
+    return {visible:main.getClientRects().length>0,hit:hit===main||main.contains(hit),
+      model:document.querySelector('#lab-model').value,
+      speed:document.querySelector('#granular-speed-value').value,
+      pitch:document.querySelector('#granular-pitch-value').value};
+  });
+  assert.equal(stateBefore.visible&&stateBefore.hit,true,
+    'shared main Play must be hit-testable on the model tab: '+JSON.stringify(stateBefore));
+  assert.equal(stateBefore.model,'live');
+  await page.click('#play-main');
   try{
-    await page.waitForFunction(()=>document.querySelector('#rt-indicator')?.textContent.includes('稼働中 · Rust/WASM AudioWorklet'),{timeout:20000});
+    await page.waitForFunction(()=>document.querySelector('#rt-indicator')
+      ?.textContent.includes('稼働中 · Rust/WASM AudioWorklet'),{timeout:20000});
   }catch(error){
-    const info=await page.evaluate(()=>({status:document.querySelector('#status')?.textContent,indicator:document.querySelector('#rt-indicator')?.textContent,lab:document.querySelector('#lab-status')?.textContent}));
-    throw Error('Rust Worklet failed: '+JSON.stringify({beforeWet,clicks:await page.evaluate(()=>window.__wetNativeClicks),...info})+' / '+error.message);
+    const info=await page.evaluate(()=>({status:document.querySelector('#status')?.textContent,
+      indicator:document.querySelector('#rt-indicator')?.textContent,
+      lab:document.querySelector('#lab-status')?.textContent}));
+    throw Error('Rust Worklet failed from shared model transport: '+JSON.stringify({stateBefore,...info})+' / '+error.message);
   }
-  assert.equal(await page.$eval('#lab-speed',e=>e.value),'1.5');
-  assert.equal(await page.$eval('#lab-pitch',e=>e.value),'5');
+  assert.equal(await page.$eval('#granular-speed-value',e=>e.value),'1.5');
+  assert.equal(await page.$eval('#granular-pitch-value',e=>e.value),'5');
   assert.deepEqual(errors,[]);
   await (await page.$('#stop')).click();
  }finally{await browser?.close();server.kill();await rm(temp,{recursive:true,force:true});}

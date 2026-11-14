@@ -43,7 +43,11 @@ test("Pages entry: mobile settings opens and tapping the visible source opens na
       if(r.status()>=400 && /\.(mjs|js|wasm|css)(\?|$)/.test(r.url()))
         errors.push(r.status()+" "+r.url());
     });
-    const url=liveUrl||"http://127.0.0.1:8766/index.html";
+    // This test verifies the inherited Frequency Warp runtime contract, not
+    // the public Audio Time UI. The legacy UI is engineering-only.
+    const testUrl=new URL(liveUrl||"http://127.0.0.1:8766/index.html");
+    testUrl.searchParams.set("legacyUi","1");
+    const url=testUrl.toString();
     let boot=false,lastError="";
     // GitHub Pages propagation/cold-edge cache can take a few requests. Only
     // the final, fully functional public entry is considered acceptable.

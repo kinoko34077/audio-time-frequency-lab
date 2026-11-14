@@ -110,7 +110,9 @@ test("real recorded waveform UX across mobile, Android-size, tablet and desktop 
         await page.waitForFunction(()=>document.body.dataset.mainTab==="model");
         assert.equal(await page.$eval(".model-extra-controls",el=>el.open),false,
           "research is opt-in even on narrow Android-size windows");
-        assert.equal(await page.$eval(".model-legacy-fold",el=>el.open),false);
+        assert.equal(await page.$eval(".model-legacy-fold",el=>el.getClientRects().length),0);
+        assert.equal(await page.$eval("#main-player-panel",el=>el.getClientRects().length),0);
+        assert.equal(await page.$eval("#model-transport-host #play-main",el=>el.getClientRects().length>0),true);
         const modelWidth=await page.evaluate(()=>({
           client:innerWidth,scroll:document.documentElement.scrollWidth
         }));

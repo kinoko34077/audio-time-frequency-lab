@@ -32,8 +32,12 @@ try:
       chooser.value.set_files(path)
       page.get_by_text("読み込み完了。再生できます。",exact=False).wait_for(timeout=20000)
       assert page.locator("#play-wet").is_enabled()
-      page.locator("#lab-speed").evaluate("(e)=>{e.value='1.5';e.dispatchEvent(new Event('change',{bubbles:true}));}")
-      page.locator("#lab-pitch").evaluate("(e)=>{e.value='5';e.dispatchEvent(new Event('change',{bubbles:true}));}")
+      # The Audio Time player owns the only editable speed/pitch pair.
+      assert page.locator("#lab-speed,#lab-pitch").count()==0
+      page.locator("#granular-speed-value").evaluate("(e)=>{e.value='1.5';e.dispatchEvent(new Event('change',{bubbles:true}));}")
+      page.locator("#granular-pitch-value").evaluate("(e)=>{e.value='5';e.dispatchEvent(new Event('change',{bubbles:true}));}")
+      assert page.locator("#granular-speed-value").input_value()=="1.5"
+      assert page.locator("#granular-pitch-value").input_value()=="5"
       # U1: Granular is explicitly selected on the primary player, not
       # an implicit Rust setting while a different engine renders sound.
       assert page.locator("#lab-model").input_value()=="granular"
@@ -46,16 +50,17 @@ try:
       assert not page.locator(".workspace-right").is_visible()
       assert not page.locator("#settings-open").is_visible()
       assert page.locator("#lab-render").count()==0
-      # R4 default is the simple player; the inherited research workbench
-      # remains reachable through the explicit processing-model tab.
+      # The model tab is dedicated to model selection. Neither a second
+      # waveform/player nor inherited Frequency Warp UI may appear there.
       page.locator("#main-tab-model").click()
       assert page.locator("#audio-lab").is_visible()
-      # Legacy Frequency Warp processing is retained but no longer occupies
-      # the default model-comparison view; it is expanded only on demand.
+      assert not page.locator("#main-player-panel").is_visible()
       assert not page.locator(".quick-panel").is_visible()
-      page.locator(".model-legacy-fold > summary").click()
-      assert page.locator(".quick-panel").is_visible()
-      assert page.locator("#settings-open").is_visible()
+      assert not page.locator(".model-legacy-fold").is_visible()
+      assert not page.locator("#settings-open").is_visible()
+      assert page.locator("#model-transport-host #play-main").is_visible()
+      assert page.locator("#granular-speed-value").input_value()=="1.5"
+      assert page.locator("#granular-pitch-value").input_value()=="5"
       # Advanced window sliders are disclosed on demand in the compact model UI.
       page.locator(".model-extra-controls > summary").click()
       assert page.locator("#lab-short").is_visible()
@@ -69,10 +74,14 @@ try:
       page.locator("#lab-short").evaluate("(e)=>{e.value='11';e.dispatchEvent(new Event('change',{bubbles:true}));}")
       assert page.locator("#lab-short-output").inner_text()=="2048 samples"
       assert page.locator("#lab-long-output").inner_text()=="1024 samples"
-      page.locator("#play-wet").click()
+      page.locator("#play-main").click()
       page.locator("#rt-indicator").get_by_text("モデル再生中",exact=False).wait_for(timeout=25000)
       assert page.locator("#lab-short-output").inner_text()=="2048 samples"
       assert page.locator("#lab-long-output").inner_text()=="1024 samples"
+      # Optional model explanation must be reachable through the disclosure,
+      # not assumed to be visible while the compact model page is folded.
+      page.locator(".model-info-controls > summary").click()
+      assert page.locator("#lab-model-description").is_visible()
       assert '波形が自然につながる位置' in page.locator('#lab-model-description').inner_text()
       page.locator('#lab-model').select_option('dual')
       assert page.locator('#lab-short').is_enabled()
@@ -86,7 +95,7 @@ try:
       assert "原音再生中" in page.locator("#rt-indicator").inner_text()
       page.locator("#stop").click()
       assert not failures,failures
-      print("PASS inherited native chooser, clean Lab UI, automatic WSOLA preview + window controls, original transport; mobile emulation:",mobile)
+      print("PASS native chooser, dedicated Audio Time model/player UI, WSOLA preview + windows, original transport; mobile emulation:",mobile)
       page.close()
     browser.close()
 finally:

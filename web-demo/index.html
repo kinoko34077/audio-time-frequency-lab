@@ -35,15 +35,11 @@
           <option value="am">AM包絡 + Phase Vocoder · 自動先読み</option>
         </select>
       </label>
-      <label class="lab-field">速度 <output id="lab-speed-output" for="lab-speed">1.00×</output>
-        <input id="lab-speed" type="range" min="-8" max="8" step=".01" value="1">
-      </label>
-      <label class="lab-field">音程 <output id="lab-pitch-output" for="lab-pitch">0 半音</output>
-        <input id="lab-pitch" type="range" min="-12" max="12" step=".1" value="0">
-      </label>
     </div>
-    <p id="lab-model-description" class="lab-note model-summary" aria-live="polite">Granular：速度−8〜+8/0と独立音程を再生します。モデルは主再生ボタンへ反映します。</p>
-    <p id="lab-model-compatibility" class="lab-note" role="status">Granularは元音源サンプルA/Bとスクラブ対応。ほかの研究モデルは速度0.5〜2倍のみ、0/逆再生およびサンプル単位A/B反復には未対応です。</p>
+    <details class="model-info-controls"><summary>モデルの説明・現在の対応範囲</summary>
+      <p id="lab-model-description" class="lab-note model-summary" aria-live="polite">選択した処理モデルの説明を表示します。</p>
+      <p id="lab-model-compatibility" class="lab-note" role="status">処理モデルの対応範囲を表示します。</p>
+    </details>
     <details class="model-extra-controls">
       <summary>処理モデルの詳細設定・解析</summary>
       <div class="lab-grid model-extra-grid">
@@ -69,6 +65,9 @@
       <p id="lab-status" role="status" aria-live="polite">音源を読み込んで「モデルで再生」を押してください。</p>
     </div>
     <p class="lab-note model-unobtrusive-note">音源は端末内で処理します。</p>
+  </section>
+  <section id="model-transport-host" class="model-transport-host" aria-label="共通再生操作">
+    <p id="model-audio-note" class="model-audio-note">音源は「再生」タブで選択してください。</p>
   </section>
   <div class="workspace-grid">
     <div class="workspace-left">
@@ -100,12 +99,12 @@
           <div class="wave-wrap"><canvas id="wave" role="button" tabindex="0" aria-label="全体波形をタップして位置を移動"></canvas><div id="wave-overview-selection" class="wave-overview-selection" aria-hidden="true"></div><div id="playhead" class="playhead"></div></div>
         </section>
         <div class="transport"><span id="elapsed">0:00.0</span><span id="wave-hint">波形を押して移動</span><span id="duration">0:00.0</span></div>
-        <div class="actions">
+        <div id="player-actions-slot"><div class="actions">
           <button id="play-main" class="primary" aria-label="再生" disabled>▶ 再生</button>
           <button id="stop" disabled>■ 停止</button>
           <button id="play-dry" disabled>原音を聴く</button>
           <button id="play-wet" disabled>▶ モデルで再生</button>
-        </div>
+        </div></div>
         <section id="granular-optin-controls" class="player-tune" aria-label="速度と音程" hidden>
           <div class="player-tune-grid">
             <div class="player-tune-control">
@@ -157,7 +156,7 @@
         <audio id="background-output" playsinline preload="none" aria-hidden="true" hidden></audio>
       </section>
 
-      <details class="model-legacy-fold"><summary>旧Frequency Warpの変換・解析設定</summary>
+      <details class="model-legacy-fold" aria-hidden="true"><summary>ランタイム互換用内部設定</summary>
       <section class="panel quick-panel" aria-labelledby="control-title">
         <div class="section-header"><div><p class="eyebrow">PERFORMANCE</p><h2 id="control-title">変換する</h2></div><span class="micro-hint">動かすと音に反映</span></div>
         <details class="panel-fold" open><summary>変換パラメータ・追加加工</summary>

@@ -486,7 +486,8 @@ test("U1/U5 primary Play routes to REAL selected live/PV/Granular engines and on
     await set("player-loop-b","16000");
     await page.click("#main-tab-model");
     assert.equal(await page.$eval("#lab-model",el=>el.value),"granular");
-    assert.match(await page.$eval("#lab-pitch-output",el=>el.textContent),/0\.125/);
+    assert.equal(await page.$eval("#granular-pitch-value",el=>el.value),"0.125");
+    assert.equal(await page.$eval("#model-transport-host #play-main",el=>el.getClientRects().length>0),true);
     assert.equal(await page.$eval("#granular-speed-value",el=>el.value),"1.237");
     await set("lab-model","live");
     await page.waitForFunction(()=>document.querySelector("#lab-status")?.textContent
@@ -516,29 +517,51 @@ test("U1/U5 primary Play routes to REAL selected live/PV/Granular engines and on
     assert.equal(await page.$eval("#granular-pitch-value",e=>e.value),"0.125");
     assert.equal(await page.$eval("#player-loop-a",e=>e.value),"5000");
     assert.equal(await page.$eval("#player-loop-b",e=>e.value),"16000");
-    await set("lab-speed","1.5");
-    // This control is a 0.1-step range slider. Direct typed precision is
-    // checked independently above with the retained 0.125 canonical value.
-    await set("lab-pitch","0.7");
+    // One shared edit surface replaces the duplicate model-tab sliders.
+    await page.click("#main-tab-player");
+    await set("granular-speed-value","1.5");
+    await set("granular-pitch-value","0.7");
+    await page.click("#main-tab-model");
     assert.equal(await page.$eval("#granular-speed-value",e=>e.value),"1.5");
     assert.equal(await page.$eval("#granular-pitch-value",e=>e.value),"0.7");
-    // Unsupported speed must stop, not claim the selected Rust mode plays
-    // a different speed or silently replace it with Granular/original.
+    // An unsupported pending model selection retains both canonical input
+    // and the existing real audio stream; no silent model substitution.
+    await page.click("#main-tab-player");
     await set("granular-speed-value","0");
+    await page.click("#main-tab-model");
     const workletsBefore=await page.evaluate(()=>window.__engineCreations.length);
     await set("lab-model","live");
-    await page.waitForFunction(()=>document.querySelector("#lab-model-compatibility")
-      ?.textContent.includes("未対応"),{timeout:10000});
-    await page.waitForFunction(()=>document.querySelector("#play-main")?.textContent
-      .includes("再生"),{timeout:20000});
+    await page.waitForFunction(()=>document.querySelector("#lab-status")
+      ?.textContent.includes("適用待ち"),{timeout:10000});
+    // Granular's primary button means "Pause", not legacy "モデル停止".
+    // Verify actual render and the still-owned source PCM session instead of
+    // asserting a label belonging to a different engine.
+    const retained=await page.evaluate(()=>({
+      mode:document.querySelector("#rt-telemetry").dataset.pcmTransport,
+      running:document.querySelector("#granular-optin-status").dataset.renderRunning,
+      primary:document.querySelector("#play-main").textContent,
+      stopDisabled:document.querySelector("#stop").disabled
+    }));
+    assert.equal(retained.mode,"granular-experimental",
+      "pending model must retain the actual playing Granular engine: "+JSON.stringify(retained));
+    assert.equal(retained.running,"true",
+      "pending model must not stop the source PCM audio render: "+JSON.stringify(retained));
+    assert.equal(retained.stopDisabled,false);
     assert.equal(await page.$eval("#granular-speed-value",e=>e.value),"0");
     assert.equal(await page.evaluate(()=>window.__engineCreations.length),workletsBefore,
       "unsupported live 0x must not instantiate a substituted DSP");
+    // When the user restores a compatible speed, the already selected
+    // pending Rust model becomes the real processing path automatically.
+    await page.click("#main-tab-player");
+    await set("granular-speed-value","1.5");
+    await page.waitForFunction(()=>document.querySelector("#rt-indicator")
+      ?.textContent.includes("Rust/WASM AudioWorklet"),{timeout:20000});
+    assert.equal(await page.$eval("#granular-speed-value",e=>e.value),"1.5");
     assert.deepEqual(errors,[]);
     console.log("U1_U5_REAL_MODEL_ROUTE "+JSON.stringify({
       engines:await page.evaluate(()=>window.__engineCreations),
-      speedPitch:"one user canonical",ab:"preserved",
-      unsupportedZero:"rejected without engine swap"
+      speedPitch:"one canonical editable pair",ab:"preserved",
+      unsupportedZero:"pending without stopping last-good DSP"
     }));
   }finally{await browser?.close();server.kill("SIGTERM");}
 });
