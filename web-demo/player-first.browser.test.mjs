@@ -63,6 +63,45 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, swit
     });
     await page.waitForFunction(()=>document.querySelector("#granular-optin-status")
       ?.dataset.renderRunning==="true",{timeout:15000});
+    // U2: audit the actual visible canvas during 28 browser animation frames.
+    // Resizing either backing dimension on each moving frame discards pixels
+    // and creates a paint hitch even when the audio Worklet is continuous.
+    const waveDraw=await page.evaluate(async()=>{
+      const canvas=document.getElementById("wave-detail");
+      const proto=HTMLCanvasElement.prototype;
+      const width=Object.getOwnPropertyDescriptor(proto,"width");
+      const height=Object.getOwnPropertyDescriptor(proto,"height");
+      let resets=0;const samples=[];
+      Object.defineProperty(proto,"width",{...width,set(value){
+        if(this===canvas)resets++;
+        return width.set.call(this,value);
+      }});
+      Object.defineProperty(proto,"height",{...height,set(value){
+        if(this===canvas)resets++;
+        return height.set.call(this,value);
+      }});
+      try{
+        await new Promise(resolve=>{
+          let count=0;
+          const frame=()=>{
+            samples.push(Number(canvas.getAttribute("aria-valuenow")));
+            if(++count>=28)resolve();
+            else requestAnimationFrame(frame);
+          };
+          requestAnimationFrame(frame);
+        });
+        return {resets,distinctFrames:new Set(samples).size};
+      }finally{
+        Object.defineProperty(proto,"width",width);
+        Object.defineProperty(proto,"height",height);
+      }
+    });
+    assert.equal(waveDraw.resets,0,
+      "moving fixed-head waveform must not reset same-sized canvas backing on every paint");
+    assert.ok(waveDraw.distinctFrames>=8,
+      "browser must visibly update the source-frame head during actual audio: "+
+      JSON.stringify(waveDraw));
+    console.log("U2_REAL_CANVAS_PAINT "+JSON.stringify(waveDraw));
     await page.click("#play-main");
     await page.waitForFunction(()=>document.querySelector("#play-main")
       ?.textContent.includes("再開")&&
