@@ -83,18 +83,9 @@ test("live Audio Lab opt-in original playback uses a persistent PCM node across 
     assert.match(after.telemetry,/cache不足 0/);
     assert.match(after.elapsed,/0:01/);
 
-    // Rejected wet parameters must not stop/recreate the currently audible
-    // original. Force a preflight-only invalid quality without changing DSP.
-    await page.evaluate(()=>{
-      const quality=document.querySelector("#quality");
-      window.__originalQuality=quality.value;
-      quality.add(new Option("Invalid test only","invalid-for-test"));
-      quality.value="invalid-for-test";
-    });
-    // Explicitly select the existing Rust/wet backend. Granular is now
-    // the named default and should not silently execute a Rust preflight.
-    // Changing tabs or selected model while in original/raw audition must
-    // preserve this independent PCM player until a valid wet launch.
+    // The old app defaulted the research model to Rust; now it defaults
+    // explicitly to Granular. Select Rust before injecting the invalid
+    // preflight quality, since model selection legitimately updates #quality.
     await page.click("#main-tab-model");
     await page.evaluate(()=>{
       const model=document.querySelector("#lab-model");
@@ -102,6 +93,13 @@ test("live Audio Lab opt-in original playback uses a persistent PCM node across 
     });
     await page.waitForFunction(()=>document.querySelector("#lab-model").value==="live",{
       timeout:10000
+    });
+    // Rejected wet parameters must not stop/recreate currently audible raw.
+    await page.evaluate(()=>{
+      const quality=document.querySelector("#quality");
+      window.__originalQuality=quality.value;
+      quality.add(new Option("Invalid test only","invalid-for-test"));
+      quality.value="invalid-for-test";
     });
     await page.click("#play-wet");
     await page.waitForFunction(()=>document.querySelector("#status")
