@@ -1206,3 +1206,9 @@ body.model-lab[data-legacy-tools="1"] .offline-tool{display:block!important}
   }
   body.model-lab[data-main-tab="player"] .wave-editor{gap:2px!important}
 }
+
+/* The legacy wet preflight path is verified only in compatibility mode;
+   it is not an extra Audio Time playback button. */
+body.model-lab[data-legacy-tools="1"] .model-transport-host #play-wet{
+  display:block!important;
+}
