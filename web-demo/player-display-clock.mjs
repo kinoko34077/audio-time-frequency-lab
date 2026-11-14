@@ -28,7 +28,12 @@ export function displaySourceFrameFromProgress(progress,{audioTime,sourceRate,so
      Number.isSafeInteger(progress.loopEndFrame)&&
      progress.loopStartFrame>=0&&
      progress.loopStartFrame<progress.loopEndFrame&&
-     progress.loopEndFrame<=sourceFrames)
+     progress.loopEndFrame<=sourceFrames){
+    // Floating-point extrapolation must not make a 1-sample A/B interval
+    // appear to move to B or wrap to the adjacent source frame.
+    if(progress.loopEndFrame-progress.loopStartFrame===1)
+      return progress.loopStartFrame;
     return wrap(predicted,progress.loopStartFrame,progress.loopEndFrame);
+  }
   return clamp(predicted,0,sourceFrames);
 }
