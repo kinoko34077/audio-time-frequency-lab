@@ -78,6 +78,10 @@ try:
       page.locator("#rt-indicator").get_by_text("モデル再生中",exact=False).wait_for(timeout=25000)
       assert page.locator("#lab-short-output").inner_text()=="2048 samples"
       assert page.locator("#lab-long-output").inner_text()=="1024 samples"
+      # Optional model explanation must be reachable through the disclosure,
+      # not assumed to be visible while the compact model page is folded.
+      page.locator(".model-info-controls > summary").click()
+      assert page.locator("#lab-model-description").is_visible()
       assert '波形が自然につながる位置' in page.locator('#lab-model-description').inner_text()
       page.locator('#lab-model').select_option('dual')
       assert page.locator('#lab-short').is_enabled()
