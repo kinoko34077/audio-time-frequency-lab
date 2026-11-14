@@ -943,8 +943,9 @@ waveSurface.addEventListener("pointerdown",e=>{
     try{waveSurface.setPointerCapture(e.pointerId);}catch{}
     playheadFromPointer(e,false,true);
   }else{
-    // Preserve legacy one-click seek without stealing a synthetic pointer.
-    playheadFromPointer(e);
+    // Other model modes still seek on tap, but a tap alone must never
+    // start either the Rust/Worker or original PCM playback path.
+    playheadFromPointer(e,false);
   }
 });
 if(PLAYER_GRANULAR_AVAILABLE){
