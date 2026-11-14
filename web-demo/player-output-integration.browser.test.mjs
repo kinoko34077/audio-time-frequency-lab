@@ -201,8 +201,10 @@ test("recorded piano main player: gesture/parameter receipts AND actual output P
         "#granular-optin-status")?.dataset.renderFrame};
     });
     assert.ok(actualScratch.log.some(x=>x.type==="scrub"&&x.speed>0));
-    assert.ok(actualScratch.log.some(x=>x.type==="scrub"&&x.bytes>0),
-      "initial scratch must prime its PCM cache");
+    // Non-pressed hover can prime the same PCM cache BEFORE pointerdown.
+    // A pressed drag should reuse that cache, not demand a redundant copy.
+    assert.ok(actualScratch.log.some(x=>x.type==="scrub"),
+      "drag must still reach the real atomic scratch handler");
     assert.ok(actualScratch.log.some(x=>x.type==="scrub"&&x.bytes===0),
       "consecutive pointer positions must reuse PCM cache");
     assert.equal(actualScratch.log.filter(x=>x.type==="seek-window").length,0,
