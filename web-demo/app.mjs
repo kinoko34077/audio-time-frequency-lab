@@ -526,7 +526,11 @@ function settings(){
     aBandBins:Number($("#a-band").value),
     aQuality:Number($("#a-quality").value)
   };
-  if(lab.mode==="live"){
+  // A selected Rust model may be pending while a prior engine continues
+  // rendering at 0/reverse/out-of-range speed. Do not call liveFactors on an
+  // unapplied request: its validated range is still 0.5..2, and status/
+  // graph refresh must never throw or mutate the last-good audio session.
+  if(lab.mode==="live"&&primaryModelCapability("live",lab.speed).supported){
     const ratio=liveFactors(lab.speed,lab.semitones);
     Object.assign(value,{engine:3,rationalEnabled:true,pitchRatio:ratio.spectralRatio,shiftHz:0,
       ...fullBandPartialOptions(runtimeSampleRate),
