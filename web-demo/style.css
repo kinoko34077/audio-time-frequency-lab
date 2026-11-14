@@ -1197,3 +1197,12 @@ body.model-lab[data-legacy-tools="1"] .offline-tool{display:block!important}
   .model-transport-host .actions{gap:5px;grid-template-columns:1.3fr .8fr 1fr}
   .model-transport-host .actions button{font-size:12px;min-height:44px;padding:7px 2px}
 }
+
+/* Compact 320px / short-height screens: reclaim redundant inter-control
+   whitespace before shrinking the essential waveform or touch targets. */
+@media(max-width:360px) and (max-height:650px){
+  body.model-lab[data-main-tab="player"] #main-player-panel{
+    gap:4px!important;
+  }
+  body.model-lab[data-main-tab="player"] .wave-editor{gap:2px!important}
+}
