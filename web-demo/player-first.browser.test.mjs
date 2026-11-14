@@ -202,11 +202,20 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, swit
     // The detailed viewport is zoomed to 0.75s; gesture velocity depends on
     // pointer event timing, so assert a positive signed command, not 1.5x.
     await page.waitForFunction(()=>window.__scratchSpeeds?.some(v=>v>0.05),{timeout:8000});
+    const forwardDragHead=Number(await page.$eval("#wave-detail",
+      el=>el.getAttribute("aria-valuenow")));
     // Reverse the record by moving the waveform in the opposite direction
     // before release; the Worklet must receive an actual negative speed.
     await page.mouse.move(editingWave.x+editingWave.width*.17,
       editingWave.y+editingWave.height*.65,{steps:8});
     await page.waitForFunction(()=>window.__scratchSpeeds?.some(v=>v<-.05),{timeout:8000});
+    const reverseDragHead=Number(await page.$eval("#wave-detail",
+      el=>el.getAttribute("aria-valuenow")));
+    assert.ok(Number.isSafeInteger(forwardDragHead)&&Number.isSafeInteger(reverseDragHead),
+      "real source-frame playhead must be reported during both gesture directions");
+    assert.ok(reverseDragHead<forwardDragHead,
+      "reversing the waveform must reverse the UI source-frame position: "+
+      JSON.stringify({beforePan,forwardDragHead,reverseDragHead}));
     await page.mouse.up();
     await page.waitForFunction(()=>window.__scratchSpeeds?.length>=4&&
       window.__scratchSpeeds.at(-1)===1,{timeout:10000});
@@ -221,8 +230,16 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, swit
       const speed=document.querySelector("#granular-speed-value");
       speed.value="0";speed.dispatchEvent(new Event("change",{bubbles:true}));
     });
-    await page.waitForFunction(prev=>Number(document.querySelector("#wave-detail")
-      ?.getAttribute("aria-valuenow"))>prev,{timeout:15000},beforePan);
+    // With a short A/B loop and a reverse flick, the *post-release*
+    // playhead may wrap and need not exceed the pre-drag position.
+    // Direction is verified at each live mouse move above; here check
+    // bounded final transport state and persistent worklet, not chronology.
+    const afterScrub=Number(await page.$eval("#wave-detail",
+      el=>el.getAttribute("aria-valuenow")));
+    assert.ok(Number.isSafeInteger(afterScrub)&&afterScrub>=0&&
+      afterScrub<sourceFrames,
+      "final sample position must remain within the actual source: "+
+      JSON.stringify({beforePan,forwardDragHead,reverseDragHead,afterScrub}));
     assert.equal(await page.$eval("#rt-telemetry",el=>Number(el.dataset.pcmNodeStarts)),starts,
       "zoom/handle scrub may not create extra worklet nodes");
     // Native Chrome touchscreen injection: two simultaneous active contacts
@@ -443,8 +460,11 @@ test("U1/U5 primary Play routes to REAL selected live/PV/Granular engines and on
     await set("lab-model","pv");
     await page.waitForFunction(()=>window.__engineCreations?.some(e=>
       e.kind==="worker"&&e.name.includes("lab-processor.worker.mjs")),{timeout:20000});
-    await page.waitForFunction(()=>document.querySelector("#lab-status")?.textContent
-      .includes("モデル音声を再生中"),{timeout:20000});
+    // The Worker overwrites transient "モデル音声を再生中" status as
+    // soon as it prefetches the next chunk. The stable indicator is emitted
+    // only by the onStarted callback after real PCM has been scheduled.
+    await page.waitForFunction(()=>document.querySelector("#rt-indicator")
+      ?.textContent.includes("モデル再生中"),{timeout:20000});
     await set("lab-model","granular");
     await page.waitForFunction(()=>window.__engineCreations?.some(e=>
       e.kind==="worklet"&&e.name==="audio-lab-source-pcm"),{timeout:20000});
