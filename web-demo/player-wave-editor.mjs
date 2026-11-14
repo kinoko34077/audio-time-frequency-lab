@@ -237,7 +237,10 @@ export function createPlayerWaveEditor({
       velocity:0,idleTimer:null};
     wrap.dataset.interaction=target;
     if(target==="pan"){
-      active=true;onScrubState(true);onScrubMotion(0,"hold",c);onStart();
+      // A stationary tap selects a frame, it does NOT mean Play.
+      // While an engine is already playing, keep the held scratch at 0x;
+      // the audition launch itself is deferred until a real drag (>3px).
+      active=true;onScrubState(true);onScrubMotion(0,"hold",c);
     }
     e.preventDefault();
   });
@@ -263,6 +266,10 @@ export function createPlayerWaveEditor({
         active=true;onScrubState(true);onScrubMotion(0,"hold",center());onStart();
       }
       const next=clamp(Math.round(gesture.frame-delta*spanFrames/canvas.clientWidth),0,frames-1);
+      if(!gesture.auditionStarted){
+        gesture.auditionStarted=true;
+        onStart(next/rate);
+      }
       const now=performance.now();
       const value=scrubSpeed(gesture.lastSeekFrame,next,now-gesture.lastMoveTime,rate);
       gesture.lastSeekFrame=next;gesture.lastMoveTime=now;
