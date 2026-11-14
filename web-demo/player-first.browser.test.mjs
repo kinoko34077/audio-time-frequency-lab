@@ -533,6 +533,10 @@ test("U1/U5 primary Play routes to REAL selected live/PV/Granular engines and on
     await set("lab-model","live");
     await page.waitForFunction(()=>document.querySelector("#lab-status")
       ?.textContent.includes("適用待ち"),{timeout:10000});
+    await page.waitForFunction(()=>document.querySelector("#audio-state-summary")
+      ?.textContent.includes("適用待ち"),{timeout:4000});
+    assert.equal(await page.$eval("#runtime-hud",e=>e.getClientRects().length),0,
+      "pending model must be shown in the one-line status, not a separate HUD");
     // Granular's primary button means "Pause", not legacy "モデル停止".
     // Verify actual render and the still-owned source PCM session instead of
     // asserting a label belonging to a different engine.
