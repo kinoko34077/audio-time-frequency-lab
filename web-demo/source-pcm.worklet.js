@@ -224,6 +224,14 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
       this.port.postMessage({
         type:"progress",sourceFrame:state.sourceFrame,
         revision:state.revision,ended:state.ended,
+        // Render-completed clock sample: main-thread waveform interpolation
+        // uses this metadata only for paint; never for audio scheduling.
+        outputTime:typeof currentTime==="number"?
+          currentTime+out[0].length/sampleRate:null,
+        speed:state.speed,running:this.running,
+        loopEnabled:state.loopEnabled,
+        loopStartFrame:state.loopStartFrame,
+        loopEndFrame:state.loopEndFrame,
         renderedFrames:stats.renderedFrames,
         missingFrames:stats.missingFrames,
         processingMode:this.processingMode,
