@@ -94,13 +94,21 @@
       const error=status.dataset.kind==="error";
       const warning=status.dataset.kind==="warning";
       const pending=modelStatus.textContent.includes("適用待ち");
+      const actual=(indicator.textContent||"停止中").trim();
+      // Requested/legacy diagnostic warnings may outlive Play/Pause/Stop.
+      // Render the REAL transport state first, not a stale "playing" verb
+      // copied from a previous warning. Keep the warning itself discoverable.
+      const transport=actual.split(" · ")[0]||"停止中";
       summary.dataset.kind=error?"error":pending||warning?"warning":"info";
-      if(error||(!pending&&warning)){
+      if(error){
         summary.textContent=status.textContent||"音声の処理状態を確認してください。";
       }else if(pending){
-        summary.textContent="モデル設定は適用待ち（指定値を保持）";
+        summary.textContent=transport+" · モデル設定は適用待ち（指定値を保持）";
+      }else if(warning){
+        const note=(status.textContent||"").trim()
+          .replace(/^(?:再生中|原音再生中|モデル再生中)[。:：・\s]+/,"").trim();
+        summary.textContent=transport+" · "+(note||"処理上の注意があります。");
       }else{
-        const actual=(indicator.textContent||"停止中").trim();
         // A stopped transport can still be ready to play. File readiness
         // belongs in the visible status, not only the hidden diagnostic DOM.
         if(actual.startsWith("停止中")&&status.textContent.includes("読み込み完了")){

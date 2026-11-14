@@ -102,11 +102,28 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, swit
       "browser must visibly update the source-frame head during actual audio: "+
       JSON.stringify(waveDraw));
     console.log("U2_REAL_CANVAS_PAINT "+JSON.stringify(waveDraw));
+    // A previously emitted "playing" warning can outlive actual transport.
+    // Exercise real Worklet pause/resume with the stale warning retained.
+    await page.evaluate(()=>{
+      const status=document.querySelector("#status");
+      status.dataset.kind="warning";
+      status.textContent="再生中。警告の詳細は保持されています。";
+    });
+    await page.waitForFunction(()=>{
+      const summary=document.querySelector("#audio-state-summary");
+      return summary?.dataset.kind==="warning"&&
+        summary.textContent.includes("警告の詳細は保持されています。");
+    },{timeout:4000});
     await page.click("#play-main");
     await page.waitForFunction(()=>document.querySelector("#play-main")
       ?.textContent.includes("再開")&&
       document.querySelector("#granular-optin-status")?.dataset.renderRunning==="false",
       {timeout:15000});
+    await page.waitForFunction(()=>document.querySelector("#audio-state-summary")
+      ?.textContent.startsWith("一時停止中"),{timeout:4000});
+    assert.ok(!await page.$eval("#audio-state-summary",
+      el=>el.textContent.includes("一時停止中 · 再生中")),
+      "stale playing warning cannot mask an actual Worklet pause");
     const paused=await page.evaluate(()=>({
       frame:Number(document.querySelector("#wave-detail")?.getAttribute("aria-valuenow")),
       speed:document.querySelector("#granular-speed-value")?.value,
@@ -131,6 +148,8 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, swit
       ?.textContent.includes("一時停止")&&
       document.querySelector("#granular-optin-status")?.dataset.renderRunning==="true",
       {timeout:15000});
+    await page.waitForFunction(()=>document.querySelector("#audio-state-summary")
+      ?.textContent.startsWith("再生中"),{timeout:4000});
     assert.equal(await page.$eval("#rt-telemetry",
       el=>Number(el.dataset.pcmNodeStarts)),starts,
       "main pause/resume must reuse the identical audio worklet");
@@ -412,9 +431,19 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, swit
     assert.equal(await page.$eval("#player-loop-b",e=>e.validationMessage),"");
     await page.waitForFunction(()=>document.querySelector("#player-loop-hint")
       ?.textContent.includes("反映が完了"),{timeout:15000});
+    await page.evaluate(()=>{
+      const status=document.querySelector("#status");
+      status.dataset.kind="warning";
+      status.textContent="再生中。停止前の注意を保持します。";
+    });
     await page.click("#stop");
     await page.waitForFunction(()=>!document.querySelector("#rt-telemetry")
       ?.dataset.pcmTransport,{timeout:20000});
+    await page.waitForFunction(()=>document.querySelector("#audio-state-summary")
+      ?.textContent.startsWith("停止中"),{timeout:4000});
+    assert.ok(!await page.$eval("#audio-state-summary",
+      el=>el.textContent.includes("停止中 · 再生中")),
+      "the visible status must not claim playback after Stop");
     // The original button remains a separate audition path, not an alias
     // for granular pitch-shifted output on the new default home page.
     await page.click("#play-dry");
