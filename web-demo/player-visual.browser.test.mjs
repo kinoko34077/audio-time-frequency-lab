@@ -74,7 +74,7 @@ test("R4 usability visual captures: desktop and mobile player and folded researc
       "the model tab must not duplicate the full waveform/player panel");
     assert.equal(await page.$eval("#model-transport-host #play-main",el=>el.getClientRects().length>0),true,
       "the same primary Play must be reachable on the model tab");
-    assert.equal(await page.$eval("#lab-speed,#lab-pitch",nodes=>nodes.length),0,
+    assert.equal(await page.evaluate(()=>document.querySelectorAll("#lab-speed,#lab-pitch").length),0,
       "speed and pitch must have one canonical editable UI pair");
     assert.equal(await page.$eval("#settings-open",el=>el.getClientRects().length),0,
       "old Frequency Warp settings must not be a public Audio Time entry");
@@ -103,7 +103,7 @@ test("R4 usability visual captures: desktop and mobile player and folded researc
     assert.equal(await mobile.$eval(".model-legacy-fold",el=>el.getClientRects().length),0);
     assert.equal(await mobile.$eval("#main-player-panel",el=>el.getClientRects().length),0);
     assert.equal(await mobile.$eval("#model-transport-host #play-main",el=>el.getClientRects().length>0),true);
-    assert.equal(await mobile.$eval("#lab-speed,#lab-pitch",nodes=>nodes.length),0);
+    assert.equal(await mobile.evaluate(()=>document.querySelectorAll("#lab-speed,#lab-pitch").length),0);
     await mobile.screenshot({path:path.join(captureDir,"04-model-mobile.png")});
     console.log("UI_REVIEW_JPEG_MODEL_MOBILE:"+Buffer.from(await mobile.screenshot({type:"jpeg",quality:30})).toString("base64"));
     assert.deepEqual(errors,[],"no console page exceptions");
