@@ -109,8 +109,11 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, swit
       status.dataset.kind="warning";
       status.textContent="再生中。警告の詳細は保持されています。";
     });
-    await page.waitForFunction(()=>document.querySelector("#audio-state-summary")
-      ?.textContent.startsWith("再生中"),{timeout:4000});
+    await page.waitForFunction(()=>{
+      const summary=document.querySelector("#audio-state-summary");
+      return summary?.dataset.kind==="warning"&&
+        summary.textContent.includes("警告の詳細は保持されています。");
+    },{timeout:4000});
     await page.click("#play-main");
     await page.waitForFunction(()=>document.querySelector("#play-main")
       ?.textContent.includes("再開")&&
