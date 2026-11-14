@@ -538,6 +538,13 @@ test("U1/U5 primary Play routes to REAL selected live/PV/Granular engines and on
     assert.equal(await page.$eval("#granular-speed-value",e=>e.value),"0");
     assert.equal(await page.evaluate(()=>window.__engineCreations.length),workletsBefore,
       "unsupported live 0x must not instantiate a substituted DSP");
+    // When the user restores a compatible speed, the already selected
+    // pending Rust model becomes the real processing path automatically.
+    await page.click("#main-tab-player");
+    await set("granular-speed-value","1.5");
+    await page.waitForFunction(()=>document.querySelector("#rt-indicator")
+      ?.textContent.includes("Rust/WASM AudioWorklet"),{timeout:20000});
+    assert.equal(await page.$eval("#granular-speed-value",e=>e.value),"1.5");
     assert.deepEqual(errors,[]);
     console.log("U1_U5_REAL_MODEL_ROUTE "+JSON.stringify({
       engines:await page.evaluate(()=>window.__engineCreations),
