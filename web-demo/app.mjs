@@ -1138,9 +1138,12 @@ function startSource(p,offset){
   if(p.worklet)p.worklet.port.postMessage({type:"reset"});
   const src=state.ctx.createBufferSource();
   src.buffer=p.buffer;src.loop=true;src.connect(p.worklet||p.dry);
-  p.sourceTimeRate=(p.labRealtime||p.labProcessed)?lab.speed:1;
-  src.playbackRate.value=p.labRealtime?lab.speed:1;
-  const inputOffset=p.labProcessed?offset/lab.speed:offset;
+  // UI requests may be newer than the applied Rust/processed stream.
+  const appliedRate=(p.labRealtime||p.labProcessed)?
+    (p.appliedSpeed??lab.speed):1;
+  p.sourceTimeRate=appliedRate;
+  src.playbackRate.value=p.labRealtime?appliedRate:1;
+  const inputOffset=p.labProcessed?offset/appliedRate:offset;
   const when=state.ctx.currentTime+.025;
   src.start(when,clamp(inputOffset,0,Math.max(0,p.buffer.duration-.001)));
   p.source=src;p.offset=offset;p.at=when;state.seek=offset;
@@ -1177,7 +1180,12 @@ function seek(seconds){
   const where=clamp(seconds,0,Math.max(0,rightEdge));
   state.seek=where;mediaStatus(Boolean(p&&!p.paused));
   if(!p)return;
-  if(p.labStream){void stop().then(()=>play("wet",where));return;}
+  if(p.labStream){
+    // Restart the existing, applied renderer. Requested model settings can
+    // still be pending; play("wet") would reject AFTER stopping this stream.
+    void startModelPlayback(where,p.appliedConfig);
+    return;
+  }
   if(p.rawPCM){
     p.offset=where;
     schedulePCMSeek(p,Math.min(state.dry[0].length-1,
@@ -1633,6 +1641,7 @@ async function play(mode="wet",offset=null){
     const player={
       worklet,dry,wet,master,directRoute,bridgeRoute:null,outputRoute:"direct",
       buffer:makeBuffer(),source:null,labRealtime:lab.mode==="live",labProcessed:false,
+      appliedLabMode:lab.mode,appliedSpeed:lab.mode==="live"?lab.speed:1,
       mode,quality:current.qualityIndex,engine:current.engine,hopDiv:current.hopDiv,at:ctx.currentTime,
       offset:0,appliedRevision:0,feedback:createPlaybackFeedback(),
       notice:preflight.warnings.join(" ")
@@ -2498,6 +2507,7 @@ async function labSettingsChanged(){
              !lab.individual&&player.labRealtime){
       const p=player;p.offset=currentTime;p.at=state.ctx.currentTime;
       p.sourceTimeRate=lab.speed;
+      p.appliedSpeed=lab.speed;
       p.source?.playbackRate.setValueAtTime(lab.speed,state.ctx.currentTime);
       updateParams("lab");
     }else if(nextMode!=="granular"){
@@ -2517,7 +2527,18 @@ function liveSliderValue(){
   $("#lab-period-cycles-output").textContent=String(selectedPeriodCycles())+"周期";
 }
 [labShort,labLong,labWindows,labPeriod].forEach(node=>node.addEventListener("input",liveSliderValue));
-async function startModelPlayback(offset=null){
+async function startModelPlayback(offset=null,appliedOverride=null){
+  // A seek must not replace the active Worker config with a requested but
+  // unapplied model/speed. Capture the actual renderer settings at launch.
+  const applied=appliedOverride||Object.freeze({
+    mode:lab.mode,speed:lab.speed,semitones:lab.semitones,
+    individual:lab.individual,fftSize:lab.fftSize,
+    shortFftSize:lab.shortFftSize,longFftSize:lab.longFftSize,
+    referenceWindows:lab.referenceWindows,periodCycles:lab.periodCycles
+  });
+  const pending=Boolean(appliedOverride)&&(
+    applied.mode!==lab.mode||applied.speed!==lab.speed||
+    applied.semitones!==lab.semitones||applied.individual!==lab.individual);
   const where=clamp(offset??(state.player?playPosition():state.seek),0,Math.max(0,duration()-.001));
   if(state.player)await stop();
   // Native AudioContext (and original file decoder/transport) is inherited;
@@ -2526,19 +2547,25 @@ async function startModelPlayback(offset=null){
   const ctx=await context();
   if(epoch!==state.transportEpoch)return;
   state.seek=where;
-  labStatusText((lab.individual?"個別波長＋":"")+lab.mode.toUpperCase()+" · 再生位置から先読み処理を開始…");
+  if(!pending)labStatusText((applied.individual?"個別波長＋":"")+
+    applied.mode.toUpperCase()+" · 再生位置から先読み処理を開始…");
   let player;
   try{
     const stream=createModelStream({
       ctx,sourceChannels:state.dry,sampleRate:state.decoded.sampleRate,
-      speed:lab.speed,semitones:lab.semitones,model:lab.individual?"period-joint":lab.mode,
-      jointBackend:lab.individual?lab.mode:null,
-      fftSize:lab.fftSize,shortFftSize:lab.shortFftSize,longFftSize:lab.longFftSize,referenceWindows:lab.referenceWindows,periodCycles:lab.periodCycles,startSeconds:where,
-      onStatus:text=>{if(state.player===player)labStatusText(text);},
+      speed:applied.speed,semitones:applied.semitones,
+      model:applied.individual?"period-joint":applied.mode,
+      jointBackend:applied.individual?applied.mode:null,
+      fftSize:applied.fftSize,shortFftSize:applied.shortFftSize,
+      longFftSize:applied.longFftSize,referenceWindows:applied.referenceWindows,
+      periodCycles:applied.periodCycles,startSeconds:where,
+      onStatus:text=>{if(state.player===player&&!pending)labStatusText(text);},
       onStarted:at=>{
         if(state.player!==player)return;
         player.at=at;controls.stop.disabled=false;
-        indicator("モデル再生中 · "+(lab.individual?"個別波長＋":"")+lab.mode.toUpperCase()+" · 自動先読み");
+        indicator("モデル再生中 · "+(applied.individual?"個別波長＋":"")+
+          applied.mode.toUpperCase()+" · 自動先読み"+
+          (pending?"（新しいモデル設定は適用待ち）":""));
         message("選択モデルを順次処理して再生中。全曲の計算は不要です。");
       },
       onFailure:error=>{
@@ -2556,8 +2583,9 @@ async function startModelPlayback(offset=null){
         })();
       }
     });
-    player={labStream:true,stream,mode:"wet",appliedLabMode:lab.mode,offset:where,at:ctx.currentTime,
-      sourceTimeRate:lab.speed,master:stream.master};
+    player={labStream:true,stream,mode:"wet",appliedLabMode:applied.mode,
+      appliedConfig:applied,offset:where,at:ctx.currentTime,
+      sourceTimeRate:applied.speed,master:stream.master};
     state.player=player;controls.stop.disabled=false;
     controls.main.textContent="■ モデル停止";
     controls.main.setAttribute("aria-label","選択した処理モデルの再生を停止");
