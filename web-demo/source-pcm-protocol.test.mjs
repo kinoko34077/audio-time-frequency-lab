@@ -178,3 +178,22 @@ test("atomic scratch preserves Granular overlap and renders the held destination
     "reverse scratch must advance actual audio source time backwards");
   assert.equal(messages.filter(m=>m.type==="error").length,0);
 });
+
+test("render progress publishes the actual signed source speed and A/B bounds for display",()=>{
+  const {p,messages}=processor({sourceFrames:4096,sourceSampleRate:48000,
+    channelCount:1,startFrame:1000,speed:-1,loopEnabled:true,
+    loopStartFrame:500,loopEndFrame:3000});
+  p.port.onmessage({data:{type:"command",op:"play",requestId:1}});
+  for(let i=0;i<8;i++)p.process([],[[new Float32Array(128)]]);
+  const progress=messages.find(x=>x.type==="progress");
+  assert.ok(progress,"render thread must send a snapshot after eight real blocks");
+  assert.equal(progress.running,true);
+  assert.equal(progress.speed,-1);
+  assert.equal(progress.loopEnabled,true);
+  assert.equal(progress.loopStartFrame,500);
+  assert.equal(progress.loopEndFrame,3000);
+  assert.equal(progress.sourceFrame,p.renderer.timeline.state.sourceFrame);
+  assert.equal(progress.revision,p.renderer.timeline.state.revision);
+  assert.equal(progress.outputTime,null,
+    "non-browser Worklet harness has no real audio clock and must not invent it");
+});

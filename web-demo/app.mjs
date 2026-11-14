@@ -18,6 +18,7 @@ import {defineParameter} from "./parameter-binding.mjs";
 import {mountFrequencyUnitField,mountParameterUnitField} from "./frequency-unit-field.mjs";
 import {reconcileFrequencyBounds} from "./frequency-bounds.mjs";
 import {prepareStreamSettings} from "./stream-parameter-contract.mjs";
+import {displaySourceFrameFromProgress} from "./player-display-clock.mjs";
 import {createPlaybackFeedback} from "./playback-feedback.mjs";
 import {axisShiftUnits,axisShiftCanonical,axisShiftView} from "./axis-shift-view.mjs";
 
@@ -801,8 +802,27 @@ function playPosition(){
   }
   return (state.player.offset+Math.max(0,state.ctx.currentTime-state.player.at)*(state.player.sourceTimeRate||1))%duration();
 }
+// Only paint-time consumers use extrapolation. playPosition() remains the
+// authoritative received source frame for model changes, seeks, A/B and
+// transport control: a prediction must NEVER become a seek command.
+function displayPlayPosition(){
+  const p=state.player;
+  if(activeWavePointer!==null||detailWaveScrubbing||hoverWave!==null||
+     !p?.rawPCM||p.paused||!state.ctx||!state.decoded||!state.dry)
+    return playPosition();
+  const progress=p.pcmBridge?.latest;
+  const applied=p.lastAppliedFrame;
+  if(applied&&(!progress||!Number.isSafeInteger(progress.revision)||
+     progress.revision<applied.revision))return playPosition();
+  const sample=displaySourceFrameFromProgress(progress,{
+    audioTime:state.ctx.currentTime,
+    sourceRate:state.decoded.sampleRate,
+    sourceFrames:state.dry[0].length
+  });
+  return Number.isFinite(sample)?sample/state.decoded.sampleRate:playPosition();
+}
 function refreshPlayhead(){
-  const seconds=playPosition();
+  const seconds=displayPlayPosition();
   $("#elapsed").textContent=fmtTime(seconds);
   $("#duration").textContent=fmtTime(duration());
   $("#playhead").style.left=(duration()?clamp(seconds/duration(),0,1)*100:0)+"%";
@@ -978,7 +998,7 @@ detailWaveEditor=createPlayerWaveEditor({
   zoomIn:$("#wave-zoom-in"),zoomOut:$("#wave-zoom-out"),
   zoomLabel:$("#wave-zoom-label"),
   visibleStart:$("#wave-visible-start"),visibleEnd:$("#wave-visible-end"),
-  getPosition:()=>playPosition(),
+  getPosition:()=>displayPlayPosition(),
   onScrubMotion:waveformScrubMotion,
   onHoverFrame:frame=>waveHoverSample("detail",frame),
   onHoverEnd:restore=>waveHoverEnd("detail",restore),
