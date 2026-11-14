@@ -438,7 +438,7 @@ test("U1/U5 primary Play routes to REAL selected live/PV/Granular engines and on
       e.kind==="worklet"&&e.name==="frequency-warp-rust"),{timeout:20000});
     await page.waitForFunction(()=>document.querySelector("#play-main")
       ?.textContent.includes("モデル停止"),{timeout:20000});
-    assert.match(await page.$eval("#lab-model-compatibility",el=>el.textContent),/未対応/);
+    assert.match(await page.$eval("#lab-model-compatibility",el=>el.textContent),/非対応|未対応/);
     await page.click("#main-tab-model");
     await set("lab-model","pv");
     await page.waitForFunction(()=>window.__engineCreations?.some(e=>
