@@ -138,9 +138,27 @@ test("live Audio Lab opt-in original playback uses a persistent PCM node across 
       quality.querySelector('[value="invalid-for-test"]').remove();
     });
 
+    const beforeStop=await page.evaluate(()=>{
+      const el=document.querySelector("#stop"),rect=el.getBoundingClientRect();
+      const hit=document.elementFromPoint(rect.left+rect.width/2,rect.top+rect.height/2);
+      return {disabled:el.disabled,rect:{x:rect.x,y:rect.y,w:rect.width,h:rect.height},
+        hit:hit?.id||hit?.tagName,indicator:document.querySelector("#rt-indicator").textContent,
+        status:document.querySelector("#status").textContent,
+        pcm:document.querySelector("#rt-telemetry").dataset.pcmTransport};
+    });
     await page.click("#stop");
-    await page.waitForFunction(()=>!document.querySelector("#rt-telemetry")
-      ?.dataset.pcmTransport,{timeout:10000});
+    try{
+      await page.waitForFunction(()=>!document.querySelector("#rt-telemetry")
+        ?.dataset.pcmTransport,{timeout:3500});
+    }catch(error){
+      const afterStop=await page.evaluate(()=>({
+        disabled:document.querySelector("#stop").disabled,
+        pcm:document.querySelector("#rt-telemetry").dataset.pcmTransport,
+        indicator:document.querySelector("#rt-indicator").textContent,
+        status:document.querySelector("#status").textContent}));
+      throw Error("Legacy Stop failed to clear PCM session: "+
+        JSON.stringify({beforeStop,afterStop})+" / "+error.message);
+    }
 
     // A startup failure must never strand the original/wet playback controls.
     await page.evaluate(()=>{
