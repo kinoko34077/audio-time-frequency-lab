@@ -1631,6 +1631,10 @@ async function play(mode="wet",offset=null){
     player.feedback.ready();
     tuneWet();
     controls.stop.disabled=false;
+    if(mode==="wet"){
+      controls.main.textContent="■ モデル停止";
+      controls.main.setAttribute("aria-label","選択した処理モデルの再生を停止");
+    }
     indicator("稼働中 · Rust/WASM AudioWorklet · "+(1000*result.latencyFrames/ctx.sampleRate).toFixed(1)+" ms DSP遅延");
     message(player.notice ||
       (mode==="wet"?"128サンプル単位でリアルタイム変換中。ツマミ操作で曲全体を再計算しません。":"原音再生中。"),
@@ -2447,6 +2451,11 @@ async function labSettingsChanged(){
     return;
   }
   const player=state.player;
+  $("#granular-optin-status").textContent=capability.supported?
+    "選択モデル: "+nextMode+"。"+(capability.sampleAB?
+      "サンプル単位A/B・正逆・0倍対応。":
+      "0/逆再生とサンプル単位A/B・即時スクラブは未対応。設定値は保持。"):
+    "未適用: "+capability.reason;
   if(player&&player.mode!=="dry"){
     if(previous!==nextMode||
        (nextMode==="granular"&&!player.rawPCM)||
@@ -2516,12 +2525,20 @@ async function startModelPlayback(offset=null){
         // Recover from the last AUDIBLE source time, not the initial seek.
         // A pending Worker may fail minutes after stream launch.
         const resume=playPosition();
-        void (async()=>{await stop();if(!state.player)await play("dry",resume);})();
+        void (async()=>{
+          await stop();
+          if(state.player)return;
+          state.seek=resume;
+          indicator("選択モデルの処理失敗 · 再生停止");
+          message("選択モデルで音声処理できませんでした: "+error,"error");
+        })();
       }
     });
     player={labStream:true,stream,mode:"wet",offset:where,at:ctx.currentTime,
       sourceTimeRate:lab.speed,master:stream.master};
     state.player=player;controls.stop.disabled=false;
+    controls.main.textContent="■ モデル停止";
+    controls.main.setAttribute("aria-label","選択した処理モデルの再生を停止");
     mediaStatus(true);stream.start();refreshPlayhead();
   }catch(error){
     labStatusText("処理開始失敗: "+error.message);
