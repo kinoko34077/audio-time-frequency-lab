@@ -42,7 +42,7 @@ export function createPlayerWaveEditor({
   onScrubMotion=()=>{},onHoverFrame=()=>false,onHoverEnd=()=>{}
 }){
   let channels=null,rate=48000,levels=null,frames=0,spanFrames=rate*8;
-  let lastDraw=0,lastFrame=NaN,lastSpan=NaN,lastWidth=0,lastHeight=0;
+  let lastFrame=NaN,lastSpan=NaN,lastWidth=0,lastHeight=0;
   const pointers=new Map();
   let gesture=null,dragged=false,active=false;
   // Anchor the unpressed hover to the waveform on pointer entry. Reusing a
@@ -97,17 +97,23 @@ export function createPlayerWaveEditor({
   }
   function refresh(force=false){
     if(!frames||!canvas.isConnected||!canvas.clientWidth)return;
-    const now=performance.now(),c=center(),w=canvas.clientWidth,h=canvas.clientHeight;
-    if(!force&&now-lastDraw<32)return;
+    const c=center(),w=canvas.clientWidth,h=canvas.clientHeight;
+    // Already invoked once per browser RAF by app.mjs. The former 32ms
+    // throttle added an avoidable 30Hz stair-step to a 60Hz playhead.
     // A subpixel source movement does not alter the visible waveform; still
     // update marker positions, because A/B may have changed.
     const changed=force||w!==lastWidth||h!==lastHeight||spanFrames!==lastSpan||
       Math.abs(c-lastFrame)>spanFrames/Math.max(1,w)*.35;
     if(changed){
-      lastDraw=now;lastFrame=c;lastSpan=spanFrames;lastWidth=w;lastHeight=h;
+      lastFrame=c;lastSpan=spanFrames;lastWidth=w;lastHeight=h;
       const ratio=Math.min(devicePixelRatio||1,2);
-      canvas.width=Math.max(1,Math.round(w*ratio));
-      canvas.height=Math.max(1,Math.round(h*ratio));
+      const pixelWidth=Math.max(1,Math.round(w*ratio));
+      const pixelHeight=Math.max(1,Math.round(h*ratio));
+      // Setting canvas.width or height *always clears the backing buffer*
+      // and resets canvas state. Reallocate only on actual pixel resize.
+      // This prevents a complete canvas reconstruction on every playhead RAF.
+      if(canvas.width!==pixelWidth)canvas.width=pixelWidth;
+      if(canvas.height!==pixelHeight)canvas.height=pixelHeight;
       const context=canvas.getContext("2d"),width=canvas.width,height=canvas.height;
       const xScale=width/w,scale=height/h;
       context.clearRect(0,0,width,height);
