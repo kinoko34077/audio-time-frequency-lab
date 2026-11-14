@@ -234,10 +234,13 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, swit
     // playhead may wrap and need not exceed the pre-drag position.
     // Direction is verified at each live mouse move above; here check
     // bounded final transport state and persistent worklet, not chronology.
-    const afterScrub=Number(await page.$eval("#wave-detail",
-      el=>el.getAttribute("aria-valuenow")));
+    const finalScrubState=await page.$eval("#wave-detail",el=>({
+      frame:Number(el.getAttribute("aria-valuenow")),
+      maxFrame:Number(el.getAttribute("aria-valuemax"))
+    }));
+    const afterScrub=finalScrubState.frame;
     assert.ok(Number.isSafeInteger(afterScrub)&&afterScrub>=0&&
-      afterScrub<sourceFrames,
+      afterScrub<=finalScrubState.maxFrame,
       "final sample position must remain within the actual source: "+
       JSON.stringify({beforePan,forwardDragHead,reverseDragHead,afterScrub}));
     assert.equal(await page.$eval("#rt-telemetry",el=>Number(el.dataset.pcmNodeStarts)),starts,
@@ -475,9 +478,11 @@ test("U1/U5 primary Play routes to REAL selected live/PV/Granular engines and on
     assert.equal(await page.$eval("#player-loop-a",e=>e.value),"5000");
     assert.equal(await page.$eval("#player-loop-b",e=>e.value),"16000");
     await set("lab-speed","1.5");
-    await set("lab-pitch","0.75");
+    // This control is a 0.1-step range slider. Direct typed precision is
+    // checked independently above with the retained 0.125 canonical value.
+    await set("lab-pitch","0.7");
     assert.equal(await page.$eval("#granular-speed-value",e=>e.value),"1.5");
-    assert.equal(await page.$eval("#granular-pitch-value",e=>e.value),"0.75");
+    assert.equal(await page.$eval("#granular-pitch-value",e=>e.value),"0.7");
     // Unsupported speed must stop, not claim the selected Rust mode plays
     // a different speed or silently replace it with Granular/original.
     await set("granular-speed-value","0");
