@@ -179,8 +179,14 @@ export function createPlayerWaveEditor({
     if(gesture?.type==="pan"&&gesture.id===id){
       clearTimeout(gesture.idleTimer);
       if(active){
-        const elapsed=performance.now()-(gesture.lastMovedAt??-Infinity);
-        onScrubMotion(reason==="release"?releaseScrubSpeed(gesture.velocity??0,elapsed):0,reason);
+        if(reason==="release"&&gesture.moved){
+          const elapsed=performance.now()-(gesture.lastMovedAt??-Infinity);
+          onScrubMotion(releaseScrubSpeed(gesture.velocity??0,elapsed),"release");
+        }else{
+          // No movement means no record throw. Do not schedule a 480ms
+          // inertia tail after a simple tap or an interrupted gesture.
+          onScrubMotion(0,"cancel");
+        }
       }
     }
     pointers.delete(id);
