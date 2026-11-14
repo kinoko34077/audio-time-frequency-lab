@@ -66,11 +66,12 @@ test('real schedule registers late Worker completion without skipping playback p
   assert.ok(Math.abs(stream.sourcePositionAt(15.54)-6.25)<.0001);
  }finally{stream?.stop();globalThis.Worker=original;}
 });
-test('app playback and error fallback use audible scheduled source rather than original start offset',()=>{
- const app=readFileSync(new URL('app.mjs',import.meta.url),'utf8');
- assert.match(app,/if\(state\.player\.labStream\)return state\.player\.stream\.sourcePositionAt\(state\.ctx\.currentTime\)/);
- assert.match(app,/const resume=playPosition\(\);\s*void \(async\(\)=>\{await stop\(\);if\(!state\.player\)await play\("dry",resume\);\}\)\(\)/);
- assert.doesNotMatch(app,/stop\(\)\.then\(\(\)=>play\("dry",where\)\)/);
+test('app model playback uses audible scheduled source and fails explicitly without dry substitution',()=>{
+  const app=readFileSync(new URL('app.mjs',import.meta.url),'utf8');
+  assert.match(app,/if\(state\.player\.labStream\)return state\.player\.stream\.sourcePositionAt\(state\.ctx\.currentTime\)/);
+  assert.match(app,/const resume=playPosition\(\);\s*void \(async\(\)=>\{\s*await stop\(\);\s*if\(state\.player\)return;\s*state\.seek=resume;/);
+  assert.match(app,/message\("選択モデルで音声処理できませんでした: "\+error,"error"\)/);
+  assert.doesNotMatch(app,/if\(!state\.player\)await play\("dry",resume\)/);
 });
 
 test('disabled joint-mode long/short/reference controls do not change preview context',()=>{
