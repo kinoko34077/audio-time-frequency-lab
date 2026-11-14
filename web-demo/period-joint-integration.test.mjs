@@ -21,7 +21,7 @@ test('checkbox has exact label/default OFF and selects experimental branch of pl
  assert.match(html,/周波数ごとの個別波長/);
  assert.doesNotMatch(html,/<input id="lab-individual-periods"[^>]*checked/);
  assert.match(app,/const nextIndividual=labIndividual.checked/);
- assert.match(app,/jointBackend:lab.individual\?lab.mode:null/);
+ assert.match(app,/jointBackend:applied.individual\?applied.mode:null/);
  assert.match(app,/labModel.disabled=false/);
 });
 test('opted-in mixed tone renders rather than refusing the requested audio',()=>{
