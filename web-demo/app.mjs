@@ -18,6 +18,7 @@ import {defineParameter} from "./parameter-binding.mjs";
 import {mountFrequencyUnitField,mountParameterUnitField} from "./frequency-unit-field.mjs";
 import {reconcileFrequencyBounds} from "./frequency-bounds.mjs";
 import {prepareStreamSettings} from "./stream-parameter-contract.mjs";
+import {displaySourceFrameFromProgress} from "./player-display-clock.mjs";
 import {createPlaybackFeedback} from "./playback-feedback.mjs";
 import {axisShiftUnits,axisShiftCanonical,axisShiftView} from "./axis-shift-view.mjs";
 
@@ -794,9 +795,18 @@ function playPosition(){
     // event. Never repaint the head at an OLD progress frame after a precise
     // seek has already been applied by the audio processor.
     const applied=state.player.lastAppliedFrame;
-    const samples=applied&&(!progress||!Number.isSafeInteger(progress.revision)||
-      progress.revision<applied.revision)?
-      applied.frame:progress?.sourceFrame;
+    const newerReceipt=applied&&(!progress||
+      !Number.isSafeInteger(progress.revision)||
+      progress.revision<applied.revision);
+    // A just-applied atomic seek/scrub supersedes old progress. Otherwise
+    // interpolate only the DISPLAY from real render-thread time, speed and
+    // loop bounds; no estimated frame may ever command the audio transport.
+    const samples=newerReceipt?applied.frame:
+      displaySourceFrameFromProgress(progress,{
+        audioTime:state.ctx.currentTime,
+        sourceRate:state.decoded.sampleRate,
+        sourceFrames:state.dry[0].length
+      });
     return Number.isFinite(samples)?samples/state.decoded.sampleRate:state.player.offset;
   }
   return (state.player.offset+Math.max(0,state.ctx.currentTime-state.player.at)*(state.player.sourceTimeRate||1))%duration();
