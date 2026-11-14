@@ -91,8 +91,18 @@ test("live Audio Lab opt-in original playback uses a persistent PCM node across 
       quality.add(new Option("Invalid test only","invalid-for-test"));
       quality.value="invalid-for-test";
     });
-    // Models now have an explicit tab; changing tabs must not stop PCM.
+    // Explicitly select the existing Rust/wet backend. Granular is now
+    // the named default and should not silently execute a Rust preflight.
+    // Changing tabs or selected model while in original/raw audition must
+    // preserve this independent PCM player until a valid wet launch.
     await page.click("#main-tab-model");
+    await page.evaluate(()=>{
+      const model=document.querySelector("#lab-model");
+      model.value="live";model.dispatchEvent(new Event("change",{bubbles:true}));
+    });
+    await page.waitForFunction(()=>document.querySelector("#lab-model").value==="live",{
+      timeout:10000
+    });
     await page.click("#play-wet");
     await page.waitForFunction(()=>document.querySelector("#status")
       ?.textContent.includes("変換設定は未反映"),{timeout:10000});
