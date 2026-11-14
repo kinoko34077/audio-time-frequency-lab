@@ -63,7 +63,7 @@ test('browser slider appears in opt-in mode and forwards user-selected cycle cou
  assert.match(app,/labPeriodField.hidden=!lab.individual/);
  assert.match(app,/labPeriod.disabled=!lab.individual/);
  assert.match(app,/lab.periodCycles=nextCycles/);
- assert.match(app,/periodCycles:lab.periodCycles,startSeconds:where/);
+ assert.match(app,/periodCycles:applied.periodCycles,startSeconds:where/);
  assert.match(stream,/longFftSize,periodCycles,jointBackend,plan/);
  assert.match(worker,/sourceStartSeconds:plan.from\/sampleRate,periodCycles,jointBackend/);
 });
