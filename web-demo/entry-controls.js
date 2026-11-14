@@ -3,6 +3,9 @@
  * a DSP module or deployment resource fails to load.
  */
 (()=>{
+  // Legacy UI is available only for inherited engineering regression checks.
+  // Audio Time users see the dedicated player/model interface by default.
+  document.body.dataset.legacyTools=new URL(location.href).searchParams.get("legacyUi")==="1"?"1":"0";
   const $=id=>document.querySelector(id);
   const dialog=$("#settings-dialog");
   const opener=$("#settings-open");
