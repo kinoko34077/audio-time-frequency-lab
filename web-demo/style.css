@@ -1233,3 +1233,51 @@ body.model-lab[data-main-tab="model"] #runtime-hud.is-hidden{
   width:max-content!important;
   margin-inline:auto!important;
 }
+
+
+/* U6 — one unobtrusive user status adjacent to the shared transport.
+   The diagnostic DOM and all render/apply telemetry remain mounted; the
+   ordinary Audio Time page does not open a second status card by default. */
+body.model-lab:not([data-legacy-tools="1"]) .audio-status-row{
+  display:flex;align-items:center;justify-content:space-between;
+  gap:8px;min-width:0;min-height:30px;margin-top:3px;
+  font-size:11px;color:#a9c8c9;
+}
+body.model-lab:not([data-legacy-tools="1"]) #audio-state-summary{
+  flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+body.model-lab:not([data-legacy-tools="1"]) #audio-state-summary[data-kind="warning"]{color:#ffd39a}
+body.model-lab:not([data-legacy-tools="1"]) #audio-state-summary[data-kind="error"]{
+  color:#f6a5a2;white-space:normal;overflow-wrap:anywhere;
+}
+body.model-lab:not([data-legacy-tools="1"]) #audio-diagnostics-toggle{
+  flex-shrink:0;min-height:32px;min-width:51px;padding:4px 8px;
+  font-size:11px;background:transparent;border:1px solid #31545b;
+}
+body.model-lab:not([data-legacy-tools="1"]) #runtime-hud{
+  display:none!important;
+}
+body.model-lab:not([data-legacy-tools="1"]) #runtime-hud.is-expanded{
+  position:static!important;inset:auto!important;left:auto!important;
+  right:auto!important;top:auto!important;bottom:auto!important;
+  transform:none!important;display:flex!important;
+  width:100%!important;max-width:none!important;
+  margin:5px 0 0!important;max-height:220px!important;
+  box-shadow:none!important;pointer-events:auto;
+}
+body.model-lab:not([data-legacy-tools="1"]) #runtime-hud .runtime-hud-head,
+body.model-lab:not([data-legacy-tools="1"]) #runtime-hud-restore{
+  display:none!important;
+}
+body.model-lab:not([data-legacy-tools="1"]) #runtime-hud-body{
+  display:grid!important;overflow-y:auto!important;max-height:205px!important;
+}
+body.model-lab:not([data-legacy-tools="1"]) #audio-lab .lab-bottom,
+body.model-lab:not([data-legacy-tools="1"]) #audio-lab .model-unobtrusive-note{
+  display:none!important;
+}
+body.model-lab[data-legacy-tools="1"] .audio-status-row{display:none!important}
+@media(max-width:600px){
+  body.model-lab:not([data-legacy-tools="1"]) #audio-diagnostics-toggle{min-height:38px}
+  body.model-lab:not([data-legacy-tools="1"]) .audio-status-row{gap:4px}
+}

@@ -32,7 +32,8 @@ try:
         page.goto(url,wait_until='domcontentloaded')
         page.locator('html[data-fw-boot=ready]').wait_for(timeout=15000)
         page.locator('#audio-file').set_input_files(path)
-        page.get_by_text('読み込み完了。再生できます。',exact=False).wait_for(timeout=25000)
+        page.wait_for_function("""() => document.querySelector('#audio-state-summary')
+          ?.textContent.includes('読み込み完了。再生できます。')""",timeout=25000)
         # The player owns the only editable speed/pitch controls. Select
         # models in their dedicated tab, without duplicate field proxies.
         assert page.locator("#lab-speed,#lab-pitch").count()==0
@@ -47,7 +48,8 @@ try:
             page.locator('#lab-model').select_option(model)
             page.locator('#play-main').click()
             try:
-                page.locator('#rt-indicator').get_by_text('モデル再生中',exact=False).wait_for(timeout=25000)
+                page.wait_for_function("""() => document.querySelector('#rt-indicator')
+                  ?.textContent.includes('モデル再生中')""",timeout=25000)
             except Exception as err:
                 raise AssertionError(f'{model} could not start: '+page.locator('#lab-status').inner_text()) from err
             assert 'メモリ上限' not in page.locator('#lab-status').inner_text()
@@ -67,7 +69,8 @@ try:
                 page.locator('#main-tab-player').click()
                 page.locator('#wave').evaluate("(el)=>{const r=el.getBoundingClientRect();el.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,clientX:r.left+r.width*.67,clientY:r.top+20}));}")
                 page.locator('#main-tab-model').click()
-                page.locator('#rt-indicator').get_by_text('モデル再生中',exact=False).wait_for(timeout=25000)
+                page.wait_for_function("""() => document.querySelector('#rt-indicator')
+                  ?.textContent.includes('モデル再生中')""",timeout=25000)
             page.locator('#stop').click()
             print('PASS long-track automatic bounded model:',model,flush=True)
         assert not failures, failures

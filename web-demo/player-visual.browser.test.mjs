@@ -62,6 +62,15 @@ test("R4 usability visual captures: desktop and mobile player and folded researc
     await page.waitForFunction(()=>document.documentElement.dataset.fwBoot==="ready",{timeout:20000});
     await waitForFile(page);
     await layoutEvidence(page,"desktop-loaded");
+    assert.equal(await page.$eval("#runtime-hud",e=>e.getClientRects().length),0,
+      "user-facing player must not show a second telemetry card");
+    assert.equal(await page.$eval("#audio-state-summary",e=>e.getClientRects().length>0),true);
+    await page.click("#audio-diagnostics-toggle");
+    assert.equal(await page.$eval("#runtime-hud",e=>e.getClientRects().length>0),true,
+      "actual DSP telemetry remains readable on deliberate request");
+    assert.equal(await page.$eval("#audio-diagnostics-toggle",e=>e.getAttribute("aria-expanded")),"true");
+    await page.click("#audio-diagnostics-toggle");
+    assert.equal(await page.$eval("#runtime-hud",e=>e.getClientRects().length),0);
     await page.screenshot({path:path.join(captureDir,"01-player-desktop.png"),fullPage:true});
     // Compact viewport preview is logged so reviewers without artifact ZIP
     // extraction can inspect the actual browser pixels at the exact test HEAD.
@@ -79,6 +88,26 @@ test("R4 usability visual captures: desktop and mobile player and folded researc
     assert.equal(await page.$eval("#settings-open",el=>el.getClientRects().length),0,
       "old Frequency Warp settings must not be a public Audio Time entry");
     assert.equal(await page.$eval("#audio-lab",el=>el.getClientRects().length>0),true);
+    assert.equal(await page.$eval("#model-transport-host #audio-state-summary",e=>e.getClientRects().length>0),true);
+    assert.equal(await page.$eval("#runtime-hud",e=>e.getClientRects().length),0,
+      "the model view must not append a second permanent status panel after the footer");
+    // Error states must remain visible even if the full diagnostics are closed,
+    // including startup failures from the separately loaded entry controller.
+    await page.evaluate(()=>{
+      const node=document.querySelector("#status");
+      window.__u6StatusBefore={text:node.textContent,kind:node.dataset.kind};
+      node.dataset.kind="error";node.textContent="検証用：音声処理起動失敗";
+    });
+    await page.waitForFunction(()=>document.querySelector("#audio-state-summary")
+      ?.textContent.includes("音声処理起動失敗"),{timeout:3500});
+    assert.equal(await page.$eval("#audio-state-summary",e=>e.dataset.kind),"error");
+    await page.evaluate(()=>{
+      const node=document.querySelector("#status");
+      node.dataset.kind=window.__u6StatusBefore.kind;
+      node.textContent=window.__u6StatusBefore.text;
+    });
+    await page.waitForFunction(()=>!document.querySelector("#audio-state-summary")
+      ?.textContent.includes("検証用"),{timeout:3500});
     await page.screenshot({path:path.join(captureDir,"02-model-desktop.png")});
     console.log("UI_REVIEW_JPEG_MODEL_DESKTOP:"+Buffer.from(await page.screenshot({type:"jpeg",quality:28})).toString("base64"));
     // Puppeteer's setViewport({isMobile:true,hasTouch:true}) can reload a
@@ -100,6 +129,8 @@ test("R4 usability visual captures: desktop and mobile player and folded researc
     await mobile.screenshot({path:path.join(captureDir,"03-player-mobile.png"),fullPage:true});
     console.log("UI_REVIEW_JPEG_MOBILE:"+Buffer.from(await mobile.screenshot({type:"jpeg",quality:32})).toString("base64"));
     await mobile.click("#main-tab-model");
+    assert.equal(await mobile.$eval("#runtime-hud",e=>e.getClientRects().length),0);
+    assert.equal(await mobile.$eval("#model-transport-host #audio-state-summary",e=>e.getClientRects().length>0),true);
     assert.equal(await mobile.$eval(".model-legacy-fold",el=>el.getClientRects().length),0);
     assert.equal(await mobile.$eval("#main-player-panel",el=>el.getClientRects().length),0);
     assert.equal(await mobile.$eval("#model-transport-host #play-main",el=>el.getClientRects().length>0),true);

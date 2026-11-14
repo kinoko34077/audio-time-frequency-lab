@@ -30,7 +30,11 @@ try:
       with page.expect_file_chooser(timeout=8000) as chooser:
         page.locator("#audio-file").click()
       chooser.value.set_files(path)
-      page.get_by_text("読み込み完了。再生できます。",exact=False).wait_for(timeout=20000)
+      # U6: readiness is visible in the one-line player status. Full
+      # engine telemetry stays mounted but is no longer permanently visible.
+      page.wait_for_function("""() => document.querySelector('#audio-state-summary')
+        ?.textContent.includes('読み込み完了。再生できます。')""",timeout=20000)
+      assert not page.locator("#runtime-hud").is_visible()
       assert page.locator("#play-wet").is_enabled()
       # The Audio Time player owns the only editable speed/pitch pair.
       assert page.locator("#lab-speed,#lab-pitch").count()==0
@@ -75,7 +79,9 @@ try:
       assert page.locator("#lab-short-output").inner_text()=="2048 samples"
       assert page.locator("#lab-long-output").inner_text()=="1024 samples"
       page.locator("#play-main").click()
-      page.locator("#rt-indicator").get_by_text("モデル再生中",exact=False).wait_for(timeout=25000)
+      page.wait_for_function("""() => document.querySelector('#rt-indicator')
+        ?.textContent.includes('モデル再生中')""",timeout=25000)
+      assert page.locator("#audio-state-summary").is_visible()
       assert page.locator("#lab-short-output").inner_text()=="2048 samples"
       assert page.locator("#lab-long-output").inner_text()=="1024 samples"
       # Optional model explanation must be reachable through the disclosure,
@@ -91,8 +97,9 @@ try:
       assert page.locator("#lab-windows-output").inner_text()=="2 窓"
       page.locator("#stop").click()
       page.locator("#play-dry").click()
-      page.locator("#rt-indicator").wait_for(timeout=15000)
-      assert "原音再生中" in page.locator("#rt-indicator").inner_text()
+      page.wait_for_function("""() => document.querySelector('#rt-indicator')
+        ?.textContent.includes('原音再生中')""",timeout=15000)
+      assert "原音再生中" in page.locator("#audio-state-summary").inner_text()
       page.locator("#stop").click()
       assert not failures,failures
       print("PASS native chooser, dedicated Audio Time model/player UI, WSOLA preview + windows, original transport; mobile emulation:",mobile)
