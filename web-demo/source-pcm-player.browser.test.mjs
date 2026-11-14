@@ -101,9 +101,31 @@ test("live Audio Lab opt-in original playback uses a persistent PCM node across 
       quality.add(new Option("Invalid test only","invalid-for-test"));
       quality.value="invalid-for-test";
     });
+    // Legacy status can be replaced by PCM telemetry in the following
+    // audio callback. Capture the command's actual notification transition,
+    // not an arbitrarily long-lived final HUD string.
+    await page.evaluate(()=>{
+      const status=document.querySelector("#status"),indicator=document.querySelector("#rt-indicator");
+      window.__wetPreflightTrace=[];
+      const snapshot=()=>window.__wetPreflightTrace.push({
+        status:status.textContent,indicator:indicator.textContent
+      });
+      new MutationObserver(snapshot).observe(status,{childList:true,subtree:true,characterData:true});
+      new MutationObserver(snapshot).observe(indicator,{childList:true,subtree:true,characterData:true});
+      snapshot();
+    });
     await page.click("#play-wet");
-    await page.waitForFunction(()=>document.querySelector("#status")
-      ?.textContent.includes("変換設定は未反映"),{timeout:10000});
+    try{
+      await page.waitForFunction(()=>window.__wetPreflightTrace.some(x=>
+        x.status.includes("変換設定は未反映")||x.indicator.includes("モデル設定未反映")
+      ),{timeout:3500});
+    }catch(error){
+      const observed=await page.evaluate(()=>({quality:document.querySelector("#quality").value,
+        selectedModel:document.querySelector("#lab-model").value,
+        trace:window.__wetPreflightTrace.slice(-14),
+        currentPlayer:document.querySelector("#rt-telemetry").dataset.pcmTransport}));
+      throw Error("Legacy invalid wet preflight message missing: "+JSON.stringify(observed)+" / "+error.message);
+    }
     const unchanged=await page.evaluate(()=>({
       raw:document.querySelector("#rt-telemetry").dataset.pcmTransport,
       nodes:Number(document.querySelector("#rt-telemetry").dataset.pcmNodeStarts)
