@@ -1137,3 +1137,63 @@ body.model-lab[data-main-tab="model"] .workspace-grid:has(.model-legacy-fold:not
     min-height:154px!important;
   }
 }
+
+
+/* Audio Time's public UI: legacy frequency-warp controls are an internal
+   compatibility substrate, not an Audio Time workspace. The explicit
+   legacyUi=1 test route exists solely for inherited runtime regression. */
+body.model-lab:not([data-legacy-tools="1"]) .gear,
+body.model-lab:not([data-legacy-tools="1"]) #settings-dialog,
+body.model-lab:not([data-legacy-tools="1"]) .model-legacy-fold,
+body.model-lab:not([data-legacy-tools="1"]) .offline-tool{
+  display:none!important;
+}
+body.model-lab[data-main-tab="model"] .workspace-grid,
+body.model-lab[data-main-tab="model"] .workspace-grid:has(.model-legacy-fold:not([open])){
+  display:none!important;
+}
+body.model-lab[data-main-tab="player"] #model-transport-host{
+  display:none!important;
+}
+body.model-lab[data-main-tab="model"] #model-transport-host{
+  display:block!important;
+}
+body.model-lab[data-main-tab="model"] .audio-lab-panel,
+body.model-lab[data-main-tab="model"] #model-transport-host{
+  max-width:900px;margin:0 auto 12px;
+}
+body.model-lab[data-main-tab="model"] .model-essential-grid{
+  display:block;max-width:650px;
+}
+body.model-lab[data-main-tab="model"] .model-essential-grid .lab-field:first-child{
+  display:flex;flex-direction:column;gap:6px;
+}
+.model-info-controls{
+  margin-top:10px;padding:7px 1px;border-top:1px solid #31545b;
+}
+.model-info-controls>summary{
+  cursor:pointer;font-weight:550;font-size:12px;color:#a9d2cd;
+  padding:5px 3px;
+}
+.model-transport-host{
+  border:1px solid #31545b;border-radius:12px;
+  background:#11252b;padding:10px 14px;
+}
+.model-audio-note{margin:0 0 7px;color:#a6c6c9;font-size:12px;overflow-wrap:anywhere}
+.model-transport-host .actions{
+  display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr) minmax(0,1fr);
+  gap:8px;
+}
+.model-transport-host .actions button{min-height:44px}
+.model-transport-host #play-wet{display:none!important}
+body.model-lab[data-legacy-tools="1"] .gear{display:flex!important}
+body.model-lab[data-legacy-tools="1"] #settings-dialog[open]{display:block!important}
+body.model-lab[data-legacy-tools="1"] .model-legacy-fold{display:block!important}
+body.model-lab[data-legacy-tools="1"] .model-legacy-fold>.quick-panel{display:block!important}
+body.model-lab[data-legacy-tools="1"] .offline-tool{display:block!important}
+@media(max-width:600px){
+  body.model-lab[data-main-tab="model"] .audio-lab-panel{padding:10px 11px}
+  .model-transport-host{padding:9px 10px}
+  .model-transport-host .actions{gap:5px;grid-template-columns:1.3fr .8fr 1fr}
+  .model-transport-host .actions button{font-size:12px;min-height:44px;padding:7px 2px}
+}
