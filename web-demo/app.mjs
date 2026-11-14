@@ -4,6 +4,7 @@ import {createModelStream} from "./lab-stream.mjs";
 import {createSourcePCMBridge} from "./source-pcm-bridge.mjs";
 import {returnToPlaySpeed,scrubSpeed,releaseScrubSpeed} from "./scrub-kinetics.mjs";
 import {createPlayerWaveEditor} from "./player-wave-editor.mjs";
+import {primaryModelCapability} from "./model-route.mjs";
 import {validatePlaybackSpeed,validateSpeedRailRange,speedOnRail,formatPlaybackSpeed} from "./source-timeline.mjs";
 import {frequencyFromSlider,sliderFromFrequency,holdFromFrequency,drawCrusherPreview} from "./crusher-visual.mjs";
 import {drawFrequencyGraph} from "./graph.mjs";
@@ -42,7 +43,8 @@ function mainTab(){
   return document.body.dataset.mainTab==="model"?"model":"player";
 }
 function preferredWaveMode(){
-  return mainTab()==="player"?"player":GRANULAR_EXPERIMENT?"dry":"wet";
+  return mainTab()==="player"?(lab.mode==="granular"?"player":"wet"):
+    GRANULAR_EXPERIMENT?"dry":"wet";
 }
 let graphMax=2000;
 let graphAlphaBeforeZoom=0;
@@ -59,8 +61,9 @@ const state={
   precise:Object.create(null),
   effective:{low:20,high:16000},raf:0,lastStats:null,mathCore:null,wasmPromise:null,rebuildTimer:null,sine:null,loadToken:0,transportEpoch:0
 };
-const lab={mode:"live",speed:1,semitones:0,fftSize:2048,shortFftSize:512,longFftSize:2048,referenceWindows:8,periodCycles:8,individual:false,processed:null,worker:null,job:0};
-const labReady=()=>lab.mode!=="live"&&lab.processed?.model===lab.mode&&lab.processed?.speed===lab.speed&&lab.processed?.semitones===lab.semitones;
+const lab={mode:"granular",speed:1,semitones:0,fftSize:2048,shortFftSize:512,longFftSize:2048,referenceWindows:8,periodCycles:8,individual:false,processed:null,worker:null,job:0};
+const labReady=()=>!["live","granular"].includes(lab.mode)&&
+  lab.processed?.model===lab.mode&&lab.processed?.speed===lab.speed&&lab.processed?.semitones===lab.semitones;
 
 // Continuous log bands around 20 Hz: 0..200 resolves 0.001..20 Hz,
 // 200..1000 resolves 20..20,000 Hz. Exact typed values remain independent.
@@ -146,6 +149,15 @@ function refreshGranular(){
   $("#granular-range").value=String(granular.railMax);
   $("#granular-rail-note").textContent=Math.abs(granular.speed)>granular.railMax?
     "指定速度はレール外です。直接入力した数値は保持されています。":"";
+  // The research-model tab is a second VIEW of these same user values,
+  // never an independent speed/pitch state that disagrees with main audio.
+  const ls=$("#lab-speed"),lp=$("#lab-pitch");
+  if(ls&&document.activeElement!==ls)ls.value=String(granular.speed);
+  if(lp&&document.activeElement!==lp)lp.value=String(granular.pitch);
+  if($("#lab-speed-output"))
+    $("#lab-speed-output").textContent=formatPlaybackSpeed(granular.speed)+"×";
+  if($("#lab-pitch-output"))
+    $("#lab-pitch-output").textContent=String(granular.pitch)+" 半音";
 }
 // All waveform-scrub commands share one queue: an old seek must NEVER apply
 // after the gesture's newest speed or after its kinetic release.
@@ -222,7 +234,7 @@ function waveformScrubMotion(speed,phase,sourceFrame=null){
   };
   scrubMotionFrame=requestAnimationFrame(frame);
 }
-function editGranular(kind,raw){
+function editGranular(kind,raw,fromModelTab=false){
   const input=$("#granular-"+kind+"-value");
   if(!String(raw).trim()){
     input.setCustomValidity("値を入力してください");input.reportValidity();return;
@@ -240,7 +252,11 @@ function editGranular(kind,raw){
   granular[kind]=value;refreshGranular();
   const bridge=state.player?.pcmBridge,status=$("#granular-optin-status");
   if(!bridge||bridge.processingMode!=="granular"){
-    status.textContent="設定保持中。次の実験再生時に適用します。";return;
+    status.textContent="設定保持中。現在の選択モデルで適用するには再生状態を確認してください。";
+    // Main-tab edits also drive the actually selected non-Granular model.
+    if(!fromModelTab&&state.player?.mode==="wet")
+      void labSettingsChanged();
+    return;
   }
   if(kind==="speed"&&temporaryScrubSpeed!==null){
     status.textContent="設定速度を保持しました。スクラブ終了後に反映します。";return;
@@ -804,6 +820,7 @@ function waveHoverSample(owner,sourceFrame){
   // Never silently switch a selected Rust/Worker/Dry engine, or unpause after
   // the user explicitly paused playback.
   if(!state.dry||activeWavePointer!==null||detailWaveScrubbing||
+     lab.mode!=="granular"||
      (!state.player&&mainTab()!=="player")||
      (state.player&&(!state.player.rawPCM||!state.player.granular||
        state.player.paused)))return false;
@@ -881,7 +898,7 @@ const waveSurface=$("#wave");
 waveSurface.addEventListener("pointerdown",e=>{
   if(!state.dry||(e.pointerType==="mouse"&&e.button!==0))return;
   if(activeWavePointer!==null)return;
-  if((GRANULAR_EXPERIMENT||mainTab()==="player")&&e.isTrusted&&
+  if((GRANULAR_EXPERIMENT||mainTab()==="player"&&lab.mode==="granular")&&e.isTrusted&&
      (!state.player||(state.player.rawPCM&&state.player.granular))){
     // A deliberate press takes ownership from hover; no hover-leave easing
     // may race with this finger/mouse drag's first 0× hold.
@@ -974,7 +991,8 @@ detailWaveEditor=createPlayerWaveEditor({
   },
   onStart:()=>{
     if(!state.dry||state.player)return;
-    void play("player",state.seek).catch(error=>message("スクラブ再生失敗: "+error.message,"error"));
+    void play(preferredWaveMode(),state.seek)
+      .catch(error=>message("スクラブ再生失敗: "+error.message,"error"));
   },
   onPosition:(seconds,{scrub=false}={})=>{
     if(!state.dry)return;
@@ -1177,10 +1195,14 @@ async function setMainPlayerPaused(paused){
   }
 }
 function toggleMainPlayer(){
-  const p=state.player;
-  if(p?.rawPCM&&p.mode==="player")
+  const p=state.player,mode=lab.mode==="granular"?"player":"wet";
+  if(p?.rawPCM&&p.mode==="player"&&mode==="player")
     return setMainPlayerPaused(!Boolean(p.paused));
-  return play("player");
+  // The chunked model stream and the legacy Rust graph have no in-place
+  // pause equivalent. Main toolbar explicitly stops rather than pretending
+  // to pause/resume one of those DSPs.
+  if(p&&p.mode==="wet"&&mode==="wet")return stop();
+  return play(mode);
 }
 function mediaStatus(playing){
   const session=navigator.mediaSession;
@@ -1293,6 +1315,12 @@ async function stop(){
 }
 async function play(mode="wet",offset=null){
   if(!state.dry)return;
+  if(mode==="wet"&&lab.mode==="granular")return play("player",offset);
+  if(mode==="wet"&&!primaryModelCapability(lab.mode,granular.speed).supported){
+    const note=primaryModelCapability(lab.mode,granular.speed).reason;
+    labStatusText(note);
+    message("選択モデルで再生できません: "+note,"error");return;
+  }
   if(lab.mode!=="live"&&mode==="wet")return startModelPlayback(offset);
   if(state.player?.labStream){const where=offset??playPosition();await stop();return play(mode,where);}
   if(state.player?.rawPCM){
@@ -1603,6 +1631,10 @@ async function play(mode="wet",offset=null){
     player.feedback.ready();
     tuneWet();
     controls.stop.disabled=false;
+    if(mode==="wet"){
+      controls.main.textContent="■ モデル停止";
+      controls.main.setAttribute("aria-label","選択した処理モデルの再生を停止");
+    }
     indicator("稼働中 · Rust/WASM AudioWorklet · "+(1000*result.latencyFrames/ctx.sampleRate).toFixed(1)+" ms DSP遅延");
     message(player.notice ||
       (mode==="wet"?"128サンプル単位でリアルタイム変換中。ツマミ操作で曲全体を再計算しません。":"原音再生中。"),
@@ -2323,22 +2355,27 @@ const labPeriod=$("#lab-period-cycles"),labPeriodField=$("#lab-period-cycles-fie
 const selectedPeriodCycles=()=>2**Number(labPeriod.value);
 function labStatusText(text){labStatus.textContent=text;}
 function labRefresh(){
-  $("#lab-speed-output").textContent=lab.speed.toFixed(2)+"×";
-  $("#lab-pitch-output").textContent=(lab.semitones>0?"+":"")+lab.semitones+" 半音";
+  $("#lab-speed-output").textContent=formatPlaybackSpeed(granular.speed)+"×";
+  $("#lab-pitch-output").textContent=String(granular.pitch)+" 半音";
+  if(document.activeElement!==labSpeed)labSpeed.value=String(granular.speed);
+  if(document.activeElement!==labPitch)labPitch.value=String(granular.pitch);
   $("#lab-short-output").textContent=String(lab.shortFftSize)+" samples";
   $("#lab-long-output").textContent=String(lab.longFftSize)+" samples";
   $("#lab-windows-output").textContent=String(lab.referenceWindows)+" 窓";
   $("#lab-period-cycles-output").textContent=String(lab.periodCycles)+"周期";
-  labPeriodField.hidden=!lab.individual;
-  labPeriod.disabled=!lab.individual;
+  labPeriodField.hidden=!lab.individual||lab.mode==="granular";
+  labPeriod.disabled=!lab.individual||lab.mode==="granular";
+  labIndividual.disabled=lab.mode==="granular";
   // Model selection is independent from the frequency-specific window option.
   labModel.disabled=false;
   labModel.querySelector('option[value="live"]').disabled=lab.individual;
   labShort.disabled=!["wsola","dual"].includes(lab.mode);
-  labLong.disabled=lab.mode==="wsola";
-  labWindows.disabled=lab.mode==="live"||lab.individual;
+  labLong.disabled=lab.mode==="wsola"||lab.mode==="granular";
+  labWindows.disabled=lab.mode==="live"||lab.mode==="granular"||lab.individual;
   labLong.max=lab.mode==="live"?"12":"13";
-  $("#lab-window-note").textContent=lab.individual?
+  $("#lab-window-note").textContent=lab.mode==="granular"?
+    "GranularはここにあるFFT/個別波長/参照窓の研究設定を使用しません。切替時も設定値は保持します。":
+    lab.individual?
     "周波数別の"+lab.periodCycles+"周期窓×7観測で音程成分を推定し、残りは選択中の"+lab.mode.toUpperCase()+"で処理します。短窓・長窓は各残差モデルに適用、参照窓数は使用しません。":
     lab.mode==="dual"?
     "短窓＝打音・音の切替の時間精度、長窓＝持続音の周波数精度。それぞれ別々に処理へ反映します。":
@@ -2346,6 +2383,7 @@ function labRefresh(){
     lab.mode==="live"?"Rustの部分音方式は長窓設定のみ反映します。短窓・参照窓数は使いません。":
     "このモデルは長窓を使います。短窓は複合窓・WSOLAでのみ利用します。";
   const notes={
+    granular:"Granular：主再生の音程・速度入力と同じ設定値を使用。符号付き±8倍・0倍・サンプル単位A/Bに対応します。音質の完全受入は未完了です。",
     live:"部分音：周波数の山と、その間の細かな成分も補って再合成します。密度の高い音では変換誤差が残ることがあります。",
     pv:"位相ボコーダー：音を細かな周波数に分けて伸縮します。音程を保ちやすい一方、打音がぼやけることがあります。",
     wsola:"WSOLA：波形が自然につながる位置を細かく探して伸縮します。和音や大きな音程変更では揺れが残る場合があります。",
@@ -2353,66 +2391,103 @@ function labRefresh(){
     am:"AM包絡：伸縮した音の音量の輪郭をゆっくり整えます。音量を急に掛け直さず、コム状の濁りを抑える実験方式です。",
     "period-joint":"周波数ごとの個別波長（研究版）：7つの周波数別周期窓から複数の共通部分音を推定し、残差も処理します。和音・変調・声・打音も再生対象ですが、物理的な音源分離・完全な位相/音色保持は未証明です。"
   };
-  $("#lab-model-description").textContent=lab.individual?
+  $("#lab-model-description").textContent=lab.individual&&lab.mode!=="granular"?
     "個別波長（"+lab.periodCycles+"周期）＋"+lab.mode.toUpperCase()+"：共通部分音を個別波長で再合成し、残差を選択モデルで処理します。部分音・残差の帰属は推定であり、完全な音源分離は保証しません。":
     notes[lab.mode];
-  if(!state.player?.labStream)labStatusText(lab.mode==="live"
-    ?"Rust/WASMの部分音処理 · 音源を選んで再生"
-    :(lab.individual?"個別波長＋":"")+lab.mode.toUpperCase()+" · 自動先読み処理。計算ボタン不要・再生位置から開始");
+  const cap=primaryModelCapability(lab.mode,granular.speed);
+  $("#lab-model-compatibility").textContent=cap.sampleAB?
+    "このモデルは0/逆再生・サンプル単位A/B・スクラブ対応。再生/モデルの両タブが同じ設定値です。":
+    (cap.reason||"研究モデルは0.5〜2倍のみ対応。A/B・0/逆再生・即時スクラブ非対応（元のA/B設定は保持）。");
+  if(!state.player?.labStream)labStatusText(!cap.supported?
+    "未適用: "+cap.reason:lab.mode==="granular"?
+    "Granular · 主再生・選択モデル一致":lab.mode==="live"?
+    "Rust/WASMの部分音処理 · 選択時に主再生へ適用":
+    (lab.individual?"個別波長＋":"")+lab.mode.toUpperCase()+" · 自動先読み処理。実音切替はバッファ待ちあり");
 }
 function labInvalidate(){lab.job++;lab.worker?.terminate();lab.worker=null;lab.processed=null;}
+let modelSelectionEpoch=0;
 async function labSettingsChanged(){
-  const previous=lab.mode,previousIndividual=lab.individual,currentTime=playPosition();
+  const ticket=++modelSelectionEpoch;
+  const previous=lab.mode,previousIndividual=lab.individual;
+  const currentTime=playPosition();
   const nextIndividual=labIndividual.checked;
   let nextMode=labModel.value;
   if(nextIndividual&&nextMode==="live"){
-    // Rust real-time ABI does not expose frequency-specific K-window analysis.
-    // Switch visibly, never silently claim Rust uses this checkbox.
     nextMode="pv";labModel.value="pv";
-    message("Rust/WASMリアルタイムは個別波長窓に未対応です。PV＋個別波長に切り替えました。","warning");
+    message("Rust/WASMは個別波長窓に非対応のため、PV＋個別波長を選択しました。","warning");
   }
-  const nextSpeed=Number(labSpeed.value),nextSemi=Number(labPitch.value);
+  const nextSpeed=granular.speed,nextSemi=granular.pitch;
   let nextShort=2**Number(labShort.value),nextLong=2**Number(labLong.value);
   const nextWindows=Number(labWindows.value),nextCycles=selectedPeriodCycles();
-  // The two independently adjustable lengths must maintain short < long;
-  // move only the conflicting peer when the user crosses that boundary.
-  if(nextMode==='dual'&&nextShort>=nextLong){
+  if(nextMode==="dual"&&nextShort>=nextLong){
     if(document.activeElement===labShort)nextLong=Math.min(8192,nextShort*2);
     else nextShort=Math.max(256,nextLong/2);
     labShort.value=String(Math.log2(nextShort));
     labLong.value=String(Math.log2(nextLong));
   }
   if(nextMode==="live"&&nextLong>4096){nextLong=4096;labLong.value="12";}
-  if(nextMode===lab.mode&&nextSpeed===lab.speed&&nextSemi===lab.semitones&&nextShort===lab.shortFftSize&&nextLong===lab.longFftSize&&nextWindows===lab.referenceWindows&&nextCycles===lab.periodCycles&&nextIndividual===lab.individual)return;
-  liveFactors(nextSpeed,nextSemi);
+  if(nextMode===lab.mode&&nextSpeed===lab.speed&&nextSemi===lab.semitones&&
+     nextShort===lab.shortFftSize&&nextLong===lab.longFftSize&&
+     nextWindows===lab.referenceWindows&&nextCycles===lab.periodCycles&&
+     nextIndividual===lab.individual){labRefresh();return;}
+  const capability=primaryModelCapability(nextMode,nextSpeed);
+  if(nextMode==="live"&&capability.supported)liveFactors(nextSpeed,nextSemi);
   lab.mode=nextMode;lab.speed=nextSpeed;lab.semitones=nextSemi;
-  lab.shortFftSize=nextShort;lab.longFftSize=nextLong;lab.fftSize=Math.min(4096,nextLong);lab.referenceWindows=nextWindows;lab.periodCycles=nextCycles;lab.individual=nextIndividual;
-  // Borrow the original Rust quality control, never silently pretend that
-  // +/- context windows are part of Rust's existing DSP API.
+  lab.shortFftSize=nextShort;lab.longFftSize=nextLong;
+  lab.fftSize=Math.min(4096,nextLong);
+  lab.referenceWindows=nextWindows;lab.periodCycles=nextCycles;
+  lab.individual=nextIndividual;
   $("#quality").value=lab.fftSize===1024?"eco":lab.fftSize===2048?"standard":"high";
   labInvalidate();
-  // Editing research/model options must not switch an actively playing
-  // R4 granular track back to the unprocessed original. The independent
-  // player is controlled exclusively by its own signed-speed/pitch/AB UI.
-  if(state.player&&state.player.mode!=="player"){
-    if(previous==="live"&&lab.mode==="live"&&!previousIndividual&&!lab.individual&&state.player.labRealtime){
-      const p=state.player;p.offset=currentTime;p.at=state.ctx.currentTime;
+  labRefresh();
+  if(!capability.supported){
+    if(state.player&&state.player.mode!=="dry"){
+      await stop();
+      if(ticket!==modelSelectionEpoch)return;
+      state.seek=currentTime;
+    }
+    labStatusText("未適用: "+capability.reason);
+    message("選択モデルは現在の速度を適用できません: "+capability.reason,"error");
+    return;
+  }
+  const player=state.player;
+  $("#granular-optin-status").textContent=capability.supported?
+    "選択モデル: "+nextMode+"。"+(capability.sampleAB?
+      "サンプル単位A/B・正逆・0倍対応。":
+      "0/逆再生とサンプル単位A/B・即時スクラブは未対応。設定値は保持。"):
+    "未適用: "+capability.reason;
+  if(player&&player.mode!=="dry"){
+    if(previous!==nextMode||
+       (nextMode==="granular"&&!player.rawPCM)||
+       (nextMode!=="granular"&&player.rawPCM)){
+      await stop();
+      if(ticket!==modelSelectionEpoch)return;
+      state.seek=currentTime;
+      void play(nextMode==="granular"?"player":"wet",currentTime);
+    }else if(nextMode==="live"&&previous==="live"&&!previousIndividual&&
+             !lab.individual&&player.labRealtime){
+      const p=player;p.offset=currentTime;p.at=state.ctx.currentTime;
       p.sourceTimeRate=lab.speed;
       p.source?.playbackRate.setValueAtTime(lab.speed,state.ctx.currentTime);
       updateParams("lab");
-    }else{
-      const wasWet=state.player.mode==="wet";
-      await stop();state.seek=currentTime;
-      if(wasWet)void play("wet",currentTime);
-      else void play("dry",currentTime);
+    }else if(nextMode!=="granular"){
+      await stop();
+      if(ticket!==modelSelectionEpoch)return;
+      state.seek=currentTime;void play("wet",currentTime);
     }
   }
-  labRefresh();
   if(state.dry&&lab.mode==="live"&&!state.player)updateParams("lab");
 }
-[labModel,labSpeed,labPitch,labShort,labLong,labWindows,labIndividual,labPeriod].forEach(node=>node.addEventListener("change",()=>void labSettingsChanged()));
+[labModel,labShort,labLong,labWindows,labIndividual,labPeriod]
+  .forEach(node=>node.addEventListener("change",()=>void labSettingsChanged()));
+for(const [control,kind] of [[labSpeed,"speed"],[labPitch,"pitch"]]){
+  control.addEventListener("change",()=>{
+    editGranular(kind,control.value,true);
+    void labSettingsChanged();
+  });
+}
 function liveSliderValue(){
-  $("#lab-speed-output").textContent=Number(labSpeed.value).toFixed(2)+"×";
+  $("#lab-speed-output").textContent=formatPlaybackSpeed(Number(labSpeed.value))+"×";
   $("#lab-pitch-output").textContent=labPitch.value+" 半音";
   $("#lab-short-output").textContent=String(2**Number(labShort.value))+" samples";
   $("#lab-long-output").textContent=String(2**Number(labLong.value))+" samples";
@@ -2450,12 +2525,20 @@ async function startModelPlayback(offset=null){
         // Recover from the last AUDIBLE source time, not the initial seek.
         // A pending Worker may fail minutes after stream launch.
         const resume=playPosition();
-        void (async()=>{await stop();if(!state.player)await play("dry",resume);})();
+        void (async()=>{
+          await stop();
+          if(state.player)return;
+          state.seek=resume;
+          indicator("選択モデルの処理失敗 · 再生停止");
+          message("選択モデルで音声処理できませんでした: "+error,"error");
+        })();
       }
     });
     player={labStream:true,stream,mode:"wet",offset:where,at:ctx.currentTime,
       sourceTimeRate:lab.speed,master:stream.master};
     state.player=player;controls.stop.disabled=false;
+    controls.main.textContent="■ モデル停止";
+    controls.main.setAttribute("aria-label","選択した処理モデルの再生を停止");
     mediaStatus(true);stream.start();refreshPlayhead();
   }catch(error){
     labStatusText("処理開始失敗: "+error.message);

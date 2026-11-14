@@ -34,7 +34,9 @@ try:
       assert page.locator("#play-wet").is_enabled()
       page.locator("#lab-speed").evaluate("(e)=>{e.value='1.5';e.dispatchEvent(new Event('change',{bubbles:true}));}")
       page.locator("#lab-pitch").evaluate("(e)=>{e.value='5';e.dispatchEvent(new Event('change',{bubbles:true}));}")
-      assert page.locator("#lab-model").input_value()=="live"
+      # U1: Granular is explicitly selected on the primary player, not
+      # an implicit Rust setting while a different engine renders sound.
+      assert page.locator("#lab-model").input_value()=="granular"
       # The Playwright browser can suppress AudioWorklet addModule; native
       # actual Chrome worklet proof is separately covered by lab-live-smoke.test.mjs.
       # Here the real native file picker is the acceptance target, not injection.

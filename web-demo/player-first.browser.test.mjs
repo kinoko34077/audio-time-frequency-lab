@@ -202,11 +202,20 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, swit
     // The detailed viewport is zoomed to 0.75s; gesture velocity depends on
     // pointer event timing, so assert a positive signed command, not 1.5x.
     await page.waitForFunction(()=>window.__scratchSpeeds?.some(v=>v>0.05),{timeout:8000});
+    const forwardDragHead=Number(await page.$eval("#wave-detail",
+      el=>el.getAttribute("aria-valuenow")));
     // Reverse the record by moving the waveform in the opposite direction
     // before release; the Worklet must receive an actual negative speed.
     await page.mouse.move(editingWave.x+editingWave.width*.17,
       editingWave.y+editingWave.height*.65,{steps:8});
     await page.waitForFunction(()=>window.__scratchSpeeds?.some(v=>v<-.05),{timeout:8000});
+    const reverseDragHead=Number(await page.$eval("#wave-detail",
+      el=>el.getAttribute("aria-valuenow")));
+    assert.ok(Number.isSafeInteger(forwardDragHead)&&Number.isSafeInteger(reverseDragHead),
+      "real source-frame playhead must be reported during both gesture directions");
+    assert.ok(reverseDragHead<forwardDragHead,
+      "reversing the waveform must reverse the UI source-frame position: "+
+      JSON.stringify({beforePan,forwardDragHead,reverseDragHead}));
     await page.mouse.up();
     await page.waitForFunction(()=>window.__scratchSpeeds?.length>=4&&
       window.__scratchSpeeds.at(-1)===1,{timeout:10000});
@@ -221,8 +230,19 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, swit
       const speed=document.querySelector("#granular-speed-value");
       speed.value="0";speed.dispatchEvent(new Event("change",{bubbles:true}));
     });
-    await page.waitForFunction(prev=>Number(document.querySelector("#wave-detail")
-      ?.getAttribute("aria-valuenow"))>prev,{timeout:15000},beforePan);
+    // With a short A/B loop and a reverse flick, the *post-release*
+    // playhead may wrap and need not exceed the pre-drag position.
+    // Direction is verified at each live mouse move above; here check
+    // bounded final transport state and persistent worklet, not chronology.
+    const finalScrubState=await page.$eval("#wave-detail",el=>({
+      frame:Number(el.getAttribute("aria-valuenow")),
+      maxFrame:Number(el.getAttribute("aria-valuemax"))
+    }));
+    const afterScrub=finalScrubState.frame;
+    assert.ok(Number.isSafeInteger(afterScrub)&&afterScrub>=0&&
+      afterScrub<=finalScrubState.maxFrame,
+      "final sample position must remain within the actual source: "+
+      JSON.stringify({beforePan,forwardDragHead,reverseDragHead,afterScrub}));
     assert.equal(await page.$eval("#rt-telemetry",el=>Number(el.dataset.pcmNodeStarts)),starts,
       "zoom/handle scrub may not create extra worklet nodes");
     // Native Chrome touchscreen injection: two simultaneous active contacts
@@ -283,7 +303,7 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, swit
     await page.click("#main-tab-model");
     assert.equal(await page.$eval("body",el=>el.dataset.mainTab),"model");
     assert.notEqual(await page.$eval("#audio-lab",el=>getComputedStyle(el).display),"none");
-    assert.equal(await page.$eval("#lab-model",el=>el.value),"live");
+    assert.equal(await page.$eval("#lab-model",el=>el.value),"granular");
     await page.click("#main-tab-player");
     assert.equal(await page.$eval("body",el=>el.dataset.mainTab),"player");
     assert.equal(await page.$eval("#granular-speed-value",el=>el.value),"0");
@@ -376,4 +396,110 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, swit
   }finally{
     await browser?.close();server.kill();
   }
+});
+test("U1/U5 primary Play routes to REAL selected live/PV/Granular engines and one speed/pitch state",async()=>{
+  const port=18772;
+  const server=spawn("python3",["-m","http.server",String(port),"--bind","127.0.0.1"],{
+    cwd:path.resolve("_site"),stdio:"ignore"
+  });
+  let browser;
+  try{
+    browser=await puppeteer.launch({
+      executablePath:process.env.CHROME_BIN||"/usr/bin/google-chrome",
+      headless:true,args:["--no-sandbox","--disable-dev-shm-usage",
+        "--autoplay-policy=no-user-gesture-required"]
+    });
+    const page=await browser.newPage(),errors=[];
+    page.on("pageerror",err=>errors.push(err.message));
+    await page.evaluateOnNewDocument(()=>{
+      const Worklet=window.AudioWorkletNode,NativeWorker=window.Worker;
+      window.__engineCreations=[];
+      window.AudioWorkletNode=class extends Worklet{
+        constructor(ctx,name,opts){
+          super(ctx,name,opts);
+          window.__engineCreations.push({kind:"worklet",name});
+        }
+      };
+      window.Worker=class extends NativeWorker{
+        constructor(url,options){
+          super(url,options);
+          window.__engineCreations.push({kind:"worker",name:String(url)});
+        }
+      };
+    });
+    await page.goto("http://127.0.0.1:"+port+"/",{
+      waitUntil:"domcontentloaded",timeout:20000
+    });
+    await page.waitForFunction(()=>document.documentElement.dataset.fwBoot==="ready",
+      {timeout:20000});
+    assert.equal(await page.$eval("#lab-model",el=>el.value),"granular");
+    await (await page.$("#audio-file")).uploadFile(recording);
+    await page.waitForFunction(()=>document.querySelector("#file-meta")?.textContent
+      .includes("meta-piano-a0-cc0-3s-48khz.wav"),{timeout:20000});
+    await page.waitForSelector("#play-main:not([disabled])",{timeout:10000});
+    const set=(id,value)=>page.evaluate(({id,value})=>{
+      const el=document.getElementById(id);
+      el.value=value;el.dispatchEvent(new Event("change",{bubbles:true}));
+    },{id,value});
+    await set("granular-speed-value","1.237");
+    await set("granular-pitch-value","0.125");
+    await set("player-loop-a","5000");
+    await set("player-loop-b","16000");
+    await page.click("#main-tab-model");
+    assert.equal(await page.$eval("#lab-model",el=>el.value),"granular");
+    assert.match(await page.$eval("#lab-pitch-output",el=>el.textContent),/0\.125/);
+    assert.equal(await page.$eval("#granular-speed-value",el=>el.value),"1.237");
+    await set("lab-model","live");
+    await page.waitForFunction(()=>document.querySelector("#lab-status")?.textContent
+      .includes("Rust/WASM"),{timeout:10000});
+    await page.click("#main-tab-player");
+    await page.click("#play-main");
+    await page.waitForFunction(()=>window.__engineCreations?.some(e=>
+      e.kind==="worklet"&&e.name==="frequency-warp-rust"),{timeout:20000});
+    await page.waitForFunction(()=>document.querySelector("#play-main")
+      ?.textContent.includes("モデル停止"),{timeout:20000});
+    assert.match(await page.$eval("#lab-model-compatibility",el=>el.textContent),/非対応|未対応/);
+    await page.click("#main-tab-model");
+    await set("lab-model","pv");
+    await page.waitForFunction(()=>window.__engineCreations?.some(e=>
+      e.kind==="worker"&&e.name.includes("lab-processor.worker.mjs")),{timeout:20000});
+    // The Worker overwrites transient "モデル音声を再生中" status as
+    // soon as it prefetches the next chunk. The stable indicator is emitted
+    // only by the onStarted callback after real PCM has been scheduled.
+    await page.waitForFunction(()=>document.querySelector("#rt-indicator")
+      ?.textContent.includes("モデル再生中"),{timeout:20000});
+    await set("lab-model","granular");
+    await page.waitForFunction(()=>window.__engineCreations?.some(e=>
+      e.kind==="worklet"&&e.name==="audio-lab-source-pcm"),{timeout:20000});
+    await page.waitForFunction(()=>document.querySelector("#granular-optin-status")
+      ?.dataset.renderRunning==="true",{timeout:20000});
+    assert.equal(await page.$eval("#granular-speed-value",e=>e.value),"1.237");
+    assert.equal(await page.$eval("#granular-pitch-value",e=>e.value),"0.125");
+    assert.equal(await page.$eval("#player-loop-a",e=>e.value),"5000");
+    assert.equal(await page.$eval("#player-loop-b",e=>e.value),"16000");
+    await set("lab-speed","1.5");
+    // This control is a 0.1-step range slider. Direct typed precision is
+    // checked independently above with the retained 0.125 canonical value.
+    await set("lab-pitch","0.7");
+    assert.equal(await page.$eval("#granular-speed-value",e=>e.value),"1.5");
+    assert.equal(await page.$eval("#granular-pitch-value",e=>e.value),"0.7");
+    // Unsupported speed must stop, not claim the selected Rust mode plays
+    // a different speed or silently replace it with Granular/original.
+    await set("granular-speed-value","0");
+    const workletsBefore=await page.evaluate(()=>window.__engineCreations.length);
+    await set("lab-model","live");
+    await page.waitForFunction(()=>document.querySelector("#lab-model-compatibility")
+      ?.textContent.includes("未対応"),{timeout:10000});
+    await page.waitForFunction(()=>document.querySelector("#play-main")?.textContent
+      .includes("再生"),{timeout:20000});
+    assert.equal(await page.$eval("#granular-speed-value",e=>e.value),"0");
+    assert.equal(await page.evaluate(()=>window.__engineCreations.length),workletsBefore,
+      "unsupported live 0x must not instantiate a substituted DSP");
+    assert.deepEqual(errors,[]);
+    console.log("U1_U5_REAL_MODEL_ROUTE "+JSON.stringify({
+      engines:await page.evaluate(()=>window.__engineCreations),
+      speedPitch:"one user canonical",ab:"preserved",
+      unsupportedZero:"rejected without engine swap"
+    }));
+  }finally{await browser?.close();server.kill("SIGTERM");}
 });
