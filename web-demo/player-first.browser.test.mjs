@@ -725,10 +725,29 @@ test("U7 touch tap seeks without autoplay; deliberate drag auditions PCM, paused
     assert.equal(paused.running,"false",
       "tap while explicitly paused must not silently unpause the Worklet");
     assert.equal(paused.starts,started.starts);
+    await page.click("#stop");
+    await page.waitForFunction(()=>!document.querySelector("#rt-telemetry")
+      ?.dataset.pcmTransport,{timeout:10000});
+    // Full-track overview must also start deliberate scratch *motion* from
+    // stopped state, while a tap on the exact same surface did not.
+    const overviewDrag=await point("#wave",.43,36);
+    await touch.send("Input.dispatchTouchEvent",{type:"touchStart",touchPoints:[overviewDrag]});
+    await touch.send("Input.dispatchTouchEvent",{type:"touchMove",touchPoints:[
+      {...overviewDrag,x:overviewDrag.x+75}
+    ]});
+    await touch.send("Input.dispatchTouchEvent",{type:"touchEnd",touchPoints:[]});
+    await page.waitForFunction(()=>document.querySelector("#rt-telemetry")
+      ?.dataset.pcmTransport==="granular-experimental"&&
+      document.querySelector("#granular-optin-status")?.dataset.renderRunning==="true",
+      {timeout:20000});
+    const overviewStarted=await audio();
+    assert.ok(overviewStarted.starts>started.starts,
+      "overview drag must start a new audible Worklet, not an inert seek");
     await touch.send("Emulation.setTouchEmulationEnabled",{enabled:false});
     assert.deepEqual(errors,[]);
     console.log("U7_REAL_TOUCH_INTENT "+JSON.stringify({
-      overviewTap,detailTap,deliberateDrag:started,pausedTap:paused
+      overviewTap,detailTap,detailDrag:started,pausedTap:paused,
+      overviewDrag:overviewStarted
     }));
   }finally{await browser?.close();server.kill("SIGTERM");}
 });
