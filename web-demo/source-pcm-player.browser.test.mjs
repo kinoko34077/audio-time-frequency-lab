@@ -21,7 +21,7 @@ test("live Audio Lab opt-in original playback uses a persistent PCM node across 
     const page=await browser.newPage();
     const errors=[];
     page.on("pageerror",error=>errors.push(error.message));
-    await page.goto(`http://127.0.0.1:${port}/?pcmTransport=1`,{
+    await page.goto(`http://127.0.0.1:${port}/?pcmTransport=1&legacyUi=1`,{
       waitUntil:"domcontentloaded",timeout:20000
     });
     // The actual module and input listeners must be ready before file change.
