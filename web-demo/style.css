@@ -1212,3 +1212,24 @@ body.model-lab[data-legacy-tools="1"] .offline-tool{display:block!important}
 body.model-lab[data-legacy-tools="1"] .model-transport-host #play-wet{
   display:block!important;
 }
+
+/* The model tab uses an ordinary status region rather than a fixed overlay.
+   The previous draggable floating HUD intercepted its Stop button during
+   real Chrome audio playback (#36/#71); no transport control may be covered.
+   Keep the telemetry / collapse / restore semantics unchanged. */
+body.model-lab[data-main-tab="model"] #runtime-hud{
+  position:static!important;
+  inset:auto!important;
+  left:auto!important;top:auto!important;
+  right:auto!important;bottom:auto!important;
+  width:min(900px,calc(100% - 20px))!important;
+  max-width:900px;
+  max-height:220px;
+  margin:8px auto 14px!important;
+  z-index:auto;
+  transform:none!important;
+}
+body.model-lab[data-main-tab="model"] #runtime-hud.is-hidden{
+  width:max-content!important;
+  margin-inline:auto!important;
+}
