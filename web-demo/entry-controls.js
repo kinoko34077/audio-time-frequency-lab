@@ -83,6 +83,40 @@
   };
   new MutationObserver(updateBrief).observe($("#rt-indicator"),{childList:true,subtree:true,characterData:true});
   updateBrief();
+  // Audio Time shows one stable user-facing status alongside the actual
+  // transport controls. The original detailed telemetry DOM stays mounted,
+  // but is opened only when requested; this also works on app.mjs boot errors.
+  if(document.body.dataset.legacyTools!=="1"){
+    $("#shared-transport").appendChild(hud);
+    const summary=$("#audio-state-summary"),detail=$("#audio-diagnostics-toggle");
+    const indicator=$("#rt-indicator"),status=$("#status"),modelStatus=$("#lab-status");
+    const displayState=()=>{
+      const error=status.dataset.kind==="error";
+      const warning=status.dataset.kind==="warning";
+      const pending=modelStatus.textContent.includes("適用待ち");
+      summary.dataset.kind=error?"error":pending||warning?"warning":"info";
+      if(error||(!pending&&warning)){
+        summary.textContent=status.textContent||"音声の処理状態を確認してください。";
+      }else if(pending){
+        summary.textContent="モデル設定は適用待ち（指定値を保持）";
+      }else{
+        const actual=(indicator.textContent||"停止中").trim();
+        const short=actual.split(" · ").slice(0,2).join(" · ");
+        summary.textContent=short.length>85?short.slice(0,84)+"…":short;
+      }
+    };
+    const monitor=new MutationObserver(displayState);
+    monitor.observe(indicator,{childList:true,subtree:true,characterData:true});
+    monitor.observe(modelStatus,{childList:true,subtree:true,characterData:true});
+    monitor.observe(status,{childList:true,subtree:true,characterData:true,
+      attributes:true,attributeFilter:["data-kind"]});
+    detail.addEventListener("click",()=>{
+      const open=hud.classList.toggle("is-expanded");
+      detail.setAttribute("aria-expanded",String(open));
+      detail.textContent=open?"閉じる":"詳細";
+    });
+    displayState();
+  }
   collapse.addEventListener("click",()=>{
     const folded=hud.classList.toggle("is-collapsed");
     collapse.textContent=folded?"+":"−";
