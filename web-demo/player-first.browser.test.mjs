@@ -557,6 +557,55 @@ test("U1/U5 primary Play routes to REAL selected live/PV/Granular engines and on
     await page.waitForFunction(()=>document.querySelector("#rt-indicator")
       ?.textContent.includes("Rust/WASM AudioWorklet"),{timeout:20000});
     assert.equal(await page.$eval("#granular-speed-value",e=>e.value),"1.5");
+
+    // Independent review #71 P2 regression: a requested 0x is pending for
+    // Rust, but ArrowRight seek must use its ACTUALLY APPLIED 1.5x source.
+    await page.evaluate(()=>{
+      window.__pendingRustSeekStarts=[];
+      const proto=AudioBufferSourceNode.prototype,original=proto.start;
+      proto.start=function(...args){
+        window.__pendingRustSeekStarts.push({
+          speed:this.playbackRate.value,offset:args[1]??0
+        });
+        return original.apply(this,args);
+      };
+    });
+    await set("granular-speed-value","0");
+    await page.waitForFunction(()=>document.querySelector("#lab-status")
+      ?.textContent.includes("適用待ち"),{timeout:10000});
+    await page.focus("#wave");
+    await page.keyboard.press("ArrowRight");
+    await page.waitForFunction(()=>window.__pendingRustSeekStarts.length>0,{timeout:8000});
+    const rustSeek=await page.evaluate(()=>window.__pendingRustSeekStarts.at(-1));
+    assert.equal(rustSeek.speed,1.5,
+      "pending 0x must not change the actual Rust source playback rate");
+    assert.equal(await page.$eval("#granular-speed-value",el=>el.value),"0");
+    assert.match(await page.$eval("#lab-status",el=>el.textContent),/適用待ち/);
+
+    // Repeat with an actual Worker model. Seeking while 0x is pending must
+    // restart the *applied* PV 1.5x stream, never call rejected play(wet)
+    // after destroying the only audible stream.
+    await set("granular-speed-value","1.5");
+    await page.click("#main-tab-model");
+    await set("lab-model","pv");
+    await page.waitForFunction(()=>document.querySelector("#rt-indicator")
+      ?.textContent.includes("モデル再生中"),{timeout:20000});
+    await page.click("#main-tab-player");
+    await set("granular-speed-value","0");
+    await page.waitForFunction(()=>document.querySelector("#lab-status")
+      ?.textContent.includes("適用待ち"),{timeout:10000});
+    const beforeSeekWorker=await page.evaluate(()=>window.__engineCreations
+      .filter(x=>x.kind==="worker"&&x.name.includes("lab-processor.worker.mjs")).length);
+    await page.focus("#wave");
+    await page.keyboard.press("ArrowRight");
+    await page.waitForFunction(before=>window.__engineCreations
+      .filter(x=>x.kind==="worker"&&x.name.includes("lab-processor.worker.mjs")).length>before,
+      {timeout:20000},beforeSeekWorker);
+    await page.waitForFunction(()=>document.querySelector("#rt-indicator")
+      ?.textContent.includes("モデル再生中 · PV"),{timeout:20000});
+    assert.equal(await page.$eval("#granular-speed-value",el=>el.value),"0");
+    assert.match(await page.$eval("#lab-status",el=>el.textContent),/適用待ち/);
+    assert.equal(await page.$eval("#stop",el=>el.disabled),false);
     assert.deepEqual(errors,[]);
     console.log("U1_U5_REAL_MODEL_ROUTE "+JSON.stringify({
       engines:await page.evaluate(()=>window.__engineCreations),
