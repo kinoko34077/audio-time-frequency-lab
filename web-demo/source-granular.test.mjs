@@ -235,3 +235,55 @@ test("diagnostic known 440/660Hz musical partials disambiguate pitch ridge from 
     rows,warning:"Known harmonic diagnostics isolate modulation sidebands; do not substitute for actual recorded-piano fidelity."
   }));
 });
+
+test("live pitch edits preserve active stereo overlap and synthesis time without artificial re-attack",()=>{
+  for(const speed of [-1,0,1]){
+    const g=createGranularTimePitch({sourceSampleRate:SR,outputSampleRate:SR,channelCount:2});
+    let frame=90000,last=null;
+    const render=()=>{
+      const out=[new Float32Array(128),new Float32Array(128)];
+      const result=g.render(out,{sourceFrame:frame,speed,
+        loopEnabled:false,loopStartFrame:0,loopEndFrame:FRAMES},
+        (ch,index)=>source[ch][index],FRAMES);
+      assert.equal(result.missingFrames,0,{speed,frame});
+      frame+=128*speed;
+      for(const ch of out)assert.ok(ch.every(Number.isFinite));
+      return out;
+    };
+    for(let i=0;i<16;i++)last=render();
+    const before=g.state.outputFrames,old=last.map(ch=>ch[127]);
+    assert.equal(before,2048);
+    const changed=g.setPitch(7.1234);
+    assert.equal(changed.pitchSemitones,7.1234);
+    assert.equal(g.state.outputFrames,before,
+      "a live pitch change must not destroy overlap grains or restart output time");
+    let next=render();
+    for(let ch=0;ch<2;ch++){
+      const derivative=Math.max(.015,...Array.from(last[ch].slice(1),(
+        value,i)=>Math.abs(value-last[ch][i])));
+      const join=Math.abs(next[ch][0]-old[ch]);
+      assert.ok(join<=derivative*3+.015,
+        {speed,ch,join,derivative,
+          reason:"old grains must continue across the actual emitted sample join"});
+    }
+    const after=new Float32Array(8192);
+    for(let k=0;k<64;k++){
+      next=render();after.set(next[0],k*128);
+    }
+    assert.equal(g.state.outputFrames,before+128+8192);
+    const rms=Math.sqrt(after.slice(2048).
+      reduce((sum,v)=>sum+v*v,0)/6144);
+    assert.ok(rms>.05,{speed,rms});
+    assert.ok(energy(after,659.26)>energy(after,440)*2,
+      {speed,ratio:energy(after,659.26)/energy(after,440),
+        reason:"incoming grains must actually reach the requested new pitch"});
+    const secondBefore=g.state.outputFrames;
+    g.setPitch(-5.125);
+    assert.equal(g.state.outputFrames,secondBefore,
+      "rapid subsequent pitch change must also preserve the active epoch");
+    const lastAfter=next[0][127],oldDerivative=Math.abs(next[0][127]-next[0][126]);
+    next=render();
+    assert.ok(Math.abs(next[0][0]-lastAfter)<Math.max(.2,oldDerivative*5),
+      {speed,reason:"no large new discontinuity at second live parameter edit"});
+  }
+});

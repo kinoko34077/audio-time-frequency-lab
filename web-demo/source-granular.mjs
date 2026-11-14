@@ -20,6 +20,8 @@ export function createGranularTimePitch({
   const srcPerOutput=sourceSampleRate/outputSampleRate;
   let outputFrames=0,direction=1,pitch=0,factor=1,revision=0;
   const grains=new Map();
+  // Old overlap grains retain their pitch ratios while new ones adopt edits.
+  const grainRatios=new Map();
   // Bounded output transition prevents a new pitch/speed epoch from jumping
   // immediately from the previous audio sample to a different grain phase.
   const lastSamples=new Float32Array(channelCount);
@@ -36,11 +38,8 @@ export function createGranularTimePitch({
       throw RangeError("pitch must be finite and within -12..12 semitones");
     if(pitch!==semitones){
       pitch=semitones;factor=2**(pitch/12);revision++;
-      // A new grain configuration is a new synthesis epoch, but not a new
-      // AudioWorklet node or source-time coordinate.
-      // Initial nonzero pitch is not a change between audible epochs.
-      if(outputFrames>0)beginTransition();
-      grains.clear();outputFrames=0;
+      // Do not clear audible grains or restart the output clock. Overlap
+      // already provides an old/new-grain transition at Hann endpoints.
     }
     return {pitchSemitones:pitch,pitchRatio:factor,pitchRevision:revision};
   }
@@ -60,7 +59,9 @@ export function createGranularTimePitch({
       if(Math.abs(delta)>16)beginTransition();
       for(const [k,anchor] of grains)grains.set(k,anchor+delta);
     },
-    reset(){beginTransition();grains.clear();outputFrames=0;},
+    reset(){
+      beginTransition();grains.clear();grainRatios.clear();outputFrames=0;
+    },
     render(output,state,read,sourceFrames){
       if(!Array.isArray(output)||output.length!==channelCount||
         output.some(ch=>!(ch instanceof Float32Array)||
@@ -89,9 +90,11 @@ export function createGranularTimePitch({
         if(grains.has(k))return grains.get(k);
         const desired=baseSource+(k*hopFrames-baseOutput)*step;
         const previous=grains.get(k-1);
+        const previousStep=direction*(grainRatios.get(k-1)??factor)*srcPerOutput;
         let anchor=desired;
         if(previous!==undefined&&
-          Math.abs(Math.abs(step)-Math.abs(grainStep))>1e-6){
+          (Math.abs(Math.abs(step)-Math.abs(grainStep))>1e-6||
+            Math.abs(previousStep-grainStep)>1e-6)){
           let min=Infinity,best=0;
           // Waveform-similarity phase alignment. The bounded search is
           // intentionally conservative: this is a prototype, not an
@@ -101,7 +104,7 @@ export function createGranularTimePitch({
             for(let ch=0;ch<channelCount;ch++){
               for(let q=-48;q<=48;q+=4){
                 const old=sampleAt(ch,
-                  previous+(hopFrames+q)*grainStep);
+                  previous+(hopFrames+q)*previousStep);
                 const candidate=sampleAt(ch,desired+d+q*grainStep);
                 if(Number.isFinite(old)&&Number.isFinite(candidate)){
                   const diff=old-candidate;error+=diff*diff;valid++;
@@ -116,7 +119,11 @@ export function createGranularTimePitch({
           anchor=desired+best;
         }
         grains.set(k,anchor);
-        if(grains.size>12)grains.delete(grains.keys().next().value);
+        grainRatios.set(k,factor);
+        if(grains.size>12){
+          const oldest=grains.keys().next().value;
+          grains.delete(oldest);grainRatios.delete(oldest);
+        }
         return anchor;
       };
       for(let i=0;i<output[0].length;i++){
@@ -133,7 +140,9 @@ export function createGranularTimePitch({
           for(let k=firstCenter;k<=lastCenter;k++){
             const center=k*hopFrames,weight=window[t-center+half];
             if(weight<=0)continue;
-            let p=grains.get(k)+(t-center)*grainStep;
+            // Hold the local pitch of grains that were audible before edit.
+            const localStep=direction*(grainRatios.get(k)??factor)*srcPerOutput;
+            let p=grains.get(k)+(t-center)*localStep;
             if(looping)p=wraps(p);
             if(p<0||p>=sourceFrames)continue;
             const index=Math.floor(p),frac=p-index;
