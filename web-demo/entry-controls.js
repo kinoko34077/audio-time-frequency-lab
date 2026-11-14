@@ -101,8 +101,16 @@
         summary.textContent="モデル設定は適用待ち（指定値を保持）";
       }else{
         const actual=(indicator.textContent||"停止中").trim();
-        const short=actual.split(" · ").slice(0,2).join(" · ");
-        summary.textContent=short.length>85?short.slice(0,84)+"…":short;
+        // A stopped transport can still be ready to play. File readiness
+        // belongs in the visible status, not only the hidden diagnostic DOM.
+        if(actual.startsWith("停止中")&&status.textContent.includes("読み込み完了")){
+          summary.textContent="読み込み完了。再生できます。";
+        }else if(actual.startsWith("停止中")&&status.textContent.includes("音声ファイルを選択")){
+          summary.textContent="音声ファイルを選択してください。";
+        }else{
+          const short=actual.split(" · ").slice(0,2).join(" · ");
+          summary.textContent=short.length>85?short.slice(0,84)+"…":short;
+        }
       }
     };
     const monitor=new MutationObserver(displayState);
