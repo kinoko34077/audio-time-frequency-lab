@@ -677,8 +677,8 @@ test("U7 touch tap seeks without autoplay; deliberate drag auditions PCM, paused
       });
       return {x:Math.round(b.x+b.w*fraction),y:Math.round(b.y+b.h*.67),id};
     };
-    const tap=async(selector,id)=>{
-      const p=await point(selector,.67,id);
+    const tap=async(selector,id,fraction=.54)=>{
+      const p=await point(selector,fraction,id);
       await touch.send("Input.dispatchTouchEvent",{type:"touchStart",touchPoints:[p]});
       await touch.send("Input.dispatchTouchEvent",{type:"touchEnd",touchPoints:[]});
     };
@@ -690,7 +690,7 @@ test("U7 touch tap seeks without autoplay; deliberate drag auditions PCM, paused
     }));
     const initial=await audio();
     assert.equal(initial.transport,"");
-    await tap("#wave",31);
+    await tap("#wave",31,.35);
     await new Promise(resolve=>setTimeout(resolve,350));
     const overviewTap=await audio();
     assert.equal(overviewTap.transport,"","overview tap must only seek: "+JSON.stringify(overviewTap));
@@ -703,7 +703,7 @@ test("U7 touch tap seeks without autoplay; deliberate drag auditions PCM, paused
     // A real dragged touch, as opposed to a stationary tap, must still
     // initiate the actual granular PCM output path. This does not change
     // the saved speed/pitch and allows normal DJ-style release kinetics.
-    const p=await point("#wave-detail",.58,33);
+    const p=await point("#wave-detail",.56,33);
     await touch.send("Input.dispatchTouchEvent",{type:"touchStart",touchPoints:[p]});
     await touch.send("Input.dispatchTouchEvent",{type:"touchMove",touchPoints:[
       {...p,x:p.x-75}
