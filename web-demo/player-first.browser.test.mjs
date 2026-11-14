@@ -647,3 +647,88 @@ test("U1/U5 primary Play routes to REAL selected live/PV/Granular engines and on
     }));
   }finally{await browser?.close();server.kill("SIGTERM");}
 });
+
+test("U7 touch tap seeks without autoplay; deliberate drag auditions PCM, paused remains paused",async()=>{
+  const port=18775,server=spawn("python3",["-m","http.server",String(port),"--bind","127.0.0.1"],{
+    cwd:path.resolve("_site"),stdio:"ignore"
+  });
+  let browser;
+  try{
+    browser=await puppeteer.launch({
+      executablePath:process.env.CHROME_BIN||"/usr/bin/google-chrome",
+      headless:true,args:["--no-sandbox","--disable-dev-shm-usage",
+        "--autoplay-policy=no-user-gesture-required"]
+    });
+    const page=await browser.newPage(),errors=[];
+    page.on("pageerror",e=>errors.push(e.message));
+    await page.goto(`http://127.0.0.1:${port}/`,{waitUntil:"domcontentloaded",timeout:20000});
+    await page.waitForFunction(()=>document.documentElement.dataset.fwBoot==="ready",{timeout:20000});
+    await (await page.$("#audio-file")).uploadFile(recording);
+    await page.waitForFunction(()=>document.querySelector("#file-meta")?.textContent
+      .includes("meta-piano-a0-cc0-3s-48khz.wav"),{timeout:20000});
+    await page.waitForSelector("#play-main:not([disabled])",{timeout:10000});
+    const touch=await page.createCDPSession();
+    await touch.send("Emulation.setTouchEmulationEnabled",{enabled:true,maxTouchPoints:2});
+    const point=async(selector,fraction,id)=>{
+      const b=await page.$eval(selector,el=>{
+        el.scrollIntoView({block:"center"});
+        const r=el.getBoundingClientRect();
+        return {x:r.x,y:r.y,w:r.width,h:r.height};
+      });
+      return {x:Math.round(b.x+b.w*fraction),y:Math.round(b.y+b.h*.67),id};
+    };
+    const tap=async(selector,id)=>{
+      const p=await point(selector,.67,id);
+      await touch.send("Input.dispatchTouchEvent",{type:"touchStart",touchPoints:[p]});
+      await touch.send("Input.dispatchTouchEvent",{type:"touchEnd",touchPoints:[]});
+    };
+    const audio=()=>page.evaluate(()=>({
+      transport:document.querySelector("#rt-telemetry")?.dataset.pcmTransport||"",
+      starts:Number(document.querySelector("#rt-telemetry")?.dataset.pcmNodeStarts||0),
+      running:document.querySelector("#granular-optin-status")?.dataset.renderRunning||"",
+      button:document.querySelector("#play-main")?.textContent
+    }));
+    const initial=await audio();
+    assert.equal(initial.transport,"");
+    await tap("#wave",31);
+    await new Promise(resolve=>setTimeout(resolve,350));
+    const overviewTap=await audio();
+    assert.equal(overviewTap.transport,"","overview tap must only seek: "+JSON.stringify(overviewTap));
+    assert.equal(overviewTap.starts,initial.starts);
+    await tap("#wave-detail",32);
+    await new Promise(resolve=>setTimeout(resolve,350));
+    const detailTap=await audio();
+    assert.equal(detailTap.transport,"","detail tap must not autoplay: "+JSON.stringify(detailTap));
+    assert.equal(detailTap.starts,initial.starts);
+    // A real dragged touch, as opposed to a stationary tap, must still
+    // initiate the actual granular PCM output path. This does not change
+    // the saved speed/pitch and allows normal DJ-style release kinetics.
+    const p=await point("#wave-detail",.58,33);
+    await touch.send("Input.dispatchTouchEvent",{type:"touchStart",touchPoints:[p]});
+    await touch.send("Input.dispatchTouchEvent",{type:"touchMove",touchPoints:[
+      {...p,x:p.x-75}
+    ]});
+    await touch.send("Input.dispatchTouchEvent",{type:"touchEnd",touchPoints:[]});
+    await page.waitForFunction(()=>document.querySelector("#rt-telemetry")
+      ?.dataset.pcmTransport==="granular-experimental"&&
+      document.querySelector("#granular-optin-status")?.dataset.renderRunning==="true",
+      {timeout:20000});
+    const started=await audio();
+    assert.ok(started.starts>=1,"drag must start an actual PCM Worklet");
+    await page.click("#play-main");
+    await page.waitForFunction(()=>document.querySelector("#granular-optin-status")
+      ?.dataset.renderRunning==="false",{timeout:10000});
+    await tap("#wave",34);
+    await tap("#wave-detail",35);
+    await new Promise(resolve=>setTimeout(resolve,200));
+    const paused=await audio();
+    assert.equal(paused.running,"false",
+      "tap while explicitly paused must not silently unpause the Worklet");
+    assert.equal(paused.starts,started.starts);
+    await touch.send("Emulation.setTouchEmulationEnabled",{enabled:false});
+    assert.deepEqual(errors,[]);
+    console.log("U7_REAL_TOUCH_INTENT "+JSON.stringify({
+      overviewTap,detailTap,deliberateDrag:started,pausedTap:paused
+    }));
+  }finally{await browser?.close();server.kill("SIGTERM");}
+});
