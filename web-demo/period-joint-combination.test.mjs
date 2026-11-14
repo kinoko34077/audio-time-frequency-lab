@@ -62,6 +62,6 @@ test('UI model selection and worker handoff are separated from individual checkb
  const worker=readFileSync(new URL('lab-processor.worker.mjs',import.meta.url),'utf8');
  assert.match(app,/labModel.disabled=false/);
  assert.match(app,/const nextIndividual=labIndividual.checked/);
- assert.match(app,/jointBackend:lab.individual\?lab.mode:null/);
+ assert.match(app,/jointBackend:applied.individual\?applied.mode:null/);
  assert.match(worker,/sourceStartSeconds:plan.from\/sampleRate,periodCycles,jointBackend/);
 });
