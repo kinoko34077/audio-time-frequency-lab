@@ -183,7 +183,7 @@ function cancelTemporaryScrub(restore=true){
     p.scratchQueued=null;
   }
   temporaryScrubSpeed=null;
-  if(restore&&active&&p?.rawPCM&&p.granular&&!p.initializing)
+  if(restore&&active&&p?.rawPCM&&p.granular&&!p.initializing&&!p.paused)
     queueScrubCommand(p,granular.speed);
 }
 function setTemporaryScrubSpeed(value,_force=false,frame=null){
@@ -999,10 +999,12 @@ if(PLAYER_GRANULAR_AVAILABLE){
       clearTimeout(g.idleTimer);
       if(e.type==="pointerup"){
         playheadFromPointer(e,false,true);
-        if(g.dragStarted||state.player)
+        if(g.dragStarted)
           waveformScrubMotion(releaseScrubSpeed(g.velocity,
             performance.now()-g.lastMovedAt),"release");
-        else cancelTemporaryScrub(false);
+        else cancelTemporaryScrub();
+        // A tap has no throw velocity. It must not leave 480ms of
+        // artificial inertia or an audible hold pending after pointerup.
       }else waveformScrubMotion(0,"cancel");
     }
     overviewGesture=null;activeWavePointer=null;
