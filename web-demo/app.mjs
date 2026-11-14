@@ -936,10 +936,12 @@ waveSurface.addEventListener("pointerdown",e=>{
     activeWavePointer=e.pointerId;
     const frame=waveFrameFromPointer(e),now=performance.now();
     overviewGesture={frame,lastFrame:frame,lastTime:now,lastMovedAt:-Infinity,
-      velocity:0,idleTimer:null};
-    waveformScrubMotion(0,"hold",frame);
+      startX:e.clientX,dragStarted:false,velocity:0,idleTimer:null};
+    // For a tap while stopped, select the frame but never launch sound.
+    // Existing playback may be held at 0x for hands-on scratching.
+    if(state.player)waveformScrubMotion(0,"hold",frame);
     try{waveSurface.setPointerCapture(e.pointerId);}catch{}
-    playheadFromPointer(e,true,true);
+    playheadFromPointer(e,false,true);
   }else{
     // Preserve legacy one-click seek without stealing a synthetic pointer.
     playheadFromPointer(e);
@@ -964,6 +966,17 @@ if(PLAYER_GRANULAR_AVAILABLE){
   waveSurface.addEventListener("pointermove",e=>{
     if(activeWavePointer!==e.pointerId||!overviewGesture)return;
     const g=overviewGesture,now=performance.now(),frame=waveFrameFromPointer(e);
+    // A touch tap and sub-3px jitter are not intent to start playback.
+    // True dragging still previews signed source motion.
+    if(!g.dragStarted){
+      if(Math.abs(e.clientX-g.startX)<=3)return;
+      g.dragStarted=true;
+      if(!state.player){
+        state.seek=frame/state.decoded.sampleRate;
+        void play(preferredWaveMode(),state.seek)
+          .catch(err=>message("スクラブ試聴を開始できません: "+err.message,"error"));
+      }
+    }
     const speed=scrubSpeed(g.lastFrame,frame,now-g.lastTime,
       state.decoded.sampleRate);
     g.velocity=speed;g.lastMovedAt=now;g.lastTime=now;g.lastFrame=frame;
@@ -985,8 +998,10 @@ if(PLAYER_GRANULAR_AVAILABLE){
       clearTimeout(g.idleTimer);
       if(e.type==="pointerup"){
         playheadFromPointer(e,false,true);
-        waveformScrubMotion(releaseScrubSpeed(g.velocity,
-          performance.now()-g.lastMovedAt),"release");
+        if(g.dragStarted||state.player)
+          waveformScrubMotion(releaseScrubSpeed(g.velocity,
+            performance.now()-g.lastMovedAt),"release");
+        else cancelTemporaryScrub(false);
       }else waveformScrubMotion(0,"cancel");
     }
     overviewGesture=null;activeWavePointer=null;
@@ -1018,9 +1033,11 @@ detailWaveEditor=createPlayerWaveEditor({
     if(active&&!detailWaveScrubbing)state.seek=playPosition();
     detailWaveScrubbing=active;
   },
-  onStart:()=>{
+  onStart:seconds=>{
     if(!state.dry||state.player)return;
-    void play(preferredWaveMode(),state.seek)
+    // A non-hover gesture begins audible preview only after actual movement.
+    // Start at its moved sample, not the stale pre-touch cursor.
+    void play(preferredWaveMode(),Number.isFinite(seconds)?seconds:state.seek)
       .catch(error=>message("スクラブ再生失敗: "+error.message,"error"));
   },
   onPosition:(seconds,{scrub=false}={})=>{
