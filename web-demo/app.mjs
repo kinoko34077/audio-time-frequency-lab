@@ -245,8 +245,10 @@ function editGranular(kind,raw,fromModelTab=false){
   const bridge=state.player?.pcmBridge,status=$("#granular-optin-status");
   if(!bridge||bridge.processingMode!=="granular"){
     status.textContent="設定保持中。現在の選択モデルで適用するには再生状態を確認してください。";
-    // Main-tab edits also drive the actually selected non-Granular model.
-    if(!fromModelTab&&state.player?.mode==="wet")
+    // Keep selected model parameters synchronized even while stopped.
+    // This also rechecks a pending model when its requested speed becomes
+    // feasible, without changing the canonical value or faking application.
+    if(!fromModelTab&&lab.mode!=="granular")
       void labSettingsChanged();
     return;
   }
@@ -260,6 +262,10 @@ function editGranular(kind,raw,fromModelTab=false){
       status.textContent="未反映: "+error.message;
       message("実験音声設定の反映失敗: "+error.message,"error");
     });
+  // The previously selected model may have been pending; honor it as soon as
+  // its real backend supports the newly entered speed, including during play.
+  if(!fromModelTab&&lab.mode!=="granular")
+    void labSettingsChanged();
 }
 if(PLAYER_GRANULAR_AVAILABLE){
   $("#granular-optin-controls").hidden=false;
