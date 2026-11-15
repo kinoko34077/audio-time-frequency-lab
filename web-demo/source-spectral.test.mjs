@@ -19,6 +19,7 @@ function render(speed,pitch,frames=8192){
     sourceFrames:FRAMES,sourceSampleRate:SR,outputSampleRate:SR,
     channelCount:2,startFrame:CENTER,speed
   });
+  renderer.installWindow(0,source.map(x=>x.slice(0,65536)));
   renderer.installWindow(START,source.map(x=>x.slice(START,START+65536)));
   renderer.installWindow(START+65536,source.map(x=>x.slice(START+65536,START+131072)));
   const spectral=createSpectralTimePitch({
