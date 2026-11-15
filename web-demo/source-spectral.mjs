@@ -177,7 +177,11 @@ export function createSpectralTimePitch({
     setPitch,beginTransition,reset,
     shiftSource(delta){
       if(!finite(delta))throw RangeError("invalid spectral scratch displacement");
-      if(Math.abs(delta)>.5)reset();
+      // Audio Time's atomic scrub moves the canonical source cursor. Spectral
+      // analysis follows that source frame on the NEXT hop; keep overlap-add
+      // and accumulated output phase across every finger movement.
+      // Resetting on each scrub event makes audible 256-sample repeats/cuts.
+      if(Math.abs(delta)>N/2)beginTransition();
     },
     render(output,state,read,sourceFrames){
       if(!Array.isArray(output)||output.length!==channelCount||
