@@ -110,7 +110,7 @@ test("44.1k source through 48k output preserves absolute pitch during a 0x spect
   assert.ok(power(440)>power(479)*1.6,
     "source/output sample-rate conversion must not sharpen 440 Hz into 479 Hz");
 });
-test("one original source sample loop remains a held sample; never fake its original chord",()=>{
+test("one-sample A/B is a sample-exact spectral ANALYSIS CENTER; audible context is not an artificial DC/comb loop",()=>{
   const frame=90037,renderer=createSourcePCMRenderer({
     sourceFrames:FRAMES,sourceSampleRate:SR,outputSampleRate:SR,
     channelCount:2,startFrame:frame,speed:0,
@@ -118,13 +118,22 @@ test("one original source sample loop remains a held sample; never fake its orig
   });
   renderer.installWindow(START,source.map(x=>x.slice(START,START+65536)));
   const stft=createSpectralTimePitch({
-    sourceSampleRate:SR,outputSampleRate:SR,channelCount:2,pitchSemitones:7
+    sourceSampleRate:SR,outputSampleRate:SR,channelCount:2,pitchSemitones:0
   });
-  const out=[new Float32Array(128),new Float32Array(128)];
-  assert.equal(renderer.renderSpectral(out,stft),0);
-  assert.equal(renderer.timeline.state.sourceFrame,frame);
-  for(let ch=0;ch<2;ch++)for(const x of out[ch])
-    assert.ok(Math.abs(x-source[ch][frame])<.00001);
+  const out=[new Float32Array(8192),new Float32Array(8192)];
+  for(let i=0;i<8192;i+=128){
+    const block=[new Float32Array(128),new Float32Array(128)];
+    assert.equal(renderer.renderSpectral(block,stft),0);
+    for(let ch=0;ch<2;ch++)out[ch].set(block[ch],i);
+  }
+  assert.equal(renderer.timeline.state.sourceFrame,frame,
+    "source-time center is exactly the selected single original sample");
+  const body=out[0].subarray(2048);
+  assert.ok(rms(body)>.045,{rms:rms(body)});
+  assert.ok(Math.max(...body)-Math.min(...body)>.13,
+    "a one-sample A/B must not synthesize a held PCM constant / DC");
+  assert.ok(binEnergy(out[0],440)>binEnergy(out[0],200)*2,
+    "frozen STFT must recover real local musical harmonics, not invented 1-sample grain rate");
 });
 test("source movement + reversal preserves continuous output and explicit fade boundary",()=>{
   const renderer=createSourcePCMRenderer({
