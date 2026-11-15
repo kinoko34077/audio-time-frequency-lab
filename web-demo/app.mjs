@@ -34,7 +34,9 @@ const GRANULAR_EXPERIMENT=PCM_EXPERIMENT==="granular";
 const PLAYER_GRANULAR_AVAILABLE=true;
 // The pre-existing ?pcmTransport=granular route remains a deliberate
 // regression/comparison path. Normal Audio Time uses real STFT instead.
-const isPCMModel=mode=>mode==="spectral"||mode==="granular";
+// PV is a real peak-locked streaming Worklet unless period-joint is enabled.
+const isPCMModel=(mode,individual=lab.individual)=>
+  mode==="spectral"||mode==="granular"||(mode==="pv"&&!individual);
 const initialModel=GRANULAR_EXPERIMENT||
   new URLSearchParams(location.search).get("model")==="granular"?
   "granular":"spectral";
@@ -1379,8 +1381,8 @@ async function stop(){
 async function play(mode="wet",offset=null){
   if(!state.dry)return;
   if(mode==="wet"&&isPCMModel(lab.mode))return play("player",offset);
-  if(mode==="wet"&&!primaryModelCapability(lab.mode,granular.speed).supported){
-    const note=primaryModelCapability(lab.mode,granular.speed).reason;
+  if(mode==="wet"&&!primaryModelCapability(lab.mode,granular.speed,{individual:lab.individual}).supported){
+    const note=primaryModelCapability(lab.mode,granular.speed,{individual:lab.individual}).reason;
     labStatusText(note);
     message("選択したモデルはこの速度にまだ対応していません。指定値は保持されています: "+note,"warning");return;
   }
@@ -1589,7 +1591,8 @@ async function play(mode="wet",offset=null){
       controls.main.disabled=false;
       const telemetry=$("#rt-telemetry");
       telemetry.dataset.pcmTransport=granularActive?
-        (activeSynthMode==="spectral"?"spectral-realtime":"granular-experimental"):
+        (activeSynthMode==="spectral"?"spectral-realtime":
+          activeSynthMode==="pv"?"pv-phase-locked":"granular-experimental"):
         "raw-experimental";
       telemetry.dataset.pcmNodeStarts=String(
         Number(telemetry.dataset.pcmNodeStarts||0)+1
@@ -1597,10 +1600,13 @@ async function play(mode="wet",offset=null){
       indicator(granularActive?
         (activeSynthMode==="spectral"?
           "STFT位相合成中 · ソース位置同期/±8/0倍（音響品質検証中）":
+          activeSynthMode==="pv"?
+          "PVピーク位相ロック合成中 · 元音源同期/±8/0倍（音響品質検証中）":
           "粒状合成中 · 独立音程/±8/0倍（音質未受入）"):
         "原音再生中 · PCM実験経路（速度と音程は未連動）");
       message(granularActive?
-        "再生中。"+(activeSynthMode==="spectral"?"STFT位相合成":"Granular")+
+        "再生中。"+(activeSynthMode==="spectral"?"STFT位相合成":
+          activeSynthMode==="pv"?"PVピーク位相ロック":"Granular")+
         "・極短ループ・実機可聴遅延は音響品質検証中。":
         "実験用PCM再生中。音程変更・0倍の音響品質は未実装です。","warning");
     }catch(err){
@@ -2438,7 +2444,9 @@ function labRefresh(){
   $("#lab-period-cycles-output").textContent=String(lab.periodCycles)+"周期";
   labPeriodField.hidden=!lab.individual||isPCMModel(lab.mode);
   labPeriod.disabled=!lab.individual||isPCMModel(lab.mode);
-  labIndividual.disabled=isPCMModel(lab.mode);
+  // The PV+period-joint research combination remains selectable; it uses
+  // the old Worker, not the signed realtime PV processor.
+  labIndividual.disabled=["spectral","granular"].includes(lab.mode);
   // Model selection is independent from the frequency-specific window option.
   labModel.disabled=false;
   labModel.querySelector('option[value="live"]').disabled=lab.individual;
@@ -2448,6 +2456,8 @@ function labRefresh(){
   labLong.max=lab.mode==="live"?"12":"13";
   $("#lab-window-note").textContent=lab.mode==="spectral"?
     "STFTは2048点Hann窓と256サンプルの合成ホップで連続再生します。現在、解析窓の変更・個別波長処理は未接続です。":
+    lab.mode==="pv"&&!lab.individual?
+    "PV（実時間）は2048点・256合成ホップのピーク位相ロック処理です。個別波長をONにした場合のみ従来の先読みPV＋個別波長を使用します。":
     lab.mode==="granular"?
     "GranularはここにあるFFT/個別波長/参照窓の研究設定を使用しません。切替時も設定値は保持します。":
     lab.individual?
@@ -2461,7 +2471,7 @@ function labRefresh(){
     spectral:"STFT Spectral：周波数成分の位相を連続進行させる再生方式。0倍は同じ波形片の反復ではなく、固定した音源位置のスペクトルから位相を発展させます。極短区間の可聴品質とiOS処理性能は検証中です。",
     granular:"Granular：波形片の重ね合わせ方式（比較用）。符号付き±8倍・0倍・サンプル単位A/Bに対応します。極低速時の周期感・comb感は既知の評価課題です。",
     live:"部分音：周波数の山と、その間の細かな成分も補って再合成します。密度の高い音では変換誤差が残ることがあります。",
-    pv:"位相ボコーダー：音を細かな周波数に分けて伸縮します。音程を保ちやすい一方、打音がぼやけることがあります。",
+    pv:"位相ボコーダー：ピーク近傍の位相関係を保持するSTFT再合成です。通常は元音源位置と逆/0倍・スクラブに直接追従します。個別波長選択時は従来の先読み処理です。打音や極低速の音色は検証中です。",
     wsola:"WSOLA：波形が自然につながる位置を細かく探して伸縮します。和音や大きな音程変更では揺れが残る場合があります。",
     dual:"短窓＋長窓：短窓で音の始まり、長窓で持続音の高さを追い、位相をそろえて切り替える実験方式です。",
     am:"AM包絡：伸縮した音の音量の輪郭をゆっくり整えます。音量を急に掛け直さず、コム状の濁りを抑える実験方式です。",
@@ -2470,7 +2480,8 @@ function labRefresh(){
   $("#lab-model-description").textContent=lab.individual&&!isPCMModel(lab.mode)?
     "個別波長（"+lab.periodCycles+"周期）＋"+lab.mode.toUpperCase()+"：共通部分音を個別波長で再合成し、残差を選択モデルで処理します。部分音・残差の帰属は推定であり、完全な音源分離は保証しません。":
     notes[lab.mode];
-  const cap=primaryModelCapability(lab.mode,granular.speed);
+  const cap=primaryModelCapability(lab.mode,granular.speed,
+    {individual:lab.individual});
   $("#lab-model-compatibility").textContent=cap.sampleAB?
     "このモデルは0/逆再生・サンプル単位A/B・スクラブ対応。再生/モデルの両タブが同じ設定値です。":
     (cap.reason||"研究モデルは0.5〜2倍のみ対応。A/B・0/逆再生・即時スクラブ非対応（元のA/B設定は保持）。");
@@ -2506,7 +2517,8 @@ async function labSettingsChanged(){
      nextShort===lab.shortFftSize&&nextLong===lab.longFftSize&&
      nextWindows===lab.referenceWindows&&nextCycles===lab.periodCycles&&
      nextIndividual===lab.individual){labRefresh();return;}
-  const capability=primaryModelCapability(nextMode,nextSpeed);
+  const capability=primaryModelCapability(nextMode,nextSpeed,
+    {individual:nextIndividual});
   if(nextMode==="live"&&capability.supported)liveFactors(nextSpeed,nextSemi);
   lab.mode=nextMode;lab.speed=nextSpeed;lab.semitones=nextSemi;
   lab.shortFftSize=nextShort;lab.longFftSize=nextLong;
@@ -2514,7 +2526,7 @@ async function labSettingsChanged(){
   lab.referenceWindows=nextWindows;lab.periodCycles=nextCycles;
   // A disabled model-incompatible checkbox is not an active DSP request.
   // Retain the checkbox setting as a draft for later compatible models.
-  lab.individual=nextIndividual&&!isPCMModel(nextMode);
+  lab.individual=nextIndividual&&!isPCMModel(nextMode,nextIndividual);
   $("#quality").value=lab.fftSize===1024?"eco":lab.fftSize===2048?"standard":"high";
   labInvalidate();
   labRefresh();
@@ -2542,12 +2554,12 @@ async function labSettingsChanged(){
     "未適用: "+capability.reason;
   if(player&&player.mode!=="dry"){
     if(previous!==nextMode||
-       (isPCMModel(nextMode)&&!player.rawPCM)||
-       (!isPCMModel(nextMode)&&player.rawPCM)){
+       (isPCMModel(nextMode,nextIndividual)&&!player.rawPCM)||
+       (!isPCMModel(nextMode,nextIndividual)&&player.rawPCM)){
       await stop();
       if(ticket!==modelSelectionEpoch)return;
       state.seek=currentTime;
-      void play(isPCMModel(nextMode)?"player":"wet",currentTime);
+      void play(isPCMModel(nextMode,nextIndividual)?"player":"wet",currentTime);
     }else if(nextMode==="live"&&previous==="live"&&!previousIndividual&&
              !lab.individual&&player.labRealtime){
       const p=player;p.offset=currentTime;p.at=state.ctx.currentTime;
@@ -2555,7 +2567,7 @@ async function labSettingsChanged(){
       p.appliedSpeed=lab.speed;
       p.source?.playbackRate.setValueAtTime(lab.speed,state.ctx.currentTime);
       updateParams("lab");
-    }else if(!isPCMModel(nextMode)){
+    }else if(!isPCMModel(nextMode,nextIndividual)){
       await stop();
       if(ticket!==modelSelectionEpoch)return;
       state.seek=currentTime;void play("wet",currentTime);
