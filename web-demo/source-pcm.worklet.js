@@ -24,6 +24,9 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
     };
     this.synth=mode==="spectral"?createSpectralTimePitch(synthConfig):
       mode==="granular"?createGranularTimePitch(synthConfig):null;
+    // Retain the old Granular diagnostic view for existing protocol tests
+    // and third-party scripts; STFT remains a distinct selected renderer.
+    this.granular=mode==="granular"?this.synth:null;
     this.running=false;
     this.disposed=false;
     this.blocks=0;
