@@ -426,6 +426,7 @@ test("native Chrome actual peak-locked PV output follows 0×, reverse and signed
     const reverse=await measure();
     assert.ok(reverse>1e-4,{reverse});
     await page.click("#main-tab-player");
+    await page.evaluate(()=>{window.__pvScratch=[];});
     const bounds=await page.$eval("#wave-detail",e=>{
       e.scrollIntoView({block:"center"});
       const r=e.getBoundingClientRect();
@@ -447,7 +448,7 @@ test("native Chrome actual peak-locked PV output follows 0×, reverse and signed
       "release must continue driving the real PV Worklet with signed kinetic velocity");
     assert.equal(Number(await page.$eval("#rt-telemetry",e=>e.dataset.pcmNodeStarts)),start,
       "scrubbing cannot recreate a new PCM node for every pointer movement");
-    assert.ok(await sound()>1e-5,
+    assert.ok(await measure()>1e-5,
       "PV should still produce samples after releasing the drag");
     assert.deepEqual(errors,[]);
     console.log("PV_REALTIME_CHROME_OUTPUT "+JSON.stringify({
