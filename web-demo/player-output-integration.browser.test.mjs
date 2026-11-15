@@ -435,14 +435,35 @@ test("native Chrome actual peak-locked PV output follows 0×, reverse and signed
       const r=e.getBoundingClientRect();
       return {x:r.x,y:r.y,w:r.width,h:r.height};
     });
-    await page.mouse.move(bounds.x+bounds.w*.48,bounds.y+bounds.h*.74);
+    const panStart=await page.evaluate(()=>{
+      const canvas=document.querySelector("#wave-detail"),r=canvas.getBoundingClientRect();
+      const markers=["#wave-a-marker","#wave-b-marker"].map(selector=>{
+        const el=document.querySelector(selector);
+        return el?.hidden?null:el.getBoundingClientRect().left-r.left;
+      }).filter(x=>x!==null);
+      return [.15,.27,.39,.61,.73,.85].map(fraction=>({
+        fraction,distance:Math.min(...markers.map(x=>Math.abs(fraction*r.width-x)),r.width)
+      })).sort((a,b)=>b.distance-a.distance)[0].fraction;
+    });
+    await page.mouse.move(bounds.x+bounds.w*panStart,bounds.y+bounds.h*.74);
     await page.mouse.down();
     // Fixed-head detail wave follows the opposite direction of the hand:
     // dragging RIGHT moves the source cursor backward (negative speed).
-    await page.mouse.move(bounds.x+bounds.w*.59,bounds.y+bounds.h*.74,{steps:10});
+    // Keep the initial hit >24px from A/B handles, or they capture the drag.
+    await page.mouse.move(bounds.x+bounds.w*(panStart+.09),bounds.y+bounds.h*.74,{steps:10});
     await page.mouse.up();
-    await page.waitForFunction(()=>window.__pvScratch.some(x=>x.kind==="scrub"&&
-      x.speed<0),{timeout:15000});
+    try{
+      await page.waitForFunction(()=>window.__pvScratch.some(x=>x.kind==="scrub"&&
+        x.speed<0),{timeout:4000});
+    }catch(error){
+      const actual=await page.evaluate(()=>({
+        commands:window.__pvScratch,route:document.querySelector("#rt-telemetry")?.dataset.pcmTransport,
+        text:document.querySelector("#rt-indicator")?.textContent,
+        render:document.querySelector("#granular-optin-status")?.dataset.renderRunning,
+        interaction:document.querySelector("#wave-detail-wrap")?.dataset.interaction
+      }));
+      throw Error("PV signed drag not observed: "+JSON.stringify({panStart,...actual})+" / "+error.message);
+    }
     await sleep(570);
     const scratch=await page.evaluate(()=>window.__pvScratch.slice());
     const thrown=scratch.filter(x=>x.kind==="scrub"&&x.speed<0);
