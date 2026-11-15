@@ -404,7 +404,7 @@ test("full real CC0 stereo orchestral song: three musical sections, L/R output, 
     app.on("pageerror",e=>errors.push(e.message));
     await app.setViewport({width:412,height:915,deviceScaleFactor:2,
       isMobile:true,hasTouch:true});
-    await app.goto("http://127.0.0.1:18828/",{
+    await app.goto("http://127.0.0.1:18828/?model=granular",{
       waitUntil:"domcontentloaded",timeout:20000
     });
     await app.waitForFunction(()=>document.documentElement.dataset.fwBoot==="ready",

@@ -3,13 +3,15 @@ import assert from "node:assert/strict";
 import {MODEL_IDS,primaryModelCapability} from "../web-demo/model-route.mjs";
 
 test("selected engine has explicit source-time and A/B capabilities, not Granular disguise",()=>{
-  assert.deepEqual(MODEL_IDS,["granular","live","pv","wsola","dual","am"]);
+  assert.deepEqual(MODEL_IDS,["spectral","granular","live","pv","wsola","dual","am"]);
   for(const speed of [-8,-1.125,0,1,7.25,8]){
-    const cap=primaryModelCapability("granular",speed);
-    assert.equal(cap.supported,true);
-    assert.equal(cap.signed,true);assert.equal(cap.sampleAB,true);
+    for(const model of ["spectral","granular"]){
+      const cap=primaryModelCapability(model,speed);
+      assert.equal(cap.supported,true);
+      assert.equal(cap.signed,true);assert.equal(cap.sampleAB,true);
+    }
   }
-  for(const model of MODEL_IDS.filter(x=>x!=="granular")){
+  for(const model of MODEL_IDS.filter(x=>!["spectral","granular"].includes(x))){
     for(const speed of [-8,-1,0,.499,2.001,8]){
       const cap=primaryModelCapability(model,speed);
       assert.equal(cap.supported,false);
@@ -20,6 +22,7 @@ test("selected engine has explicit source-time and A/B capabilities, not Granula
     for(const speed of [.5,1,1.237,2])
       assert.equal(primaryModelCapability(model,speed).supported,true);
   }
+  assert.equal(primaryModelCapability("spectral",0).realtime,true);
   assert.equal(primaryModelCapability("live",1).realtime,true);
   assert.equal(primaryModelCapability("pv",1).realtime,false);
   assert.throws(()=>primaryModelCapability("wrong",1),RangeError);

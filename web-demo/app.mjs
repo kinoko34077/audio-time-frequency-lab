@@ -32,6 +32,12 @@ const GRANULAR_EXPERIMENT=PCM_EXPERIMENT==="granular";
 // The existing ?pcmTransport=1 (raw) and ?pcmTransport=granular (prototype)
 // remain compatible, and old wet/Rust/models are still explicitly selectable.
 const PLAYER_GRANULAR_AVAILABLE=true;
+// The pre-existing ?pcmTransport=granular route remains a deliberate
+// regression/comparison path. Normal Audio Time uses real STFT instead.
+const isPCMModel=mode=>mode==="spectral"||mode==="granular";
+const initialModel=GRANULAR_EXPERIMENT||
+  new URLSearchParams(location.search).get("model")==="granular"?
+  "granular":"spectral";
 const granular={speed:1,pitch:0,railMax:8};
 let detailWaveEditor=null,detailWaveScrubbing=false;
 // Scrub speed temporarily overrides transport; it never edits canonical speed.
@@ -44,7 +50,7 @@ function mainTab(){
   return document.body.dataset.mainTab==="model"?"model":"player";
 }
 function preferredWaveMode(){
-  return mainTab()==="player"?(lab.mode==="granular"?"player":"wet"):
+  return mainTab()==="player"?(isPCMModel(lab.mode)?"player":"wet"):
     GRANULAR_EXPERIMENT?"dry":"wet";
 }
 let graphMax=2000;
@@ -62,8 +68,8 @@ const state={
   precise:Object.create(null),
   effective:{low:20,high:16000},raf:0,lastStats:null,mathCore:null,wasmPromise:null,rebuildTimer:null,sine:null,loadToken:0,transportEpoch:0
 };
-const lab={mode:"granular",speed:1,semitones:0,fftSize:2048,shortFftSize:512,longFftSize:2048,referenceWindows:8,periodCycles:8,individual:false,processed:null,worker:null,job:0};
-const labReady=()=>!["live","granular"].includes(lab.mode)&&
+const lab={mode:initialModel,speed:1,semitones:0,fftSize:2048,shortFftSize:512,longFftSize:2048,referenceWindows:8,periodCycles:8,individual:false,processed:null,worker:null,job:0};
+const labReady=()=>lab.mode!=="live"&&!isPCMModel(lab.mode)&&
   lab.processed?.model===lab.mode&&lab.processed?.speed===lab.speed&&lab.processed?.semitones===lab.semitones;
 
 // Continuous log bands around 20 Hz: 0..200 resolves 0.001..20 Hz,
@@ -243,12 +249,12 @@ function editGranular(kind,raw,fromModelTab=false){
   if(Object.is(granular[kind],value)){refreshGranular();return;}
   granular[kind]=value;refreshGranular();
   const bridge=state.player?.pcmBridge,status=$("#granular-optin-status");
-  if(!bridge||bridge.processingMode!=="granular"){
+  if(!bridge||!isPCMModel(bridge.processingMode)){
     status.textContent="設定保持中。現在の選択モデルで適用するには再生状態を確認してください。";
     // Keep selected model parameters synchronized even while stopped.
     // This also rechecks a pending model when its requested speed becomes
     // feasible, without changing the canonical value or faking application.
-    if(!fromModelTab&&lab.mode!=="granular")
+    if(!fromModelTab&&!isPCMModel(lab.mode))
       void labSettingsChanged();
     return;
   }
@@ -264,7 +270,7 @@ function editGranular(kind,raw,fromModelTab=false){
     });
   // The previously selected model may have been pending; honor it as soon as
   // its real backend supports the newly entered speed, including during play.
-  if(!fromModelTab&&lab.mode!=="granular")
+  if(!fromModelTab&&!isPCMModel(lab.mode))
     void labSettingsChanged();
 }
 if(PLAYER_GRANULAR_AVAILABLE){
@@ -849,7 +855,7 @@ function waveHoverSample(owner,sourceFrame){
   // Never silently switch a selected Rust/Worker/Dry engine, or unpause after
   // the user explicitly paused playback.
   if(!state.dry||activeWavePointer!==null||detailWaveScrubbing||
-     lab.mode!=="granular"||
+     !isPCMModel(lab.mode)||
      (!state.player&&mainTab()!=="player")||
      (state.player&&(!state.player.rawPCM||!state.player.granular||
        state.player.paused)))return false;
@@ -927,7 +933,7 @@ const waveSurface=$("#wave");
 waveSurface.addEventListener("pointerdown",e=>{
   if(!state.dry||(e.pointerType==="mouse"&&e.button!==0))return;
   if(activeWavePointer!==null)return;
-  if((GRANULAR_EXPERIMENT||mainTab()==="player"&&lab.mode==="granular")&&e.isTrusted&&
+  if((GRANULAR_EXPERIMENT||mainTab()==="player"&&isPCMModel(lab.mode))&&e.isTrusted&&
      (!state.player||(state.player.rawPCM&&state.player.granular))){
     // A deliberate press takes ownership from hover; no hover-leave easing
     // may race with this finger/mouse drag's first 0× hold.
@@ -1252,7 +1258,7 @@ async function setMainPlayerPaused(paused){
   }
 }
 function toggleMainPlayer(){
-  const p=state.player,mode=lab.mode==="granular"?"player":"wet";
+  const p=state.player,mode=isPCMModel(lab.mode)?"player":"wet";
   if(p?.rawPCM&&p.mode==="player"&&mode==="player")
     return setMainPlayerPaused(!Boolean(p.paused));
   // The chunked model stream and the legacy Rust graph have no in-place
@@ -1372,7 +1378,7 @@ async function stop(){
 }
 async function play(mode="wet",offset=null){
   if(!state.dry)return;
-  if(mode==="wet"&&lab.mode==="granular")return play("player",offset);
+  if(mode==="wet"&&isPCMModel(lab.mode))return play("player",offset);
   if(mode==="wet"&&!primaryModelCapability(lab.mode,granular.speed).supported){
     const note=primaryModelCapability(lab.mode,granular.speed).reason;
     labStatusText(note);
@@ -1440,7 +1446,10 @@ async function play(mode="wet",offset=null){
   const launchEpoch=++state.transportEpoch;
   controls.main.disabled=true;controls.dry.disabled=true;controls.wet.disabled=true;
   if(mode==="player"||(mode==="dry"&&RAW_PCM_EXPERIMENT)){
+    // Existing Worklet owns the same signed source clock for both renderers.
+    // p.granular is the legacy boolean meaning "PCM time/pitch synth active".
     const granularActive=mode==="player"||GRANULAR_EXPERIMENT;
+    const activeSynthMode=mode==="player"?lab.mode:"granular";
     // The main player is an explicit independent pitch/time engine. The
     // original button retains its prior semantics and mode identity.
     let bridge=null;
@@ -1457,7 +1466,7 @@ async function play(mode="wet",offset=null){
       bridge=await createSourcePCMBridge({
         ctx,sourceChannels:state.dry,sourceSampleRate:sourceRate,
         speed:initialSpeed,
-        processingMode:granularActive?"granular":"raw",
+        processingMode:granularActive?activeSynthMode:"raw",
         pitchSemitones:initialPitch,
         startFrame:Math.round(at*sourceRate),loopEnabled:initialLoop.enabled,
         loopStartFrame:initialLoop.a,loopEndFrame:initialLoop.b||state.dry[0].length,
@@ -1510,7 +1519,7 @@ async function play(mode="wet",offset=null){
       const master=ctx.createGain(),directRoute=ctx.createGain();
       directRoute.gain.value=1;bridge.connect(master);
       master.connect(directRoute);directRoute.connect(ctx.destination);
-      const player={rawPCM:true,directDry:true,pcmBridge:bridge,mode,granular:granularActive,appliedLabMode:granularActive?"granular":null,
+      const player={rawPCM:true,directDry:true,pcmBridge:bridge,mode,granular:granularActive,appliedLabMode:granularActive?activeSynthMode:null,
         labRealtime:false,labProcessed:false,master,directRoute,bridgeRoute:null,
         outputRoute:"direct",offset:at,at:ctx.currentTime,
         paused:false,pauseBusy:false,initializing:granularActive};
@@ -1579,12 +1588,21 @@ async function play(mode="wet",offset=null){
       controls.main.setAttribute("aria-label",mode==="player"?"再生を一時停止":"再生");
       controls.main.disabled=false;
       const telemetry=$("#rt-telemetry");
-      telemetry.dataset.pcmTransport=granularActive?"granular-experimental":"raw-experimental";
+      telemetry.dataset.pcmTransport=granularActive?
+        (activeSynthMode==="spectral"?"spectral-realtime":"granular-experimental"):
+        "raw-experimental";
       telemetry.dataset.pcmNodeStarts=String(
         Number(telemetry.dataset.pcmNodeStarts||0)+1
       );
-      indicator(granularActive?"粒状合成中 · 独立音程/±8/0倍（音質未受入）":"原音再生中 · PCM実験経路（速度と音程は未連動）");
-      message(granularActive?"再生中。極短ループのクリック・実機可聴遅延・音質は引き続き検証中。":"実験用PCM再生中。音程変更・0倍の音響品質は未実装です。","warning");
+      indicator(granularActive?
+        (activeSynthMode==="spectral"?
+          "STFT位相合成中 · ソース位置同期/±8/0倍（音響品質検証中）":
+          "粒状合成中 · 独立音程/±8/0倍（音質未受入）"):
+        "原音再生中 · PCM実験経路（速度と音程は未連動）");
+      message(granularActive?
+        "再生中。"+(activeSynthMode==="spectral"?"STFT位相合成":"Granular")+
+        "・極短ループ・実機可聴遅延は音響品質検証中。":
+        "実験用PCM再生中。音程変更・0倍の音響品質は未実装です。","warning");
     }catch(err){
       if(launchEpoch!==state.transportEpoch){bridge?.dispose();return;}
       await stop();
@@ -2408,6 +2426,7 @@ document.documentElement.dataset.fwBoot="ready";
  * on demand, never claimed to be real-time or physically identifiable.
  */
 const labModel=$("#lab-model");
+labModel.value=lab.mode;
 const labShort=$("#lab-short"),labLong=$("#lab-long"),labWindows=$("#lab-windows"),labStatus=$("#lab-status"),labIndividual=$("#lab-individual-periods");
 const labPeriod=$("#lab-period-cycles"),labPeriodField=$("#lab-period-cycles-field");
 const selectedPeriodCycles=()=>2**Number(labPeriod.value);
@@ -2417,17 +2436,19 @@ function labRefresh(){
   $("#lab-long-output").textContent=String(lab.longFftSize)+" samples";
   $("#lab-windows-output").textContent=String(lab.referenceWindows)+" 窓";
   $("#lab-period-cycles-output").textContent=String(lab.periodCycles)+"周期";
-  labPeriodField.hidden=!lab.individual||lab.mode==="granular";
-  labPeriod.disabled=!lab.individual||lab.mode==="granular";
-  labIndividual.disabled=lab.mode==="granular";
+  labPeriodField.hidden=!lab.individual||isPCMModel(lab.mode);
+  labPeriod.disabled=!lab.individual||isPCMModel(lab.mode);
+  labIndividual.disabled=isPCMModel(lab.mode);
   // Model selection is independent from the frequency-specific window option.
   labModel.disabled=false;
   labModel.querySelector('option[value="live"]').disabled=lab.individual;
   labShort.disabled=!["wsola","dual"].includes(lab.mode);
-  labLong.disabled=lab.mode==="wsola"||lab.mode==="granular";
-  labWindows.disabled=lab.mode==="live"||lab.mode==="granular"||lab.individual;
+  labLong.disabled=lab.mode==="wsola"||isPCMModel(lab.mode);
+  labWindows.disabled=lab.mode==="live"||isPCMModel(lab.mode)||lab.individual;
   labLong.max=lab.mode==="live"?"12":"13";
-  $("#lab-window-note").textContent=lab.mode==="granular"?
+  $("#lab-window-note").textContent=lab.mode==="spectral"?
+    "STFTは2048点Hann窓と256サンプルの合成ホップで連続再生します。現在、解析窓の変更・個別波長処理は未接続です。":
+    lab.mode==="granular"?
     "GranularはここにあるFFT/個別波長/参照窓の研究設定を使用しません。切替時も設定値は保持します。":
     lab.individual?
     "周波数別の"+lab.periodCycles+"周期窓×7観測で音程成分を推定し、残りは選択中の"+lab.mode.toUpperCase()+"で処理します。短窓・長窓は各残差モデルに適用、参照窓数は使用しません。":
@@ -2437,7 +2458,8 @@ function labRefresh(){
     lab.mode==="live"?"Rustの部分音方式は長窓設定のみ反映します。短窓・参照窓数は使いません。":
     "このモデルは長窓を使います。短窓は複合窓・WSOLAでのみ利用します。";
   const notes={
-    granular:"Granular：主再生の音程・速度入力と同じ設定値を使用。符号付き±8倍・0倍・サンプル単位A/Bに対応します。音質の完全受入は未完了です。",
+    spectral:"STFT Spectral：周波数成分の位相を連続進行させる再生方式。0倍は同じ波形片の反復ではなく、固定した音源位置のスペクトルから位相を発展させます。極短区間の可聴品質とiOS処理性能は検証中です。",
+    granular:"Granular：波形片の重ね合わせ方式（比較用）。符号付き±8倍・0倍・サンプル単位A/Bに対応します。極低速時の周期感・comb感は既知の評価課題です。",
     live:"部分音：周波数の山と、その間の細かな成分も補って再合成します。密度の高い音では変換誤差が残ることがあります。",
     pv:"位相ボコーダー：音を細かな周波数に分けて伸縮します。音程を保ちやすい一方、打音がぼやけることがあります。",
     wsola:"WSOLA：波形が自然につながる位置を細かく探して伸縮します。和音や大きな音程変更では揺れが残る場合があります。",
@@ -2445,7 +2467,7 @@ function labRefresh(){
     am:"AM包絡：伸縮した音の音量の輪郭をゆっくり整えます。音量を急に掛け直さず、コム状の濁りを抑える実験方式です。",
     "period-joint":"周波数ごとの個別波長（研究版）：7つの周波数別周期窓から複数の共通部分音を推定し、残差も処理します。和音・変調・声・打音も再生対象ですが、物理的な音源分離・完全な位相/音色保持は未証明です。"
   };
-  $("#lab-model-description").textContent=lab.individual&&lab.mode!=="granular"?
+  $("#lab-model-description").textContent=lab.individual&&!isPCMModel(lab.mode)?
     "個別波長（"+lab.periodCycles+"周期）＋"+lab.mode.toUpperCase()+"：共通部分音を個別波長で再合成し、残差を選択モデルで処理します。部分音・残差の帰属は推定であり、完全な音源分離は保証しません。":
     notes[lab.mode];
   const cap=primaryModelCapability(lab.mode,granular.speed);
@@ -2453,8 +2475,8 @@ function labRefresh(){
     "このモデルは0/逆再生・サンプル単位A/B・スクラブ対応。再生/モデルの両タブが同じ設定値です。":
     (cap.reason||"研究モデルは0.5〜2倍のみ対応。A/B・0/逆再生・即時スクラブ非対応（元のA/B設定は保持）。");
   if(!state.player?.labStream)labStatusText(!cap.supported?
-    "未適用: "+cap.reason:lab.mode==="granular"?
-    "Granular · 主再生・選択モデル一致":lab.mode==="live"?
+    "未適用: "+cap.reason:isPCMModel(lab.mode)?
+    lab.mode.toUpperCase()+" · 主再生・選択モデル一致":lab.mode==="live"?
     "Rust/WASMの部分音処理 · 選択時に主再生へ適用":
     (lab.individual?"個別波長＋":"")+lab.mode.toUpperCase()+" · 自動先読み処理。実音切替はバッファ待ちあり");
 }
@@ -2490,7 +2512,9 @@ async function labSettingsChanged(){
   lab.shortFftSize=nextShort;lab.longFftSize=nextLong;
   lab.fftSize=Math.min(4096,nextLong);
   lab.referenceWindows=nextWindows;lab.periodCycles=nextCycles;
-  lab.individual=nextIndividual;
+  // A disabled model-incompatible checkbox is not an active DSP request.
+  // Retain the checkbox setting as a draft for later compatible models.
+  lab.individual=nextIndividual&&!isPCMModel(nextMode);
   $("#quality").value=lab.fftSize===1024?"eco":lab.fftSize===2048?"standard":"high";
   labInvalidate();
   labRefresh();
@@ -2501,7 +2525,8 @@ async function labSettingsChanged(){
     const playing=state.player&&state.player.mode!=="dry";
     const active=state.player?.labStream?(state.player.appliedLabMode||previous):
       state.player?.labRealtime?"live":
-      state.player?.rawPCM&&state.player.granular?"granular":previous;
+      state.player?.rawPCM&&state.player.granular?
+        (state.player.appliedLabMode||"granular"):previous;
     const explanation="この処理モデルは現在の指定速度にまだ対応していません。"+
       "指定値とモデル選択は保持します。"+(playing?
       "再生中の"+active+"を維持し、モデル切替は保留しています。":"");
@@ -2517,12 +2542,12 @@ async function labSettingsChanged(){
     "未適用: "+capability.reason;
   if(player&&player.mode!=="dry"){
     if(previous!==nextMode||
-       (nextMode==="granular"&&!player.rawPCM)||
-       (nextMode!=="granular"&&player.rawPCM)){
+       (isPCMModel(nextMode)&&!player.rawPCM)||
+       (!isPCMModel(nextMode)&&player.rawPCM)){
       await stop();
       if(ticket!==modelSelectionEpoch)return;
       state.seek=currentTime;
-      void play(nextMode==="granular"?"player":"wet",currentTime);
+      void play(isPCMModel(nextMode)?"player":"wet",currentTime);
     }else if(nextMode==="live"&&previous==="live"&&!previousIndividual&&
              !lab.individual&&player.labRealtime){
       const p=player;p.offset=currentTime;p.at=state.ctx.currentTime;
@@ -2530,7 +2555,7 @@ async function labSettingsChanged(){
       p.appliedSpeed=lab.speed;
       p.source?.playbackRate.setValueAtTime(lab.speed,state.ctx.currentTime);
       updateParams("lab");
-    }else if(nextMode!=="granular"){
+    }else if(!isPCMModel(nextMode)){
       await stop();
       if(ticket!==modelSelectionEpoch)return;
       state.seek=currentTime;void play("wet",currentTime);

@@ -39,7 +39,7 @@ export async function createSourcePCMBridge({
   if(!Number.isFinite(commandTimeoutMs)||commandTimeoutMs<1||commandTimeoutMs>60000)
     throw RangeError("invalid PCM command timeout");
   let currentSpeed=validatePlaybackSpeed(speed);
-  if(processingMode!=="raw"&&processingMode!=="granular")
+  if(!["raw","granular","spectral"].includes(processingMode))
     throw RangeError("invalid PCM processing mode");
   const validatePitch=value=>{
     if(typeof value!=="number"||!Number.isFinite(value)||
@@ -213,8 +213,8 @@ export async function createSourcePCMBridge({
       }
     },
     setPitch(next){
-      if(processingMode!=="granular")
-        return Promise.reject(Error("independent pitch requires granular mode"));
+      if(processingMode==="raw")
+        return Promise.reject(Error("independent pitch requires spectral or granular mode"));
       try{next=validatePitch(next);}
       catch(error){return Promise.reject(error);}
       // Preserve caller's full finite input precision, independent of any

@@ -20,7 +20,7 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, swit
     });
     const page=await browser.newPage(),errors=[];
     page.on("pageerror",err=>errors.push(err.message));
-    await page.goto("http://127.0.0.1:"+port+"/",{waitUntil:"domcontentloaded",timeout:20000});
+    await page.goto("http://127.0.0.1:"+port+"/?model=granular",{waitUntil:"domcontentloaded",timeout:20000});
     await page.waitForFunction(()=>document.documentElement.dataset.fwBoot==="ready",{timeout:20000});
     assert.equal(await page.$eval("body",el=>el.dataset.mainTab),"player");
     assert.equal(await page.$eval("#main-tab-player",el=>el.getAttribute("aria-selected")),"true");
@@ -495,7 +495,7 @@ test("U1/U5 primary Play routes to REAL selected live/PV/Granular engines and on
         }
       };
     });
-    await page.goto("http://127.0.0.1:"+port+"/",{
+    await page.goto("http://127.0.0.1:"+port+"/?model=granular",{
       waitUntil:"domcontentloaded",timeout:20000
     });
     await page.waitForFunction(()=>document.documentElement.dataset.fwBoot==="ready",
@@ -661,7 +661,7 @@ test("U7 touch tap seeks without autoplay; deliberate drag auditions PCM, paused
     });
     const page=await browser.newPage(),errors=[];
     page.on("pageerror",e=>errors.push(e.message));
-    await page.goto(`http://127.0.0.1:${port}/`,{waitUntil:"domcontentloaded",timeout:20000});
+    await page.goto(`http://127.0.0.1:${port}/?model=granular`,{waitUntil:"domcontentloaded",timeout:20000});
     await page.waitForFunction(()=>document.documentElement.dataset.fwBoot==="ready",{timeout:20000});
     await (await page.$("#audio-file")).uploadFile(recording);
     await page.waitForFunction(()=>document.querySelector("#file-meta")?.textContent
