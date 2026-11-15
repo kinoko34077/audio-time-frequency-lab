@@ -44,8 +44,19 @@ try:
         page.locator('#lab-short').evaluate("(e)=>{e.value='8';e.dispatchEvent(new Event('change',{bubbles:true}));}")
         page.locator('#lab-long').evaluate("(e)=>{e.value='10';e.dispatchEvent(new Event('change',{bubbles:true}));}")
         page.locator('#lab-windows').evaluate("(e)=>{e.value='2';e.dispatchEvent(new Event('change',{bubbles:true}));}")
+        # The ordinary PV setting now genuinely renders through a
+        # source-time AudioWorklet. Keep the older 1.5s PV/period-joint Worker
+        # as a separate, explicit regression route.
+        page.locator('#lab-model').select_option('pv')
+        page.locator('#play-main').click()
+        page.wait_for_function("""() => document.querySelector('#rt-telemetry')
+          ?.dataset.pcmTransport==='pv-phase-locked'""",timeout=25000)
+        page.locator('#stop').click()
         for model in ('pv','wsola','dual','am'):
             page.locator('#lab-model').select_option(model)
+            page.locator('#lab-individual-periods').evaluate(
+                "(e)=>{e.checked="+("true" if model=="pv" else "false")+
+                ";e.dispatchEvent(new Event('change',{bubbles:true}));}")
             page.locator('#play-main').click()
             try:
                 page.wait_for_function("""() => document.querySelector('#rt-indicator')
