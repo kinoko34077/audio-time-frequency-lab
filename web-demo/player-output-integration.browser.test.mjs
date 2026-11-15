@@ -56,6 +56,8 @@ test("recorded piano main player: gesture/parameter receipts AND actual output P
     await page.waitForFunction(()=>document.querySelector("#file-meta")?.textContent
       .includes("meta-piano-a0-cc0-3s-48khz.wav"),{timeout:20000});
     await page.waitForSelector("#play-main:not([disabled])",{timeout:15000});
+    assert.equal(await page.$eval("#lab-model",el=>el.value),"spectral",
+      "public Audio Time must select the true STFT renderer by default");
     const decodedRate=Number((await page.$eval("#file-meta",el=>el.textContent))
       .match(/(\d+)Hz/)?.[1]);
     assert.ok(decodedRate>=8000&&decodedRate<=192000);
@@ -79,6 +81,9 @@ test("recorded piano main player: gesture/parameter receipts AND actual output P
     await page.waitForFunction(()=>document.querySelector("#granular-optin-status")
       ?.dataset.renderRunning==="true",{timeout:20000});
     await page.waitForFunction(()=>window.__audioOutputPaths?.length>=2,{timeout:20000});
+    const route=await page.$eval("#rt-telemetry",el=>el.dataset.pcmTransport);
+    assert.equal(route,"spectral-realtime",
+      "recorded music must use real selected STFT audio Worklet, not Granular");
     const nodeStarts=await page.$eval("#rt-telemetry",
       el=>Number(el.dataset.pcmNodeStarts));
     assert.equal(nodeStarts,1);
