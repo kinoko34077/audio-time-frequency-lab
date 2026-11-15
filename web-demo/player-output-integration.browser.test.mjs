@@ -437,7 +437,9 @@ test("native Chrome actual peak-locked PV output follows 0×, reverse and signed
     });
     await page.mouse.move(bounds.x+bounds.w*.48,bounds.y+bounds.h*.74);
     await page.mouse.down();
-    await page.mouse.move(bounds.x+bounds.w*.37,bounds.y+bounds.h*.74,{steps:10});
+    // Fixed-head detail wave follows the opposite direction of the hand:
+    // dragging RIGHT moves the source cursor backward (negative speed).
+    await page.mouse.move(bounds.x+bounds.w*.59,bounds.y+bounds.h*.74,{steps:10});
     await page.mouse.up();
     await page.waitForFunction(()=>window.__pvScratch.some(x=>x.kind==="scrub"&&
       x.speed<0),{timeout:15000});
