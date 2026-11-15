@@ -188,6 +188,25 @@ export function createSourcePCMRenderer({
       timeline.advance(output[0].length);
       return outcome.missingFrames;
     },
+    renderSpectral(output,spectral){
+      // A phase-coherent STFT synthesizer owns only sound, never the source
+      // clock. Reuse the same cache/loop/telemetry contract as Granular.
+      if(!spectral||typeof spectral.render!=="function")
+        throw RangeError("invalid realtime spectral engine");
+      const state=timeline.state;
+      if(state.ended&&!state.loopEnabled){
+        for(const channel of output)channel.fill(0);
+        firstMissingFrame=null;
+        renderedFrames+=output[0].length;
+        return 0;
+      }
+      const result=spectral.render(output,state,readFrame,sourceFrames);
+      firstMissingFrame=result.firstMissingFrame;
+      missingFrames+=result.missingFrames;
+      renderedFrames+=output[0].length;
+      timeline.advance(output[0].length);
+      return result.missingFrames;
+    },
     render(output){
       if(!Array.isArray(output)||output.length!==channelCount||
          output.some(ch=>!(ch instanceof Float32Array)||
