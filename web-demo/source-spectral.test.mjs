@@ -14,7 +14,7 @@ for(let i=0;i<FRAMES;i++){
   source[0][i]=tonal+attack;
   source[1][i]=.66*tonal+.13*Math.sin(2*Math.PI*330*t+.4)+attack*.3;
 }
-function render(speed,pitch,frames=8192){
+function render(speed,pitch,frames=8192,{phaseLock=false}={}){
   const renderer=createSourcePCMRenderer({
     sourceFrames:FRAMES,sourceSampleRate:SR,outputSampleRate:SR,
     channelCount:2,startFrame:CENTER,speed
@@ -23,7 +23,8 @@ function render(speed,pitch,frames=8192){
   renderer.installWindow(START,source.map(x=>x.slice(START,START+65536)));
   renderer.installWindow(START+65536,source.map(x=>x.slice(START+65536,START+131072)));
   const spectral=createSpectralTimePitch({
-    sourceSampleRate:SR,outputSampleRate:SR,channelCount:2,pitchSemitones:pitch
+    sourceSampleRate:SR,outputSampleRate:SR,channelCount:2,pitchSemitones:pitch,
+    phaseLock
   });
   const output=[new Float32Array(frames),new Float32Array(frames)];
   const start=performance.now();
@@ -152,4 +153,23 @@ test("source movement + reversal preserves continuous output and explicit fade b
   assert.equal(renderer.renderSpectral(out,stft),0);
   assert.ok(Math.abs(out[0][0]-before)<.2,
     "scrub transition must avoid an arbitrary immediate full-scale discontinuity");
+});
+
+test("real PV mode peak-locks neighboring spectral bins but retains signed source-time and non-DC freeze",()=>{
+  for(const speed of [-1,0,1]){
+    const a=render(speed,0,8192,{phaseLock:true});
+    const b=render(speed,0,8192,{phaseLock:false});
+    assert.equal(a.misses,0,{speed});
+    assert.ok(Math.abs(a.end-(CENTER+8192*speed))<1,{speed,frame:a.end});
+    assert.ok(rms(a.output[0].subarray(2048))>.04,{speed,
+      rms:rms(a.output[0].subarray(2048))});
+    assert.ok(a.output[0].every(Number.isFinite));
+    const diff=rms(a.output[0].map((x,i)=>x-b.output[0][i]).subarray(1024));
+    assert.ok(diff>1e-6,{speed,diff},
+      "PV must apply real peak-phase locking, not merely display a different engine name");
+  }
+  const g=createSpectralTimePitch({
+    sourceSampleRate:SR,outputSampleRate:SR,phaseLock:true
+  });
+  assert.equal(g.state.algorithm,"phase-vocoder-peak-locked");
 });
