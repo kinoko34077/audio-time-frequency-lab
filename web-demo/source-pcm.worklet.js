@@ -5,7 +5,7 @@
  * mode. Neither guarantees perfect short-loop musical timbre or iPhone CPU.
  */
 import {createSourcePCMRenderer} from "./source-pcm-renderer.mjs";
-import {createGranularTimePitch} from "./source-granular.mjs";
+import {createGranularTimePitch,createWsolaTimePitch} from "./source-granular.mjs";
 import {createSpectralTimePitch} from "./source-spectral.mjs";
 
 class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
@@ -15,7 +15,7 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
     this.renderer=createSourcePCMRenderer({...props,outputSampleRate:sampleRate});
     this.sourceFrames=props.sourceFrames;
     const mode=props.processingMode??"raw";
-    if(!["raw","granular","spectral","pv"].includes(mode))
+    if(!["raw","granular","spectral","pv","wsola"].includes(mode))
       throw RangeError("unknown PCM processing mode");
     this.processingMode=mode;
     const synthConfig={
@@ -24,6 +24,10 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
     };
     this.synth=mode==="pv"?createSpectralTimePitch({...synthConfig,phaseLock:true}):
       mode==="spectral"?createSpectralTimePitch(synthConfig):
+      mode==="wsola"?createWsolaTimePitch({
+        ...synthConfig,grainFrames:props.wsolaWindowFrames??1024,
+        hopFrames:(props.wsolaWindowFrames??1024)/4
+      }):
       mode==="granular"?createGranularTimePitch(synthConfig):null;
     // Retain the old Granular diagnostic view for existing protocol tests
     // and third-party scripts; STFT remains a distinct selected renderer.
