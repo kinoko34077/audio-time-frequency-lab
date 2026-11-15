@@ -345,3 +345,142 @@ test("recorded piano main player: gesture/parameter receipts AND actual output P
     await page.click("#stop");
   }finally{await browser?.close();server.kill("SIGTERM");}
 });
+
+test("native Chrome actual peak-locked PV output follows 0×, reverse and signed scratch on ONE Worklet",async()=>{
+  const port=18793;
+  const server=spawn("python3",["-m","http.server",String(port),"--bind","127.0.0.1"],{
+    cwd:path.resolve("_site"),stdio:"ignore"
+  });
+  let browser;
+  try{
+    browser=await puppeteer.launch({
+      executablePath:process.env.CHROME_BIN||"/usr/bin/google-chrome",
+      headless:true,args:["--no-sandbox","--disable-dev-shm-usage",
+        "--autoplay-policy=no-user-gesture-required"]
+    });
+    const page=await browser.newPage(),errors=[];
+    page.on("pageerror",e=>errors.push(e.message));
+    await page.evaluateOnNewDocument(()=>{
+      window.__pvAnalysers=[];window.__pvScratch=[];
+      const connect=AudioNode.prototype.connect;
+      AudioNode.prototype.connect=function(target,...args){
+        const media=typeof MediaStreamAudioDestinationNode!=="undefined"&&
+          target instanceof MediaStreamAudioDestinationNode;
+        if(target===this.context.destination||media){
+          const analyser=this.context.createAnalyser();analyser.fftSize=2048;
+          connect.call(this,analyser,...args);connect.call(analyser,target);
+          window.__pvAnalysers.push(analyser);
+          return target;
+        }
+        return connect.call(this,target,...args);
+      };
+      const post=MessagePort.prototype.postMessage;
+      MessagePort.prototype.postMessage=function(message,...args){
+        if(message?.type==="scrub"||
+           message?.type==="command"&&message?.op==="speed")
+          window.__pvScratch.push({kind:message.type,frame:message.frame,
+            speed:message.speed});
+        return post.call(this,message,...args);
+      };
+    });
+    await page.goto(`http://127.0.0.1:${port}/`,{
+      waitUntil:"domcontentloaded",timeout:20000
+    });
+    await page.waitForFunction(()=>document.documentElement.dataset.fwBoot==="ready",{timeout:20000});
+    await (await page.$("#audio-file")).uploadFile(WAV);
+    await page.waitForSelector("#play-main:not([disabled])",{timeout:15000});
+    const set=(id,value)=>page.$eval("#"+id,(el,v)=>{
+      el.value=String(v);el.dispatchEvent(new Event("change",{bubbles:true}));
+    },value);
+    await set("player-loop-b",103200);
+    await set("player-loop-a",79200);
+    await page.click("#main-tab-model");
+    await set("lab-model","pv");
+    await page.click("#play-main");
+    await page.waitForFunction(()=>document.querySelector("#rt-telemetry")
+      ?.dataset.pcmTransport==="pv-phase-locked"&&
+      document.querySelector("#granular-optin-status")?.dataset.renderRunning==="true",
+      {timeout:20000});
+    const start=Number(await page.$eval("#rt-telemetry",e=>e.dataset.pcmNodeStarts));
+    const sound=()=>page.evaluate(()=>{
+      const v=(window.__pvAnalysers||[]).map(analyser=>{
+        const audio=new Float32Array(analyser.fftSize);
+        analyser.getFloatTimeDomainData(audio);
+        return Math.sqrt(audio.reduce((sum,x)=>sum+x*x,0)/audio.length);
+      });
+      return Math.max(0,...v);
+    });
+    const measure=async()=>{
+      const rms=[];
+      for(let i=0;i<7;i++){await sleep(45);rms.push(await sound());}
+      return Math.max(...rms);
+    };
+    const positive=await measure();
+    assert.ok(positive>1e-4,{positive});
+    await set("granular-speed-value",0);
+    await page.waitForFunction(()=>document.querySelector("#granular-optin-status")
+      ?.dataset.renderRunning==="true",{timeout:10000});
+    const frozen=await measure();
+    assert.ok(frozen>1e-4,{frozen});
+    await set("granular-speed-value",-1);
+    const reverse=await measure();
+    assert.ok(reverse>1e-4,{reverse});
+    // The user's saved speed is +1; a negative record throw must continue
+    // playing BACKWARD after release before returning toward +1.
+    await set("granular-speed-value",1);
+    await page.click("#main-tab-player");
+    await page.evaluate(()=>{window.__pvScratch=[];});
+    const bounds=await page.$eval("#wave-detail",e=>{
+      e.scrollIntoView({block:"center"});
+      const r=e.getBoundingClientRect();
+      return {x:r.x,y:r.y,w:r.width,h:r.height};
+    });
+    const panStart=await page.evaluate(()=>{
+      const canvas=document.querySelector("#wave-detail"),r=canvas.getBoundingClientRect();
+      const markers=["#wave-a-marker","#wave-b-marker"].map(selector=>{
+        const el=document.querySelector(selector);
+        return el?.hidden?null:el.getBoundingClientRect().left-r.left;
+      }).filter(x=>x!==null);
+      return [.15,.27,.39,.61,.73,.85].map(fraction=>({
+        fraction,distance:Math.min(...markers.map(x=>Math.abs(fraction*r.width-x)),r.width)
+      })).sort((a,b)=>b.distance-a.distance)[0].fraction;
+    });
+    await page.mouse.move(bounds.x+bounds.w*panStart,bounds.y+bounds.h*.74);
+    await page.mouse.down();
+    // Fixed-head detail wave follows the opposite direction of the hand:
+    // dragging RIGHT moves the source cursor backward (negative speed).
+    // Keep the initial hit >24px from A/B handles, or they capture the drag.
+    await page.mouse.move(bounds.x+bounds.w*(panStart+.09),bounds.y+bounds.h*.74,{steps:10});
+    await page.mouse.up();
+    try{
+      await page.waitForFunction(()=>window.__pvScratch.some(x=>x.kind==="scrub"&&
+        x.speed<0),{timeout:4000});
+    }catch(error){
+      const actual=await page.evaluate(()=>({
+        commands:window.__pvScratch,route:document.querySelector("#rt-telemetry")?.dataset.pcmTransport,
+        text:document.querySelector("#rt-indicator")?.textContent,
+        render:document.querySelector("#granular-optin-status")?.dataset.renderRunning,
+        interaction:document.querySelector("#wave-detail-wrap")?.dataset.interaction
+      }));
+      throw Error("PV signed drag not observed: "+JSON.stringify({panStart,...actual})+" / "+error.message);
+    }
+    await sleep(570);
+    const scratch=await page.evaluate(()=>window.__pvScratch.slice());
+    const thrown=scratch.filter(x=>x.kind==="scrub"&&x.speed<0);
+    const inertia=scratch.filter(x=>x.kind==="command"&&
+      Number.isFinite(x.speed));
+    assert.ok(thrown.length>=1,{scratch});
+    assert.ok(inertia.length>=2&&inertia.some(x=>x.speed<0)&&
+      inertia.some(x=>x.speed>0)&&inertia.some(x=>Math.abs(x.speed-1)<.01),
+      "PV release must keep moving backward and smoothly regain saved +1× in actual Worklet");
+    assert.equal(Number(await page.$eval("#rt-telemetry",e=>e.dataset.pcmNodeStarts)),start,
+      "scrubbing cannot recreate a new PCM node for every pointer movement");
+    assert.ok(await measure()>1e-5,
+      "PV should still produce samples after releasing the drag");
+    assert.deepEqual(errors,[]);
+    console.log("PV_REALTIME_CHROME_OUTPUT "+JSON.stringify({
+      positive,frozen,reverse,dragCommands:thrown.length,
+      inertiaSpeeds:inertia.map(x=>x.speed),nodeStarts:start
+    }));
+  }finally{await browser?.close();server.kill("SIGTERM");}
+});

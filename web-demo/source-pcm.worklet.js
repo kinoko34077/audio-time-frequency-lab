@@ -15,14 +15,15 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
     this.renderer=createSourcePCMRenderer({...props,outputSampleRate:sampleRate});
     this.sourceFrames=props.sourceFrames;
     const mode=props.processingMode??"raw";
-    if(!["raw","granular","spectral"].includes(mode))
+    if(!["raw","granular","spectral","pv"].includes(mode))
       throw RangeError("unknown PCM processing mode");
     this.processingMode=mode;
     const synthConfig={
       sourceSampleRate:props.sourceSampleRate,outputSampleRate:sampleRate,
       channelCount:props.channelCount,pitchSemitones:props.pitchSemitones??0
     };
-    this.synth=mode==="spectral"?createSpectralTimePitch(synthConfig):
+    this.synth=mode==="pv"?createSpectralTimePitch({...synthConfig,phaseLock:true}):
+      mode==="spectral"?createSpectralTimePitch(synthConfig):
       mode==="granular"?createGranularTimePitch(synthConfig):null;
     // Retain the old Granular diagnostic view for existing protocol tests
     // and third-party scripts; STFT remains a distinct selected renderer.
@@ -209,7 +210,7 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
       this.emitRenderReceipt(sourceFrame,0);
       return true;
     }
-    const missing=this.processingMode==="spectral"?
+    const missing=this.processingMode==="spectral"||this.processingMode==="pv"?
       this.renderer.renderSpectral(out,this.synth):
       this.synth?this.renderer.renderGranular(out,this.synth):
       this.renderer.render(out);

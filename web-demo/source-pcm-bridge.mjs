@@ -39,7 +39,7 @@ export async function createSourcePCMBridge({
   if(!Number.isFinite(commandTimeoutMs)||commandTimeoutMs<1||commandTimeoutMs>60000)
     throw RangeError("invalid PCM command timeout");
   let currentSpeed=validatePlaybackSpeed(speed);
-  if(!["raw","granular","spectral"].includes(processingMode))
+  if(!["raw","granular","spectral","pv"].includes(processingMode))
     throw RangeError("invalid PCM processing mode");
   const validatePitch=value=>{
     if(typeof value!=="number"||!Number.isFinite(value)||

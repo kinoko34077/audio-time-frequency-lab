@@ -11,14 +11,15 @@ const wrapPhase=x=>x-TAU*Math.round(x/TAU);
 const finite=x=>typeof x==="number"&&Number.isFinite(x);
 export function createSpectralTimePitch({
   sourceSampleRate,outputSampleRate,channelCount=1,
-  fftFrames=2048,hopFrames=256,pitchSemitones=0
+  fftFrames=2048,hopFrames=256,pitchSemitones=0,phaseLock=false
 }={}){
   if(!finite(sourceSampleRate)||sourceSampleRate<=0||
     !finite(outputSampleRate)||outputSampleRate<=0||
     !Number.isInteger(channelCount)||channelCount<1||channelCount>2||
     ![1024,2048].includes(fftFrames)||
     !Number.isInteger(hopFrames)||hopFrames<1||
-    fftFrames%hopFrames!==0||hopFrames>fftFrames/4)
+    fftFrames%hopFrames!==0||hopFrames>fftFrames/4||
+    typeof phaseLock!=="boolean")
     throw RangeError("invalid spectral source/time configuration");
   const N=fftFrames,H=hopFrames,half=N/2,srcRatio=sourceSampleRate/outputSampleRate;
   const win=new Float64Array(N);
@@ -33,6 +34,10 @@ export function createSpectralTimePitch({
   const prev=new Float64Array(half+1),phases=new Float64Array(half+1);
   const binPhase=new Float64Array(half+1);
   const freq=new Float64Array(half+1),mags=new Float64Array(half+1);
+  // Distinct real-time peak-locked PV backend. Coherent neighboring bins
+  // preserve source-relative phases; the base spectral model stays unmodified.
+  const lockedPhases=new Float64Array(half+1);
+  const peaks=new Int32Array(half+1);
   const ringSize=N*4;
   const ola=Array.from({length:channelCount},()=>new Float64Array(ringSize));
   const norm=new Float64Array(ringSize);
@@ -122,6 +127,7 @@ export function createSpectralTimePitch({
     fft(probe.re,probe.im);
     for(let k=0;k<=half;k++){
       const re=analysis[0].re[k],im=analysis[0].im[k];
+      mags[k]=Math.hypot(re,im);
       const phase=Math.atan2(im,re);
       const phiProbe=Math.atan2(probe.im[k],probe.re[k]);
       const nominal=TAU*k/N;
@@ -135,6 +141,30 @@ export function createSpectralTimePitch({
       binPhase[k]=phase;
     }
     initialized=true;
+    if(phaseLock){
+      // Laroche-Dolson-style identity phase locking: track the real phase of
+      // each dominant analysis peak, then preserve nearby bin/peak phase
+      // relationships. Unlike regular binwise STFT this suppresses vertical
+      // phase dispersion during slowing/freeze without repeating PCM grains.
+      let maxMag=0,count=0;
+      for(let k=0;k<=half;k++)if(mags[k]>maxMag)maxMag=mags[k];
+      for(let k=1;k<half;k++){
+        if(mags[k]>=mags[k-1]&&mags[k]>=mags[k+1]&&
+           mags[k]>maxMag*.004)peaks[count++]=k;
+      }
+      if(count===0){
+        let best=0;
+        for(let k=1;k<=half;k++)if(mags[k]>mags[best])best=k;
+        peaks[count++]=best;
+      }
+      for(let k=0,j=0;k<=half;k++){
+        while(j+1<count&&
+          Math.abs(peaks[j+1]-k)<Math.abs(peaks[j]-k))j++;
+        const peak=peaks[j];
+        lockedPhases[k]=Math.abs(peak-k)<=4?
+          phases[peak]+wrapPhase(binPhase[k]-binPhase[peak]):phases[k];
+      }
+    }
     for(let ch=0;ch<channelCount;ch++){
       const dest=synth[ch];
       dest.re.fill(0);dest.im.fill(0);
@@ -143,7 +173,8 @@ export function createSpectralTimePitch({
         const mag=Math.hypot(input.re[k],input.im[k]);
         if(mag<1e-12)continue;
         const actualPhase=Math.atan2(input.im[k],input.re[k]);
-        const phase=phases[k]+wrapPhase(actualPhase-binPhase[k]);
+        const phase=(phaseLock?lockedPhases[k]:phases[k])+
+          wrapPhase(actualPhase-binPhase[k]);
         // Pitch independent of source traversal speed: interpolate between
         // destination FFT bins instead of repeating small waveform grains.
         // FFT bins here were measured at sourceSampleRate, whereas
@@ -175,7 +206,8 @@ export function createSpectralTimePitch({
   }
   return {
     get state(){return {pitchSemitones:pitch,pitchRatio:ratio,
-      pitchRevision:revision,outputFrames,algorithm:"stft-phase-coherent"};},
+      pitchRevision:revision,outputFrames,algorithm:phaseLock?
+        "phase-vocoder-peak-locked":"stft-phase-coherent"};},
     setPitch,beginTransition,reset,
     shiftSource(delta){
       if(!finite(delta))throw RangeError("invalid spectral scratch displacement");

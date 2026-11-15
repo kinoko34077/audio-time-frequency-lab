@@ -530,13 +530,14 @@ test("U1/U5 primary Play routes to REAL selected live/PV/Granular engines and on
     assert.match(await page.$eval("#lab-model-compatibility",el=>el.textContent),/非対応|未対応/);
     await page.click("#main-tab-model");
     await set("lab-model","pv");
-    await page.waitForFunction(()=>window.__engineCreations?.some(e=>
-      e.kind==="worker"&&e.name.includes("lab-processor.worker.mjs")),{timeout:20000});
-    // The Worker overwrites transient "モデル音声を再生中" status as
-    // soon as it prefetches the next chunk. The stable indicator is emitted
-    // only by the onStarted callback after real PCM has been scheduled.
-    await page.waitForFunction(()=>document.querySelector("#rt-indicator")
-      ?.textContent.includes("モデル再生中"),{timeout:20000});
+    await page.waitForFunction(()=>document.querySelector("#rt-telemetry")
+      ?.dataset.pcmTransport==="pv-phase-locked"&&
+      document.querySelector("#granular-optin-status")?.dataset.renderRunning==="true",
+      {timeout:20000});
+    // Normal PV is now a real peak-phase-locked AudioWorklet, not the
+    // historical 1.5s Worker buffer disguised as realtime scratch.
+    assert.match(await page.$eval("#rt-indicator",el=>el.textContent),
+      /PVピーク位相ロック/);
     await set("lab-model","granular");
     await page.waitForFunction(()=>window.__engineCreations?.some(e=>
       e.kind==="worklet"&&e.name==="audio-lab-source-pcm"),{timeout:20000});
@@ -615,12 +616,17 @@ test("U1/U5 primary Play routes to REAL selected live/PV/Granular engines and on
     assert.equal(await page.$eval("#granular-speed-value",el=>el.value),"0");
     assert.match(await page.$eval("#lab-status",el=>el.textContent),/適用待ち/);
 
-    // Repeat with an actual Worker model. Seeking while 0x is pending must
-    // restart the *applied* PV 1.5x stream, never call rejected play(wet)
-    // after destroying the only audible stream.
+    // Preserve the old Worker-specific pending seek regression: it now
+    // applies to PV+period-joint, which deliberately retains that backend.
+    // The ordinary PV path above is a real signed-speed Worklet.
     await set("granular-speed-value","1.5");
     await page.click("#main-tab-model");
     await set("lab-model","pv");
+    await page.$eval("#lab-individual-periods",el=>{
+      el.checked=true;el.dispatchEvent(new Event("change",{bubbles:true}));
+    });
+    await page.waitForFunction(()=>window.__engineCreations?.some(e=>
+      e.kind==="worker"&&e.name.includes("lab-processor.worker.mjs")),{timeout:20000});
     await page.waitForFunction(()=>document.querySelector("#rt-indicator")
       ?.textContent.includes("モデル再生中"),{timeout:20000});
     await page.click("#main-tab-player");
@@ -634,8 +640,10 @@ test("U1/U5 primary Play routes to REAL selected live/PV/Granular engines and on
     await page.waitForFunction(before=>window.__engineCreations
       .filter(x=>x.kind==="worker"&&x.name.includes("lab-processor.worker.mjs")).length>before,
       {timeout:20000},beforeSeekWorker);
-    await page.waitForFunction(()=>document.querySelector("#rt-indicator")
-      ?.textContent.includes("モデル再生中 · PV"),{timeout:20000});
+    await page.waitForFunction(()=>{
+      const text=document.querySelector("#rt-indicator")?.textContent||"";
+      return text.includes("モデル再生中")&&text.includes("PV");
+    },{timeout:20000});
     assert.equal(await page.$eval("#granular-speed-value",el=>el.value),"0");
     assert.match(await page.$eval("#lab-status",el=>el.textContent),/適用待ち/);
     assert.equal(await page.$eval("#stop",el=>el.disabled),false);
