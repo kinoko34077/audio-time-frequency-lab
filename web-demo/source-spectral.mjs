@@ -132,7 +132,7 @@ export function createSpectralTimePitch({
       const angular=nominal+delta/probeShift;
       freq[k]=k===0?0:Math.max(0,Math.min(Math.PI,angular));
       if(!initialized)phases[k]=phase;
-      else phases[k]+=freq[k]*H*ratio;
+      else phases[k]+=freq[k]*H*ratio*srcRatio;
       binPhase[k]=phase;
     }
     initialized=true;
@@ -147,7 +147,10 @@ export function createSpectralTimePitch({
         const phase=phases[k]+wrapPhase(actualPhase-binPhase[k]);
         // Pitch independent of source traversal speed: interpolate between
         // destination FFT bins instead of repeating small waveform grains.
-        const target=k*ratio,j=Math.floor(target),frac=target-j;
+        // FFT bins here were measured at sourceSampleRate, whereas
+        // synthesis FFT bins are outputSampleRate. Keep 440 Hz as 440 Hz
+        // even when a 44.1 kHz source plays through a 48 kHz device.
+        const target=k*ratio*srcRatio,j=Math.floor(target),frac=target-j;
         if(j<=half){
           const gain=1-frac;
           dest.re[j]+=gain*mag*Math.cos(phase);
