@@ -27,7 +27,8 @@
     <div class="lab-grid model-essential-grid">
       <label class="lab-field">処理モデル
         <select id="lab-model" aria-label="再生モデル">
-          <option value="granular">Granular · 符号付き速度・0倍・音程独立</option>
+          <option value="spectral" selected>STFT Spectral · 標準再生・正逆/0倍・音程独立</option>
+          <option value="granular">Granular · 比較用・粒状重ね合わせ</option>
           <option value="live">Rust/WASM 部分音 · リアルタイム</option>
           <option value="pv">Phase Vocoder · 自動先読み</option>
           <option value="wsola">WSOLA · 自動先読み</option>
