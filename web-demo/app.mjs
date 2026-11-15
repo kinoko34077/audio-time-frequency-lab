@@ -2446,7 +2446,9 @@ function labRefresh(){
   labLong.disabled=lab.mode==="wsola"||isPCMModel(lab.mode);
   labWindows.disabled=lab.mode==="live"||isPCMModel(lab.mode)||lab.individual;
   labLong.max=lab.mode==="live"?"12":"13";
-  $("#lab-window-note").textContent=isPCMModel(lab.mode)?
+  $("#lab-window-note").textContent=lab.mode==="spectral"?
+    "STFTは2048点Hann窓と256サンプルの合成ホップで連続再生します。現在、解析窓の変更・個別波長処理は未接続です。":
+    lab.mode==="granular"?
     "GranularはここにあるFFT/個別波長/参照窓の研究設定を使用しません。切替時も設定値は保持します。":
     lab.individual?
     "周波数別の"+lab.periodCycles+"周期窓×7観測で音程成分を推定し、残りは選択中の"+lab.mode.toUpperCase()+"で処理します。短窓・長窓は各残差モデルに適用、参照窓数は使用しません。":
@@ -2510,7 +2512,9 @@ async function labSettingsChanged(){
   lab.shortFftSize=nextShort;lab.longFftSize=nextLong;
   lab.fftSize=Math.min(4096,nextLong);
   lab.referenceWindows=nextWindows;lab.periodCycles=nextCycles;
-  lab.individual=nextIndividual;
+  // A disabled model-incompatible checkbox is not an active DSP request.
+  // Retain the checkbox setting as a draft for later compatible models.
+  lab.individual=nextIndividual&&!isPCMModel(nextMode);
   $("#quality").value=lab.fftSize===1024?"eco":lab.fftSize===2048?"standard":"high";
   labInvalidate();
   labRefresh();
