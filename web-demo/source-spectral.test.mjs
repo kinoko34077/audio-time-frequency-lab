@@ -81,6 +81,35 @@ test("fractional pitch value remains exact; spectral synthesis changes sounding 
   const a=binEnergy(output[0],659.26),b=binEnergy(output[0],440);
   assert.ok(a>b*1.2,{a,b});
 });
+test("44.1k source through 48k output preserves absolute pitch during a 0x spectral freeze",()=>{
+  const sourceRate=44100,outputRate=48000,frames=110250;
+  const mono=new Float32Array(frames);
+  for(let i=0;i<frames;i++)mono[i]=.42*Math.sin(2*Math.PI*440*i/sourceRate);
+  const reader=createSourcePCMRenderer({
+    sourceFrames:frames,sourceSampleRate:sourceRate,outputSampleRate:outputRate,
+    channelCount:1,startFrame:60000,speed:0
+  });
+  reader.installWindow(40000,[mono.slice(40000,40000+65536)]);
+  const stft=createSpectralTimePitch({sourceSampleRate:sourceRate,
+    outputSampleRate:outputRate,channelCount:1});
+  const out=new Float32Array(8192);
+  for(let i=0;i<8192;i+=128){
+    const block=new Float32Array(128);
+    assert.equal(reader.renderSpectral([block],stft),0);
+    out.set(block,i);
+  }
+  const power=f=>{
+    let re=0,im=0;
+    for(let i=2048;i<out.length;i++){
+      const angle=2*Math.PI*f*(i-2048)/outputRate;
+      re+=out[i]*Math.cos(angle);
+      im+=out[i]*Math.sin(angle);
+    }
+    return Math.hypot(re,im);
+  };
+  assert.ok(power(440)>power(479)*1.6,
+    "source/output sample-rate conversion must not sharpen 440 Hz into 479 Hz");
+});
 test("one original source sample loop remains a held sample; never fake its original chord",()=>{
   const frame=90037,renderer=createSourcePCMRenderer({
     sourceFrames:FRAMES,sourceSampleRate:SR,outputSampleRate:SR,
