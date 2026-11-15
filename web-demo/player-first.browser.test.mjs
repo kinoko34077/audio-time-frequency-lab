@@ -661,7 +661,7 @@ test("U7 touch tap seeks without autoplay; deliberate drag auditions PCM, paused
     });
     const page=await browser.newPage(),errors=[];
     page.on("pageerror",e=>errors.push(e.message));
-    await page.goto(`http://127.0.0.1:${port}/`,{waitUntil:"domcontentloaded",timeout:20000});
+    await page.goto(`http://127.0.0.1:${port}/?model=granular`,{waitUntil:"domcontentloaded",timeout:20000});
     await page.waitForFunction(()=>document.documentElement.dataset.fwBoot==="ready",{timeout:20000});
     await (await page.$("#audio-file")).uploadFile(recording);
     await page.waitForFunction(()=>document.querySelector("#file-meta")?.textContent
