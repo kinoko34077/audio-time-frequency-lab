@@ -42,9 +42,9 @@ try:
       page.locator("#granular-pitch-value").evaluate("(e)=>{e.value='5';e.dispatchEvent(new Event('change',{bubbles:true}));}")
       assert page.locator("#granular-speed-value").input_value()=="1.5"
       assert page.locator("#granular-pitch-value").input_value()=="5"
-      # U1: Granular is explicitly selected on the primary player, not
-      # an implicit Rust setting while a different engine renders sound.
-      assert page.locator("#lab-model").input_value()=="granular"
+      # The actual user-facing default is Spectral STFT, not implicit
+      # Granular/Rust rendering behind a different selected model.
+      assert page.locator("#lab-model").input_value()=="spectral"
       # The Playwright browser can suppress AudioWorklet addModule; native
       # actual Chrome worklet proof is separately covered by lab-live-smoke.test.mjs.
       # Here the real native file picker is the acceptance target, not injection.
