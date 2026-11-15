@@ -4,11 +4,13 @@
  * inherit these capabilities merely because a UI value was selected.
  */
 export const MODEL_IDS=Object.freeze(["spectral","granular","live","pv","wsola","dual","am"]);
-export function primaryModelCapability(mode,speed){
+export function primaryModelCapability(mode,speed,{individual=false}={}){
   if(!MODEL_IDS.includes(mode))throw RangeError("unknown playback model");
   if(typeof speed!=="number"||!Number.isFinite(speed)||speed<-8||speed>8)
     throw RangeError("speed must be finite within -8..8");
-  const continuousPCM=mode==="spectral"||mode==="granular";
+  if(typeof individual!=="boolean")throw TypeError("invalid individual-mode setting");
+  const continuousPCM=mode==="spectral"||mode==="granular"||
+    mode==="pv"&&!individual;
   return Object.freeze({
     mode,supported:continuousPCM||(speed>=.5&&speed<=2),
     signed:continuousPCM,zeroAudible:continuousPCM,sampleAB:continuousPCM,
