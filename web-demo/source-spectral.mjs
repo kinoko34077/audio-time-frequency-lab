@@ -86,16 +86,15 @@ export function createSpectralTimePitch({
   setPitch(pitchSemitones);
   // Sampling is in ORIGINAL source-time frames. The source cache and sample
   // interpolation are the same bounded PCM reader as the existing renderer.
-  function sampleAt(ch,pos,state,read,sourceFrames,missing){
-    const a=state.loopStartFrame,b=state.loopEndFrame;
-    if(state.loopEnabled){
-      const length=b-a;
-      pos=a+((pos-a)%length+length)%length;
-    }
+  function sampleAt(ch,pos,_state,read,sourceFrames,missing){
+    // A/B constrains the STFT ANALYSIS CENTER, not every sample of its
+    // context window. Repeating 1..128 PCM values inside a 2048-sample FFT
+    // would synthesize precisely the fixed-period comb the user rejected.
+    // A one-sample loop is an exact stationary center surrounded by the
+    // original musical context; it does not copy non-existent source notes.
     if(pos<0||pos>=sourceFrames)return 0;
     const index=Math.floor(pos),frac=pos-index;
-    const next=frac===0?index:state.loopEnabled&&index+1>=b?a:
-      Math.min(sourceFrames-1,index+1);
+    const next=frac===0?index:Math.min(sourceFrames-1,index+1);
     const x=read(ch,index),y=frac===0?x:read(ch,next);
     if(!finite(x)||!finite(y)){
       if(missing.first===null)missing.first=!finite(x)?index:next;
@@ -193,27 +192,16 @@ export function createSpectralTimePitch({
         !state||typeof read!=="function"||
         !Number.isSafeInteger(sourceFrames)||sourceFrames<1)
         throw RangeError("invalid spectral PCM render");
-      let missing={first:null,total:0};
-      // An exactly one-sample loop only defines one source sample, NOT a
-      // spectrum that could authentically reproduce the original chord.
-      if(state.loopEnabled&&state.loopEndFrame-state.loopStartFrame===1){
-        const sample=state.loopStartFrame;
-        for(let ch=0;ch<channelCount;ch++){
-          const x=read(ch,sample);
-          if(!finite(x)){missing.total++;if(missing.first===null)missing.first=sample;}
-          output[ch].fill(finite(x)?x:0);
-          last[ch]=finite(x)?x:0;
-        }
-        outputFrames+=output[0].length;
-        return {missingFrames:missing.total?output[0].length:0,
-          firstMissingFrame:missing.first};
-      }
-      const base=state.sourceFrame;
-      const sourceStep=state.speed*srcRatio;
+      const missing={first:null,total:0};
+      const base=state.sourceFrame,sourceStep=state.speed*srcRatio;
+      const a=state.loopStartFrame,b=state.loopEndFrame,span=b-a;
+      const centerAt=position=>state.loopEnabled?
+        a+((position-a)%span+span)%span:position;
       for(let i=0;i<output[0].length;i++){
         const t=outputFrames+i;
         while(nextStart<=t){
-          makeFrame(nextStart,base+(nextStart+half-outputFrames)*sourceStep,
+          makeFrame(nextStart,centerAt(
+            base+(nextStart+half-outputFrames)*sourceStep),
             state,read,sourceFrames,missing);
           nextStart+=H;
         }
