@@ -425,6 +425,9 @@ test("native Chrome actual peak-locked PV output follows 0×, reverse and signed
     await set("granular-speed-value",-1);
     const reverse=await measure();
     assert.ok(reverse>1e-4,{reverse});
+    // The user's saved speed is +1; a negative record throw must continue
+    // playing BACKWARD after release before returning toward +1.
+    await set("granular-speed-value",1);
     await page.click("#main-tab-player");
     await page.evaluate(()=>{window.__pvScratch=[];});
     const bounds=await page.$eval("#wave-detail",e=>{
@@ -438,14 +441,15 @@ test("native Chrome actual peak-locked PV output follows 0×, reverse and signed
     await page.mouse.up();
     await page.waitForFunction(()=>window.__pvScratch.some(x=>x.kind==="scrub"&&
       x.speed<0),{timeout:15000});
-    await sleep(120);
+    await sleep(570);
     const scratch=await page.evaluate(()=>window.__pvScratch.slice());
     const thrown=scratch.filter(x=>x.kind==="scrub"&&x.speed<0);
     const inertia=scratch.filter(x=>x.kind==="command"&&
       Number.isFinite(x.speed));
     assert.ok(thrown.length>=1,{scratch});
-    assert.ok(inertia.length>=2,
-      "release must continue driving the real PV Worklet with signed kinetic velocity");
+    assert.ok(inertia.length>=2&&inertia.some(x=>x.speed<0)&&
+      inertia.some(x=>x.speed>0)&&inertia.some(x=>Math.abs(x.speed-1)<.01),
+      "PV release must keep moving backward and smoothly regain saved +1× in actual Worklet");
     assert.equal(Number(await page.$eval("#rt-telemetry",e=>e.dataset.pcmNodeStarts)),start,
       "scrubbing cannot recreate a new PCM node for every pointer movement");
     assert.ok(await measure()>1e-5,
