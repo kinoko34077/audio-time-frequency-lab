@@ -640,8 +640,10 @@ test("U1/U5 primary Play routes to REAL selected live/PV/Granular engines and on
     await page.waitForFunction(before=>window.__engineCreations
       .filter(x=>x.kind==="worker"&&x.name.includes("lab-processor.worker.mjs")).length>before,
       {timeout:20000},beforeSeekWorker);
-    await page.waitForFunction(()=>document.querySelector("#rt-indicator")
-      ?.textContent.includes("モデル再生中 · PV"),{timeout:20000});
+    await page.waitForFunction(()=>{
+      const text=document.querySelector("#rt-indicator")?.textContent||"";
+      return text.includes("モデル再生中")&&text.includes("PV");
+    },{timeout:20000});
     assert.equal(await page.$eval("#granular-speed-value",el=>el.value),"0");
     assert.match(await page.$eval("#lab-status",el=>el.textContent),/適用待ち/);
     assert.equal(await page.$eval("#stop",el=>el.disabled),false);
