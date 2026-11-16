@@ -88,3 +88,15 @@ test("Dual explicit scrub shift keeps one synthesis epoch and uses original-fram
   assert.ok(Math.abs(before-out[0][0])<.5,
     "large scrub should have bounded transition rather than full-scale jump");
 });
+
+test("Dual accepts each configured 4096/8192 long PV window without resizing the source clock",()=>{
+  for(const [shortFrames,longFrames] of [[256,4096],[512,8192]]){
+    const {renderer,dual}=fixture(0,shortFrames,longFrames);
+    const block=[new Float32Array(128),new Float32Array(128)];
+    assert.equal(renderer.renderGranular(block,dual),0,{shortFrames,longFrames});
+    assert.ok(block.every(ch=>ch.every(Number.isFinite)),{shortFrames,longFrames});
+    assert.equal(renderer.timeline.state.sourceFrame,center);
+    assert.equal(dual.state.longAlgorithm,"phase-vocoder-peak-locked");
+    assert.equal(dual.state.shortAlgorithm,"wsola-correlation");
+  }
+});
