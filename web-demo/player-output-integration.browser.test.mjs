@@ -348,7 +348,8 @@ test("recorded piano main player: gesture/parameter receipts AND actual output P
 
 for(const profile of [
   {model:"pv",route:"pv-phase-locked",port:18793},
-  {model:"wsola",route:"wsola-source-time",port:18794}
+  {model:"wsola",route:"wsola-source-time",port:18794},
+  {model:"dual",route:"dual-transient-source-time",port:18795}
 ]){
 test(`native Chrome actual ${profile.model} output follows 0×, reverse and signed scratch on ONE Worklet`,async()=>{
   const port=profile.port;
