@@ -414,7 +414,7 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, swit
     // #63 U4: the user moves beyond old B and chooses "current position
     // as A". This must USE the tapped source sample, not reject it with a
     // browser validity bubble or require manually editing the old B first.
-    await page.click(".player-loop-precision summary");
+    assert.equal(await page.$eval(".player-loop-precision",el=>el.open),true);
     await page.click("#player-loop-a-now");
     assert.equal(Number(await page.$eval("#player-loop-a",e=>e.value)),finalSample,
       "new A must be exactly the selected source frame even when A passes old B");
