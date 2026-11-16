@@ -2,7 +2,7 @@
  * Owns only source sample reads/interpolation and underrun measurement.
  * Transport decisions live in source-timeline.mjs.
  */
-import {createSourceTimeline} from "./source-timeline.mjs";
+import {createSourceTimeline,nextSourceSampleIndex} from "./source-timeline.mjs";
 
 export const SOURCE_WINDOW_FRAMES=65536;
 export const SOURCE_WINDOW_SLOTS=4;
@@ -72,8 +72,7 @@ export function createSourcePCMRenderer({
       if(pos===null)continue;
       const at=Math.floor(pos),fraction=pos-at;
       const next=fraction===0?at:
-        state.loopEnabled&&at+1>=state.loopEndFrame?
-          state.loopStartFrame:Math.min(sourceFrames-1,at+1);
+        nextSourceSampleIndex(at,state,sourceFrames);
       let miss=false;
       for(let ch=0;ch<channelCount;ch++){
         const x=readFrame(ch,at),y=fraction===0?x:readFrame(ch,next);
@@ -276,8 +275,7 @@ export function createSourcePCMRenderer({
         }
         const at=Math.floor(position);
         const weight=position-at;
-        const next=weight>0&&loopState.loopEnabled&&at+1>=loopState.loopEndFrame
-          ?loopState.loopStartFrame:Math.min(sourceFrames-1,at+1);
+        const next=weight>0?nextSourceSampleIndex(at,loopState,sourceFrames):at;
         const left=find(at);
         const right=weight>0?find(next):left;
         if(!left||!right){
@@ -307,7 +305,7 @@ export function createSourcePCMRenderer({
       if(pos===null)return null;
       const at=Math.floor(pos);
       const s=timeline.state;
-      const next=s.loopEnabled&&at+1>=s.loopEndFrame?s.loopStartFrame:Math.min(sourceFrames-1,at+1);
+      const next=nextSourceSampleIndex(at,s,sourceFrames);
       return find(at)&&find(next)?null:at;
     }
   };
