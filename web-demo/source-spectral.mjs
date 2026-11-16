@@ -16,7 +16,7 @@ export function createSpectralTimePitch({
   if(!finite(sourceSampleRate)||sourceSampleRate<=0||
     !finite(outputSampleRate)||outputSampleRate<=0||
     !Number.isInteger(channelCount)||channelCount<1||channelCount>2||
-    ![1024,2048].includes(fftFrames)||
+    ![1024,2048,4096,8192].includes(fftFrames)||
     !Number.isInteger(hopFrames)||hopFrames<1||
     fftFrames%hopFrames!==0||hopFrames>fftFrames/4||
     typeof phaseLock!=="boolean")
