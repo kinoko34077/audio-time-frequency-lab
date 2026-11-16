@@ -173,3 +173,38 @@ test("real PV mode peak-locks neighboring spectral bins but retains signed sourc
   });
   assert.equal(g.state.algorithm,"phase-vocoder-peak-locked");
 });
+
+
+test("neutral 1x/0-semitone STFT and PV output the original PCM, not overlapping phased copies",()=>{
+  for(const phaseLock of [false,true]){
+    const {output,misses,end}=render(1,0,8192,{phaseLock});
+    assert.equal(misses,0);
+    assert.equal(end,CENTER+8192);
+    for(let ch=0;ch<2;ch++){
+      let maxError=0;
+      for(let i=0;i<8192;i++)
+        maxError=Math.max(maxError,Math.abs(output[ch][i]-source[ch][CENTER+i]));
+      assert.ok(maxError<1e-5,{phaseLock,ch,maxError});
+    }
+  }
+});
+
+test("neutral identity and short-loop spectral synthesis use the same source clock",()=>{
+  const a=88000,b=96000,p=createSourcePCMRenderer({
+    sourceFrames:FRAMES,sourceSampleRate:SR,outputSampleRate:SR,
+    channelCount:2,speed:1,startFrame:b-48,
+    loopStartFrame:a,loopEndFrame:b,loopEnabled:true
+  });
+  p.installWindow(START,source.map(x=>x.slice(START,START+65536)));
+  const model=createSpectralTimePitch({
+    sourceSampleRate:SR,outputSampleRate:SR,channelCount:2
+  });
+  const out=[new Float32Array(128),new Float32Array(128)];
+  assert.equal(p.renderSpectral(out,model),0);
+  for(let i=0;i<128;i++){
+    const original=a+((b-48+i-a)%(b-a));
+    for(let ch=0;ch<2;ch++)
+      assert.ok(Math.abs(out[ch][i]-source[ch][original])<1e-5,{ch,i});
+  }
+  assert.equal(p.timeline.state.sourceFrame,a+80);
+});
