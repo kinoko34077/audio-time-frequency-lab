@@ -1281,3 +1281,51 @@ body.model-lab[data-legacy-tools="1"] .audio-status-row{display:none!important}
   body.model-lab:not([data-legacy-tools="1"]) #audio-diagnostics-toggle{min-height:38px}
   body.model-lab:not([data-legacy-tools="1"]) .audio-status-row{gap:4px}
 }
+
+
+/* #36 2026-11-17: the editable value IS the visible value, adjacent to its
+   label. Shared A/B and model controls stay expanded without oversized boxes. */
+body.model-lab .player-tune-heading output[hidden],
+body.model-lab .lab-number-heading output[hidden]{display:none!important}
+body.model-lab .inline-number{display:inline-flex;align-items:center;gap:3px;white-space:nowrap;
+  font-size:11px;color:#9ecdc0;font-variant-numeric:tabular-nums}
+body.model-lab .inline-number input[type=number]{
+  width:68px;min-width:0;min-height:28px;height:28px;max-width:100%;
+  padding:2px 5px;border:1px solid #426660;border-radius:5px;
+  color:#e6f8f2;background:#102a30;text-align:right;
+  font:12px ui-monospace,monospace
+}
+body.model-lab .inline-number input:disabled{opacity:.5}
+body.model-lab .player-tune-heading{justify-content:flex-start;gap:8px;min-height:29px}
+body.model-lab .player-tune-heading label{margin-right:auto}
+body.model-lab .player-tune-control{gap:2px}
+body.model-lab .player-tune-inputs{gap:0}
+body.model-lab .player-tune-inputs input[type=range]{width:100%;min-height:30px}
+body.model-lab .lab-number-heading{display:flex;align-items:center;justify-content:space-between;
+  gap:5px;flex-wrap:wrap;min-height:30px}
+body.model-lab .lab-number-heading label{font-size:11px}
+body.model-lab .lab-number-heading .inline-number input[type=number]{width:66px}
+body.model-lab .model-extra-grid{row-gap:7px}
+body.model-lab .model-extra-grid .lab-field{gap:2px}
+body.model-lab .player-loop-fields{gap:6px}
+body.model-lab .player-loop-fields .loop-point{
+  min-width:0;display:flex;align-items:center;gap:5px;flex-wrap:wrap;
+  font-size:11px;color:#c4dfdc
+}
+body.model-lab .loop-point label{font-size:11px;white-space:nowrap}
+body.model-lab .loop-point input[type=number]{
+  width:clamp(66px,9ch,100px);min-width:0;min-height:28px;padding:3px 5px;
+  border:1px solid #426660;border-radius:5px;background:#102a30;
+  color:#e6f8f2;text-align:right;font:12px ui-monospace,monospace
+}
+body.model-lab .loop-point button{min-height:28px;padding:3px 7px;font-size:10px;
+  background:transparent;border-radius:5px}
+body.model-lab .player-loop-precision>summary,
+body.model-lab .model-extra-controls>summary{padding:3px 0}
+@media(max-width:600px){
+  body.model-lab .player-loop-fields{grid-template-columns:1fr}
+  body.model-lab .player-loop-fields .loop-point{flex-wrap:nowrap}
+  body.model-lab .loop-point input[type=number]{flex:1;width:90px;max-width:135px}
+  body.model-lab .loop-point button{margin-left:auto}
+  body.model-lab .model-extra-grid .lab-number-heading{flex-wrap:nowrap}
+}
