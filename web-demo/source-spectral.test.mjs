@@ -413,3 +413,51 @@ test("AM uses its own smoothed envelope DSP against one signed shared source-tim
   assert.throws(()=>changed.setPitch(13),/pitch/);
   assert.throws(()=>changed.shiftSource(Number.NaN),/scratch/);
 });
+
+
+test("AM 0x source RMS does not alias a 3 kHz 16-sample waveform period",()=>{
+  // Codex PR84 P2: a 16-sample probe stride sampled only ONE 3 kHz
+  // sine phase; 0x frozen at positions 24001/24004 drove the gain toward
+  // opposite clamps despite identical steady source energy.
+  const sr=48000,n=48000,amp=.25;
+  const mono=Float32Array.from({length:n},(_,i)=>
+    amp*Math.sin(2*Math.PI*3000*i/sr));
+  const expectedRms=amp/Math.SQRT2;
+  const observed=[];
+  for(const frame of [24000,24001,24004,24007]){
+    const reader=createSourcePCMRenderer({
+      sourceFrames:n,sourceSampleRate:sr,outputSampleRate:sr,
+      channelCount:1,startFrame:frame,speed:0
+    });
+    reader.installWindow(0,[mono]);
+    const engine=createAmTimePitch({
+      sourceSampleRate:sr,outputSampleRate:sr,channelCount:1,
+      pitchSemitones:0
+    });
+    const t0=performance.now();
+    let signalPower=0,missing=0;
+    for(let offset=0;offset<8192;offset+=128){
+      const out=new Float32Array(128);
+      missing+=reader.renderGranular([out],engine);
+      if(offset>=4096)for(const sample of out){
+        assert.ok(Number.isFinite(sample));
+        signalPower+=sample*sample;
+      }
+    }
+    assert.equal(missing,0,{frame});
+    assert.equal(reader.timeline.state.sourceFrame,frame,
+      "0x keeps one canonical source frame for every AM update");
+    const state=engine.state;
+    assert.ok(Math.abs(state.sourcePeak-expectedRms)<.008,
+      "AM source envelope must represent full-wave RMS at every freeze phase"+
+      JSON.stringify({frame,peak:state.sourcePeak,expectedRms}));
+    observed.push({frame,gain:state.gain,peak:state.sourcePeak,
+      outputRms:Math.sqrt(signalPower/4096),
+      renderMs:performance.now()-t0});
+  }
+  const gains=observed.map(o=>o.gain);
+  assert.ok(Math.max(...gains)-Math.min(...gains)<.05,
+    "equal source energy must not produce phase-dependent AM gain"+
+    JSON.stringify(observed));
+  console.log("AM_3KHZ_FREEZE_PHASE_RMS "+JSON.stringify(observed));
+});
