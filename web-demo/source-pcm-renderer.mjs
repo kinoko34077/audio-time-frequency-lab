@@ -52,6 +52,23 @@ export function createSourcePCMRenderer({
   // change has warm overlap/phase state instead of a new, silent startup.
   // Crossfade only at real parameter transitions; do not double the signal.
   let neutralBlend=null,identityOnlyRaw=false;
+  const lastAudible=new Float32Array(channelCount);
+  const transitionOrigin=new Float32Array(channelCount);
+  let transitionLeft=0;
+  const TRANSITION_FRAMES=128;
+  function rememberLastAudible(output){
+    const last=output[0].length-1;
+    if(last<0)return;
+    for(let ch=0;ch<channelCount;ch++)lastAudible[ch]=output[ch][last];
+  }
+  function beginOutputTransition(){
+    // The synth has its own smoothing, but the neutral PCM identity path
+    // bypasses that synth. Keep transport discontinuities click-free without
+    // adding a parallel audio node or resetting the source clock.
+    if(renderedFrames===0||!(neutralBlend>0))return;
+    transitionOrigin.set(lastAudible);
+    transitionLeft=TRANSITION_FRAMES;
+  }
   function blendNeutralPCM(output,state,pitch){
     // Tiny A/B intervals deliberately retain a synthesis context: directly
     // repeating only 1..N samples would create DC/fixed-period comb artifacts.
@@ -86,12 +103,18 @@ export function createSourcePCMRenderer({
           output[ch][i]=output[ch][i]*(1-mix)+original*mix;
         }
       }
+      if(transitionLeft>0&&mix>0){
+        const weight=transitionLeft/TRANSITION_FRAMES;
+        for(let ch=0;ch<channelCount;ch++)
+          output[ch][i]=transitionOrigin[ch]*weight+output[ch][i]*(1-weight);
+        transitionLeft--;
+      }
       if(miss)missing++;
     }
     return missing;
   }
   const api={
-    timeline,
+    timeline,beginOutputTransition,
     get firstMissingFrame(){return firstMissingFrame;},
     get statistics(){return Object.freeze({
       missingFrames,renderedFrames,windowCount:windows.length
@@ -233,6 +256,7 @@ export function createSourcePCMRenderer({
       missingFrames+=misses;
       renderedFrames+=output[0].length;
       timeline.advance(output[0].length);
+      rememberLastAudible(output);
       return misses;
     },
     renderSpectral(output,spectral){
@@ -256,6 +280,7 @@ export function createSourcePCMRenderer({
       missingFrames+=misses;
       renderedFrames+=output[0].length;
       timeline.advance(output[0].length);
+      rememberLastAudible(output);
       return misses;
     },
     render(output){
