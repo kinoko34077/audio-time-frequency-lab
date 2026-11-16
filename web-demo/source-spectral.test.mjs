@@ -413,3 +413,37 @@ test("AM uses its own smoothed envelope DSP against one signed shared source-tim
   assert.throws(()=>changed.setPitch(13),/pitch/);
   assert.throws(()=>changed.shiftSource(Number.NaN),/scratch/);
 });
+
+
+test("AM source envelope power stays independent of 3kHz freeze sample phase",()=>{
+  // Independent Codex P2: 48kHz / 3kHz = 16 source samples per period.
+  // A 16-sample probe stride falsely observes only one phase, causing
+  // wildly different 0x volume at frames 24001 and 24004.
+  const sr=48000,len=65536,frames=8192,centers=[24001,24004,24008];
+  const pcm=Float32Array.from({length:len},(_,i)=>
+    .35*Math.sin(2*Math.PI*3000*i/sr));
+  const readAt=center=>{
+    const reader=createSourcePCMRenderer({sourceFrames:len,
+      sourceSampleRate:sr,outputSampleRate:sr,channelCount:1,
+      startFrame:center,speed:0});
+    reader.installWindow(0,[pcm]);
+    const am=createAmTimePitch({sourceSampleRate:sr,
+      outputSampleRate:sr,channelCount:1,pitchSemitones:0});
+    const out=new Float32Array(frames);
+    for(let i=0;i<frames;i+=128){
+      const block=new Float32Array(128);
+      assert.equal(reader.renderGranular([block],am),0);
+      out.set(block,i);
+    }
+    assert.equal(reader.timeline.state.sourceFrame,center);
+    return {gain:am.state.gain,energy:rms(out.subarray(4096))};
+  };
+  const all=centers.map(readAt);
+  const gains=all.map(x=>x.gain),energies=all.map(x=>x.energy);
+  console.log("AM_3KHZ_ZERO_PHASE_GAINS "+JSON.stringify({centers,all}));
+  assert.ok(Math.max(...gains)-Math.min(...gains)<.08,
+    "source power must not depend on frozen 3kHz sample phase");
+  assert.ok(Math.max(...energies)/Math.min(...energies)<1.1,
+    "0x 3kHz source positions must have consistent sustained level");
+  assert.ok(gains.every(x=>x>.8&&x<1.2),{gains});
+});
