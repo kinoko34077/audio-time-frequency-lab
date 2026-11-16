@@ -342,8 +342,7 @@ function refreshAB(){
   detailWaveEditor?.refresh(true);
 }
 function syncLoopToPlayer(player=state.player){
-  if(!player?.pcmBridge||player.pcmBridge.processingMode!=="granular"||
-     player.initializing)return;
+  if(!player?.pcmBridge||player.initializing)return;
   const requested={a:ab.a,b:ab.b,enabled:ab.enabled};
   if(!player.loopBusy&&!player.pendingLoop&&player.appliedLoop?.a===requested.a&&
      player.appliedLoop?.b===requested.b&&
