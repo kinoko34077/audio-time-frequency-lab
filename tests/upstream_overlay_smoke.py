@@ -98,7 +98,7 @@ try:
         "(e)=>{e.checked=false;e.dispatchEvent(new Event('change',{bubbles:true}));}")
       assert page.locator('#lab-short').is_enabled()
       assert page.locator('#lab-long').is_enabled()
-      assert '短窓で音の始まり' in page.locator('#lab-model-description').inner_text()
+      assert '短窓WSOLA' in page.locator('#lab-model-description').inner_text()
       page.locator('#lab-model').select_option('wsola')
       assert page.locator("#lab-windows-output").inner_text()=="2 窓"
       page.locator("#stop").click()
