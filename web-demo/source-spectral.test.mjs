@@ -318,3 +318,48 @@ test("micro-pitch actual PCM diagnostics: stable tones must be measured, not inf
   }
   console.log("MICROPITCH_BASELINE_PCM "+JSON.stringify(measurements));
 });
+
+
+test("small fractional pitch changes retain harmonic amplitudes across low and high bins",()=>{
+  // The old unrotated j/j+1 deposition causes near-half-bin cancellation.
+  // This is heard as a comb-like EQ when harmonic numbers differ.
+  const frequencies=[220,440,880,1760,3520],amplitude=.12;
+  const n=65536,startFrame=10000,total=16384;
+  const pcm=Float32Array.from({length:n},(_,i)=>frequencies.reduce(
+    (sum,hz)=>sum+amplitude*Math.sin(2*Math.PI*hz*i/SR),0));
+  const measure=(out,f)=>{
+    const begin=4096,count=out.length-begin;
+    let a=0,b=0;
+    for(let i=begin;i<out.length;i++){
+      const theta=2*Math.PI*f*i/SR;
+      a+=out[i]*Math.cos(theta);b+=out[i]*Math.sin(theta);
+    }
+    return 2*Math.hypot(a,b)/count;
+  };
+  const gains=[];
+  for(const phaseLock of [false,true]){
+    for(const pitch of [-.1,.1]){
+      const renderer=createSourcePCMRenderer({
+        sourceFrames:n,sourceSampleRate:SR,outputSampleRate:SR,
+        channelCount:1,startFrame,speed:1
+      });
+      renderer.installWindow(0,[pcm]);
+      const synth=createSpectralTimePitch({sourceSampleRate:SR,
+        outputSampleRate:SR,channelCount:1,pitchSemitones:pitch,phaseLock});
+      const out=new Float32Array(total);
+      for(let i=0;i<total;i+=128){
+        const block=new Float32Array(128);
+        assert.equal(renderer.renderSpectral([block],synth),0);
+        out.set(block,i);
+      }
+      const ratios=frequencies.map(hz=>measure(out,hz*2**(pitch/12))/amplitude);
+      gains.push({model:phaseLock?"pv":"spectral",pitch,
+        gains:ratios.map(v=>Number(v.toFixed(4)))});
+      for(let i=0;i<ratios.length;i++)
+        assert.ok(ratios[i]>.8&&ratios[i]<1.2,
+          "tiny pitch must not cause comb-like harmonic notch"+
+          JSON.stringify({phaseLock,pitch,hz:frequencies[i],gain:ratios[i]}));
+    }
+  }
+  console.log("MICROPITCH_HARMONIC_GAIN "+JSON.stringify(gains));
+});
