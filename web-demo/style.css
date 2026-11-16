@@ -1312,7 +1312,7 @@ body.model-lab .player-loop-fields .loop-point{
   min-width:0;display:flex;align-items:center;gap:5px;flex-wrap:wrap;
   font-size:11px;color:#c4dfdc
 }
-body.model-lab .loop-point label{font-size:11px;white-space:nowrap}
+body.model-lab .loop-point label{display:inline;font-size:11px;white-space:nowrap}
 body.model-lab .loop-point input[type=number]{
   width:clamp(66px,9ch,100px);min-width:0;min-height:28px;padding:3px 5px;
   border:1px solid #426660;border-radius:5px;background:#102a30;
