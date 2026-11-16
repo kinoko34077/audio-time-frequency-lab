@@ -401,10 +401,10 @@ test(`native Chrome actual ${profile.model} output follows 0×, reverse and sign
     await page.click("#main-tab-model");
     await set("lab-model",profile.model);
     await page.click("#play-main");
-    await page.waitForFunction(()=>document.querySelector("#rt-telemetry")
-      ?.dataset.pcmTransport===profile.route&&
+    await page.waitForFunction(route=>document.querySelector("#rt-telemetry")
+      ?.dataset.pcmTransport===route&&
       document.querySelector("#granular-optin-status")?.dataset.renderRunning==="true",
-      {timeout:20000});
+      {timeout:20000},profile.route);
     const start=Number(await page.$eval("#rt-telemetry",e=>e.dataset.pcmNodeStarts));
     const sound=()=>page.evaluate(()=>{
       const v=(window.__pvAnalysers||[]).map(analyser=>{
