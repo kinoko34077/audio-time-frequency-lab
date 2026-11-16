@@ -36,7 +36,8 @@ const PLAYER_GRANULAR_AVAILABLE=true;
 // regression/comparison path. Normal Audio Time uses real STFT instead.
 // PV is a real peak-locked streaming Worklet unless period-joint is enabled.
 const isPCMModel=(mode,individual=lab.individual)=>
-  mode==="spectral"||mode==="granular"||(mode==="pv"&&!individual);
+  mode==="spectral"||mode==="granular"||
+  ((mode==="pv"||mode==="wsola")&&!individual);
 const initialModel=GRANULAR_EXPERIMENT||
   new URLSearchParams(location.search).get("model")==="granular"?
   "granular":"spectral";
@@ -1470,6 +1471,7 @@ async function play(mode="wet",offset=null){
         speed:initialSpeed,
         processingMode:granularActive?activeSynthMode:"raw",
         pitchSemitones:initialPitch,
+        wsolaWindowFrames:lab.shortFftSize,
         startFrame:Math.round(at*sourceRate),loopEnabled:initialLoop.enabled,
         loopStartFrame:initialLoop.a,loopEndFrame:initialLoop.b||state.dry[0].length,
         onEvent:data=>{
@@ -1592,7 +1594,8 @@ async function play(mode="wet",offset=null){
       const telemetry=$("#rt-telemetry");
       telemetry.dataset.pcmTransport=granularActive?
         (activeSynthMode==="spectral"?"spectral-realtime":
-          activeSynthMode==="pv"?"pv-phase-locked":"granular-experimental"):
+          activeSynthMode==="pv"?"pv-phase-locked":
+          activeSynthMode==="wsola"?"wsola-source-time":"granular-experimental"):
         "raw-experimental";
       telemetry.dataset.pcmNodeStarts=String(
         Number(telemetry.dataset.pcmNodeStarts||0)+1
@@ -1602,11 +1605,14 @@ async function play(mode="wet",offset=null){
           "STFT位相合成中 · ソース位置同期/±8/0倍（音響品質検証中）":
           activeSynthMode==="pv"?
           "PVピーク位相ロック合成中 · 元音源同期/±8/0倍（音響品質検証中）":
+          activeSynthMode==="wsola"?
+          "WSOLA波形相関合成中 · 元音源同期/±8/0倍（音響品質検証中）":
           "粒状合成中 · 独立音程/±8/0倍（音質未受入）"):
         "原音再生中 · PCM実験経路（速度と音程は未連動）");
       message(granularActive?
         "再生中。"+(activeSynthMode==="spectral"?"STFT位相合成":
-          activeSynthMode==="pv"?"PVピーク位相ロック":"Granular")+
+          activeSynthMode==="pv"?"PVピーク位相ロック":
+          activeSynthMode==="wsola"?"WSOLA波形相関":"Granular")+
         "・極短ループ・実機可聴遅延は音響品質検証中。":
         "実験用PCM再生中。音程変更・0倍の音響品質は未実装です。","warning");
     }catch(err){
@@ -2458,6 +2464,8 @@ function labRefresh(){
     "STFTは2048点Hann窓と256サンプルの合成ホップで連続再生します。現在、解析窓の変更・個別波長処理は未接続です。":
     lab.mode==="pv"&&!lab.individual?
     "PV（実時間）は2048点・256合成ホップのピーク位相ロック処理です。個別波長をONにした場合のみ従来の先読みPV＋個別波長を使用します。":
+    lab.mode==="wsola"&&!lab.individual?
+    "WSOLA（実時間）は短窓で元音源波形を長めの相関参照と照合します。短窓の変更は再生処理を更新します。個別波長ONでは従来の先読み方式です。":
     lab.mode==="granular"?
     "GranularはここにあるFFT/個別波長/参照窓の研究設定を使用しません。切替時も設定値は保持します。":
     lab.individual?
@@ -2472,7 +2480,7 @@ function labRefresh(){
     granular:"Granular：波形片の重ね合わせ方式（比較用）。符号付き±8倍・0倍・サンプル単位A/Bに対応します。極低速時の周期感・comb感は既知の評価課題です。",
     live:"部分音：周波数の山と、その間の細かな成分も補って再合成します。密度の高い音では変換誤差が残ることがあります。",
     pv:"位相ボコーダー：ピーク近傍の位相関係を保持するSTFT再合成です。通常は元音源位置と逆/0倍・スクラブに直接追従します。個別波長選択時は従来の先読み処理です。打音や極低速の音色は検証中です。",
-    wsola:"WSOLA：波形が自然につながる位置を細かく探して伸縮します。和音や大きな音程変更では揺れが残る場合があります。",
+    wsola:"WSOLA：ステレオ共通の正規化波形相関によって接続する実時間OLA。通常は元音源位置・正逆/0倍・スクラブに追従します。個別波長ONは従来の先読み方式です。極低速の周期性・打音品質は検証中です。",
     dual:"短窓＋長窓：短窓で音の始まり、長窓で持続音の高さを追い、位相をそろえて切り替える実験方式です。",
     am:"AM包絡：伸縮した音の音量の輪郭をゆっくり整えます。音量を急に掛け直さず、コム状の濁りを抑える実験方式です。",
     "period-joint":"周波数ごとの個別波長（研究版）：7つの周波数別周期窓から複数の共通部分音を推定し、残差も処理します。和音・変調・声・打音も再生対象ですが、物理的な音源分離・完全な位相/音色保持は未証明です。"
@@ -2496,6 +2504,7 @@ let modelSelectionEpoch=0;
 async function labSettingsChanged(){
   const ticket=++modelSelectionEpoch;
   const previous=lab.mode,previousIndividual=lab.individual;
+  const previousShort=lab.shortFftSize;
   const currentTime=playPosition();
   const nextIndividual=labIndividual.checked;
   let nextMode=labModel.value;
@@ -2554,6 +2563,7 @@ async function labSettingsChanged(){
     "未適用: "+capability.reason;
   if(player&&player.mode!=="dry"){
     if(previous!==nextMode||
+       (nextMode==="wsola"&&!nextIndividual&&previousShort!==nextShort)||
        (isPCMModel(nextMode,nextIndividual)&&!player.rawPCM)||
        (!isPCMModel(nextMode,nextIndividual)&&player.rawPCM)){
       await stop();

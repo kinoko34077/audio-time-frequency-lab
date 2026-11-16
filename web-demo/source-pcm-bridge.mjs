@@ -25,7 +25,7 @@ export async function createSourcePCMBridge({
   speed=1,startFrame=0,loopStartFrame=0,
   loopEndFrame=sourceChannels?.[0]?.length,loopEnabled=false,
   onEvent=()=>{},commandTimeoutMs=5000,
-  processingMode="raw",pitchSemitones=0
+  processingMode="raw",pitchSemitones=0,wsolaWindowFrames=1024
 }={}){
   if(!ctx?.audioWorklet||!Number.isFinite(ctx.sampleRate)||
      !Array.isArray(sourceChannels)||sourceChannels.length<1||
@@ -39,8 +39,10 @@ export async function createSourcePCMBridge({
   if(!Number.isFinite(commandTimeoutMs)||commandTimeoutMs<1||commandTimeoutMs>60000)
     throw RangeError("invalid PCM command timeout");
   let currentSpeed=validatePlaybackSpeed(speed);
-  if(!["raw","granular","spectral","pv"].includes(processingMode))
+  if(!["raw","granular","spectral","pv","wsola"].includes(processingMode))
     throw RangeError("invalid PCM processing mode");
+  if(![256,512,1024,2048,4096].includes(wsolaWindowFrames))
+    throw RangeError("invalid WSOLA synthesis window");
   const validatePitch=value=>{
     if(typeof value!=="number"||!Number.isFinite(value)||
       value<-12||value>12)
@@ -63,7 +65,7 @@ export async function createSourcePCMBridge({
       sourceFrames:frames,sourceSampleRate,
       channelCount:sourceChannels.length,speed,
       startFrame,loopStartFrame:A,loopEndFrame:B,loopEnabled:loop,
-      processingMode,pitchSemitones
+      processingMode,pitchSemitones,wsolaWindowFrames
     }
   });
   // Do not copy entire track to the worklet; these small snapshots are moved.

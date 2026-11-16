@@ -346,8 +346,12 @@ test("recorded piano main player: gesture/parameter receipts AND actual output P
   }finally{await browser?.close();server.kill("SIGTERM");}
 });
 
-test("native Chrome actual peak-locked PV output follows 0×, reverse and signed scratch on ONE Worklet",async()=>{
-  const port=18793;
+for(const profile of [
+  {model:"pv",route:"pv-phase-locked",port:18793},
+  {model:"wsola",route:"wsola-source-time",port:18794}
+]){
+test(`native Chrome actual ${profile.model} output follows 0×, reverse and signed scratch on ONE Worklet`,async()=>{
+  const port=profile.port;
   const server=spawn("python3",["-m","http.server",String(port),"--bind","127.0.0.1"],{
     cwd:path.resolve("_site"),stdio:"ignore"
   });
@@ -395,12 +399,12 @@ test("native Chrome actual peak-locked PV output follows 0×, reverse and signed
     await set("player-loop-b",103200);
     await set("player-loop-a",79200);
     await page.click("#main-tab-model");
-    await set("lab-model","pv");
+    await set("lab-model",profile.model);
     await page.click("#play-main");
-    await page.waitForFunction(()=>document.querySelector("#rt-telemetry")
-      ?.dataset.pcmTransport==="pv-phase-locked"&&
+    await page.waitForFunction(route=>document.querySelector("#rt-telemetry")
+      ?.dataset.pcmTransport===route&&
       document.querySelector("#granular-optin-status")?.dataset.renderRunning==="true",
-      {timeout:20000});
+      {timeout:20000},profile.route);
     const start=Number(await page.$eval("#rt-telemetry",e=>e.dataset.pcmNodeStarts));
     const sound=()=>page.evaluate(()=>{
       const v=(window.__pvAnalysers||[]).map(analyser=>{
@@ -462,7 +466,7 @@ test("native Chrome actual peak-locked PV output follows 0×, reverse and signed
         render:document.querySelector("#granular-optin-status")?.dataset.renderRunning,
         interaction:document.querySelector("#wave-detail-wrap")?.dataset.interaction
       }));
-      throw Error("PV signed drag not observed: "+JSON.stringify({panStart,...actual})+" / "+error.message);
+      throw Error(profile.model+" signed drag not observed: "+JSON.stringify({panStart,...actual})+" / "+error.message);
     }
     await sleep(570);
     const scratch=await page.evaluate(()=>window.__pvScratch.slice());
@@ -472,15 +476,16 @@ test("native Chrome actual peak-locked PV output follows 0×, reverse and signed
     assert.ok(thrown.length>=1,{scratch});
     assert.ok(inertia.length>=2&&inertia.some(x=>x.speed<0)&&
       inertia.some(x=>x.speed>0)&&inertia.some(x=>Math.abs(x.speed-1)<.01),
-      "PV release must keep moving backward and smoothly regain saved +1× in actual Worklet");
+      "release must keep moving backward and smoothly regain saved +1× in actual Worklet");
     assert.equal(Number(await page.$eval("#rt-telemetry",e=>e.dataset.pcmNodeStarts)),start,
       "scrubbing cannot recreate a new PCM node for every pointer movement");
     assert.ok(await measure()>1e-5,
-      "PV should still produce samples after releasing the drag");
+      "selected DSP must still produce samples after releasing the drag");
     assert.deepEqual(errors,[]);
-    console.log("PV_REALTIME_CHROME_OUTPUT "+JSON.stringify({
+    console.log(profile.model.toUpperCase()+"_REALTIME_CHROME_OUTPUT "+JSON.stringify({
       positive,frozen,reverse,dragCommands:thrown.length,
       inertiaSpeeds:inertia.map(x=>x.speed),nodeStarts:start
     }));
   }finally{await browser?.close();server.kill("SIGTERM");}
 });
+}
