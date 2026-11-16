@@ -52,10 +52,17 @@ try:
         page.wait_for_function("""() => document.querySelector('#rt-telemetry')
           ?.dataset.pcmTransport==='pv-phase-locked'""",timeout=25000)
         page.locator('#stop').click()
+        # Ordinary WSOLA is now a real PCM Worklet; its long-reference stereo
+        # waveform correlation follows the requested original source clock.
+        page.locator('#lab-model').select_option('wsola')
+        page.locator('#play-main').click()
+        page.wait_for_function("""() => document.querySelector('#rt-telemetry')
+          ?.dataset.pcmTransport==='wsola-source-time'""",timeout=25000)
+        page.locator('#stop').click()
         for model in ('pv','wsola','dual','am'):
             page.locator('#lab-model').select_option(model)
             page.locator('#lab-individual-periods').evaluate(
-                "(e)=>{e.checked="+("true" if model=="pv" else "false")+
+                "(e)=>{e.checked="+("true" if model in ("pv","wsola") else "false")+
                 ";e.dispatchEvent(new Event('change',{bubbles:true}));}")
             page.locator('#play-main').click()
             try:
