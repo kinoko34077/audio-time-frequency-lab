@@ -59,10 +59,17 @@ try:
         page.wait_for_function("""() => document.querySelector('#rt-telemetry')
           ?.dataset.pcmTransport==='wsola-source-time'""",timeout=25000)
         page.locator('#stop').click()
+        # Dual native simultaneously renders short WSOLA transients and
+        # long peak-locked PV sustains on the persistent original-source clock.
+        page.locator('#lab-model').select_option('dual')
+        page.locator('#play-main').click()
+        page.wait_for_function("""() => document.querySelector('#rt-telemetry')
+          ?.dataset.pcmTransport==='dual-transient-source-time'""",timeout=25000)
+        page.locator('#stop').click()
         for model in ('pv','wsola','dual','am'):
             page.locator('#lab-model').select_option(model)
             page.locator('#lab-individual-periods').evaluate(
-                "(e)=>{e.checked="+("true" if model in ("pv","wsola") else "false")+
+                "(e)=>{e.checked="+("true" if model in ("pv","wsola","dual") else "false")+
                 ";e.dispatchEvent(new Event('change',{bubbles:true}));}")
             page.locator('#play-main').click()
             try:

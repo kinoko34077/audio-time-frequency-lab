@@ -10,7 +10,7 @@ export function primaryModelCapability(mode,speed,{individual=false}={}){
     throw RangeError("speed must be finite within -8..8");
   if(typeof individual!=="boolean")throw TypeError("invalid individual-mode setting");
   const continuousPCM=mode==="spectral"||mode==="granular"||
-    (mode==="pv"||mode==="wsola")&&!individual;
+    (mode==="pv"||mode==="wsola"||mode==="dual")&&!individual;
   return Object.freeze({
     mode,supported:continuousPCM||(speed>=.5&&speed<=2),
     signed:continuousPCM,zeroAudible:continuousPCM,sampleAB:continuousPCM,

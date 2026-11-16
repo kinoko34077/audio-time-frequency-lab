@@ -7,6 +7,7 @@
 import {createSourcePCMRenderer} from "./source-pcm-renderer.mjs";
 import {createGranularTimePitch,createWsolaTimePitch} from "./source-granular.mjs";
 import {createSpectralTimePitch} from "./source-spectral.mjs";
+import {createDualTimePitch} from "./source-dual.mjs";
 
 class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
   constructor(options){
@@ -15,14 +16,18 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
     this.renderer=createSourcePCMRenderer({...props,outputSampleRate:sampleRate});
     this.sourceFrames=props.sourceFrames;
     const mode=props.processingMode??"raw";
-    if(!["raw","granular","spectral","pv","wsola"].includes(mode))
+    if(!["raw","granular","spectral","pv","wsola","dual"].includes(mode))
       throw RangeError("unknown PCM processing mode");
     this.processingMode=mode;
     const synthConfig={
       sourceSampleRate:props.sourceSampleRate,outputSampleRate:sampleRate,
       channelCount:props.channelCount,pitchSemitones:props.pitchSemitones??0
     };
-    this.synth=mode==="pv"?createSpectralTimePitch({...synthConfig,phaseLock:true}):
+    this.synth=mode==="dual"?createDualTimePitch({
+        ...synthConfig,shortFrames:props.dualShortFrames??512,
+        longFrames:props.dualLongFrames??2048
+      }):
+      mode==="pv"?createSpectralTimePitch({...synthConfig,phaseLock:true}):
       mode==="spectral"?createSpectralTimePitch(synthConfig):
       mode==="wsola"?createWsolaTimePitch({
         ...synthConfig,grainFrames:props.wsolaWindowFrames??1024,
