@@ -257,3 +257,64 @@ test("neutral identity output fades from last audible PCM on an abrupt seek",()=
   assert.ok(steady[0].every(x=>Math.abs(x+.8)<1e-5));
   assert.ok(steady[1].every(x=>Math.abs(x+.4)<1e-5));
 });
+
+
+test("micro-pitch actual PCM diagnostics: stable tones must be measured, not inferred from a mode label",()=>{
+  const sampleCount=65536,sourceAt=10000,outFrames=16384,f0=440;
+  const pcm=Float32Array.from({length:sampleCount},(_,i)=>
+    .35*Math.sin(2*Math.PI*f0*i/SR));
+  const fitTone=(out,atHz)=>{
+    const begin=4096,count=out.length-begin,omega=2*Math.PI*atHz/SR;
+    let cos=0,sin=0,power=0;
+    for(let i=begin;i<out.length;i++){
+      const v=out[i];cos+=v*Math.cos(omega*i);
+      sin+=v*Math.sin(omega*i);power+=v*v;
+    }
+    const a=2*cos/count,b=2*sin/count;
+    let residual=0;
+    for(let i=begin;i<out.length;i++){
+      const err=out[i]-a*Math.cos(omega*i)-b*Math.sin(omega*i);
+      residual+=err*err;
+    }
+    const amplitude=Math.hypot(a,b),rms=Math.sqrt(power/count);
+    const residualDb=20*Math.log10(Math.max(1e-15,Math.sqrt(residual/count))/Math.max(rms,1e-15));
+    const windowRms=[];
+    for(let i=begin;i+2048<=out.length;i+=2048){
+      let power=0;for(let j=0;j<2048;j++)power+=out[i+j]*out[i+j];
+      windowRms.push(Math.sqrt(power/2048));
+    }
+    const avg=windowRms.reduce((a,b)=>a+b,0)/windowRms.length;
+    const variance=windowRms.reduce((a,b)=>a+(b-avg)**2,0)/windowRms.length;
+    return {amplitude:Number(amplitude.toFixed(5)),
+      rms:Number(rms.toFixed(5)),
+      residualDb:Number(residualDb.toFixed(2)),
+      rmsCV:Number((Math.sqrt(variance)/avg).toFixed(4))};
+  };
+  const measurements=[];
+  for(const phaseLock of [false,true]){
+    for(const pitch of [-.1,-.02,.02,.1]){
+      const renderer=createSourcePCMRenderer({
+        sourceFrames:sampleCount,sourceSampleRate:SR,outputSampleRate:SR,
+        channelCount:1,startFrame:sourceAt,speed:1
+      });
+      renderer.installWindow(0,[pcm]);
+      const synth=createSpectralTimePitch({sourceSampleRate:SR,
+        outputSampleRate:SR,channelCount:1,pitchSemitones:pitch,phaseLock});
+      const output=new Float32Array(outFrames);
+      let misses=0;
+      const start=performance.now();
+      for(let i=0;i<outFrames;i+=128){
+        const block=new Float32Array(128);
+        misses+=renderer.renderSpectral([block],synth);
+        output.set(block,i);
+      }
+      assert.equal(misses,0,{phaseLock,pitch});
+      assert.equal(renderer.timeline.state.sourceFrame,sourceAt+outFrames);
+      const result=fitTone(output,f0*2**(pitch/12));
+      assert.ok(Object.values(result).every(Number.isFinite),{phaseLock,pitch,result});
+      measurements.push({mode:phaseLock?"pv":"spectral",pitch,...result,
+        renderMs:Number((performance.now()-start).toFixed(1))});
+    }
+  }
+  console.log("MICROPITCH_BASELINE_PCM "+JSON.stringify(measurements));
+});
