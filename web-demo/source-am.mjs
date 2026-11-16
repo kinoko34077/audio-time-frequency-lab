@@ -21,10 +21,12 @@ export function createAmTimePitch({sourceSampleRate,outputSampleRate,
   const stepRatio=sourceSampleRate/outputSampleRate;
   const alphaEnv=1-Math.exp(-1/(outputSampleRate*.012));
   const alphaGain=1-Math.exp(-1/(outputSampleRate*.035));
-  const sourceStride=16;
+  // Full-band squared-source samples are integrated at each probe; the
+  // slower 64-output-frame update bounds real-time worklet CPU overhead.
+  // 64 samples are still far below the 12ms envelope time constant.
+  const sourceStride=64;
   const sourceAlpha=1-Math.exp(-sourceStride/(outputSampleRate*.012));
   const radius=Math.round(sourceSampleRate*.012);
-  const probeStride=16;
   let sourceEnvelope=0,processedPower=0,gain=1,outputFrames=0;
   let sourcePeak=0,correctionFrames=0;
 
@@ -33,7 +35,11 @@ export function createAmTimePitch({sourceSampleRate,outputSampleRate,
   function sourceRms(center,state,read,sourceFrames){
     const position=loopSourcePosition(center,state);
     let power=0,count=0;
-    for(let q=-radius;q<=radius;q+=probeStride){
+    // Never decimate a raw periodic waveform before squaring it: a 3kHz
+    // tone at 48kHz completes exactly one cycle per old 16-sample stride.
+    // Skipped probes therefore followed one fixed phase and fabricated AM
+    // gain changes at 0x even though its physical RMS was unchanged.
+    for(let q=-radius;q<=radius;q++){
       const frame=Math.round(position+q);
       if(frame<0||frame>=sourceFrames)continue;
       for(let ch=0;ch<channelCount;ch++){
