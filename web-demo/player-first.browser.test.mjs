@@ -820,6 +820,31 @@ test("shared A/B updates every realtime model and compact numeric controls stay 
       const after=Number(await page.$eval("#rt-telemetry",el=>el.dataset.pcmNodeStarts));
       assert.equal(after,starts,mode+" must not recreate the Worklet on A/B edits");
     }
+    // The number itself is editable; it is not an inert duplicate readout.
+    await page.evaluate(()=>{
+      const selected=document.querySelector("#lab-model");
+      selected.value="dual";
+      selected.dispatchEvent(new Event("change",{bubbles:true}));
+    });
+    await page.waitForFunction(()=>document.querySelector("#lab-short-value")?.disabled===false,
+      {timeout:10000});
+    await page.evaluate(()=>{
+      const input=document.querySelector("#lab-short-value");
+      input.value="256";
+      input.dispatchEvent(new Event("change",{bubbles:true}));
+    });
+    await page.waitForFunction(()=>document.querySelector("#lab-short").value==="8"&&
+      document.querySelector("#lab-short-value").value==="256"&&
+      document.querySelector("#lab-short-output").textContent==="256 samples",
+      {timeout:10000});
+    await page.evaluate(()=>{
+      const input=document.querySelector("#lab-short-value");
+      input.value="300";
+      input.dispatchEvent(new Event("change",{bubbles:true}));
+    });
+    assert.equal(await page.$eval("#lab-short",el=>el.value),"8",
+      "invalid freeform FFT size must not silently change the model");
+    assert.equal(await page.$eval("#lab-short-value",el=>el.validity.customError),true);
   }finally{
     await browser?.close();
     server.kill("SIGTERM");
