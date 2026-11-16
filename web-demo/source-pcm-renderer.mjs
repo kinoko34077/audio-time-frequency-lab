@@ -47,6 +47,50 @@ export function createSourcePCMRenderer({
     const w=find(index);
     return w?w.channels[channel][index-w.start]:NaN;
   };
+  // Neutral sound belongs to the shared source reader, not to an individual
+  // DSP. Keep each selected synth running underneath so a subsequent pitch
+  // change has warm overlap/phase state instead of a new, silent startup.
+  // Crossfade only at real parameter transitions; do not double the signal.
+  let neutralBlend=null,identityOnlyRaw=false;
+  function blendNeutralPCM(output,state,pitch){
+    // Tiny A/B intervals deliberately retain a synthesis context: directly
+    // repeating only 1..N samples would create DC/fixed-period comb artifacts.
+    const neutral=state.speed===1&&pitch===0&&
+      (!state.loopEnabled||state.loopEndFrame-state.loopStartFrame>=4096);
+    if(neutralBlend===null)neutralBlend=neutral?1:0;
+    identityOnlyRaw=true;
+    let missing=0;
+    for(let i=0;i<output[0].length;i++){
+      neutralBlend=Math.max(0,Math.min(1,
+        neutralBlend+(neutral?1:-1)/128));
+      const mix=neutralBlend;
+      if(mix!==1)identityOnlyRaw=false;
+      if(mix===0)continue;
+      // The transport, including A/B wrapping, owns this position for every
+      // model. The DSP receives a read-only position and cannot change it.
+      const pos=timeline.sourceFrameAt(i);
+      if(pos===null)continue;
+      const at=Math.floor(pos),fraction=pos-at;
+      const next=fraction===0?at:
+        state.loopEnabled&&at+1>=state.loopEndFrame?
+          state.loopStartFrame:Math.min(sourceFrames-1,at+1);
+      let miss=false;
+      for(let ch=0;ch<channelCount;ch++){
+        const x=readFrame(ch,at),y=fraction===0?x:readFrame(ch,next);
+        if(!Number.isFinite(x)||!Number.isFinite(y)){
+          if(firstMissingFrame===null)
+            firstMissingFrame=Number.isFinite(x)?next:at;
+          output[ch][i]*=1-mix;
+          miss=true;
+        }else{
+          const original=x+(y-x)*fraction;
+          output[ch][i]=output[ch][i]*(1-mix)+original*mix;
+        }
+      }
+      if(miss)missing++;
+    }
+    return missing;
+  }
   const api={
     timeline,
     get firstMissingFrame(){return firstMissingFrame;},
@@ -183,10 +227,14 @@ export function createSourcePCMRenderer({
       const outcome=granular.render(
         output,state,readFrame,sourceFrames);
       firstMissingFrame=outcome.firstMissingFrame;
-      missingFrames+=outcome.missingFrames;
+      const identityMisses=blendNeutralPCM(output,state,
+        granular.state.pitchSemitones);
+      const misses=identityOnlyRaw?identityMisses:
+        Math.max(outcome.missingFrames,identityMisses);
+      missingFrames+=misses;
       renderedFrames+=output[0].length;
       timeline.advance(output[0].length);
-      return outcome.missingFrames;
+      return misses;
     },
     renderSpectral(output,spectral){
       // A phase-coherent STFT synthesizer owns only sound, never the source
@@ -202,10 +250,14 @@ export function createSourcePCMRenderer({
       }
       const result=spectral.render(output,state,readFrame,sourceFrames);
       firstMissingFrame=result.firstMissingFrame;
-      missingFrames+=result.missingFrames;
+      const identityMisses=blendNeutralPCM(output,state,
+        spectral.state.pitchSemitones);
+      const misses=identityOnlyRaw?identityMisses:
+        Math.max(result.missingFrames,identityMisses);
+      missingFrames+=misses;
       renderedFrames+=output[0].length;
       timeline.advance(output[0].length);
-      return result.missingFrames;
+      return misses;
     },
     render(output){
       if(!Array.isArray(output)||output.length!==channelCount||
