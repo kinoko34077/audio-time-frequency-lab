@@ -73,6 +73,10 @@ try:
       page.locator("#lab-long").evaluate("(e)=>{e.value='10';e.dispatchEvent(new Event('change',{bubbles:true}));}")
       page.locator("#lab-windows").evaluate("(e)=>{e.value='2';e.dispatchEvent(new Event('change',{bubbles:true}));}")
       page.locator("#lab-model").select_option("wsola")
+      # Legacy file-picker regression deliberately uses the period-joint
+      # Worker; actual WSOLA AudioWorklet PCM is checked in Chrome separately.
+      page.locator('#lab-individual-periods').evaluate(
+        "(e)=>{e.checked=true;e.dispatchEvent(new Event('change',{bubbles:true}));}")
       # Long window is disabled in WSOLA and must not silently constrain short.
       assert page.locator("#lab-long").is_disabled()
       page.locator("#lab-short").evaluate("(e)=>{e.value='11';e.dispatchEvent(new Event('change',{bubbles:true}));}")
@@ -88,8 +92,10 @@ try:
       # not assumed to be visible while the compact model page is folded.
       page.locator(".model-info-controls > summary").click()
       assert page.locator("#lab-model-description").is_visible()
-      assert '波形が自然につながる位置' in page.locator('#lab-model-description').inner_text()
+      assert '個別波長' in page.locator('#lab-model-description').inner_text()
       page.locator('#lab-model').select_option('dual')
+      page.locator('#lab-individual-periods').evaluate(
+        "(e)=>{e.checked=false;e.dispatchEvent(new Event('change',{bubbles:true}));}")
       assert page.locator('#lab-short').is_enabled()
       assert page.locator('#lab-long').is_enabled()
       assert '短窓で音の始まり' in page.locator('#lab-model-description').inner_text()
