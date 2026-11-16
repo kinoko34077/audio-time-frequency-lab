@@ -165,8 +165,12 @@ test("real PV mode peak-locks neighboring spectral bins but retains signed sourc
       rms:rms(a.output[0].subarray(2048))});
     assert.ok(a.output[0].every(Number.isFinite));
     const diff=rms(a.output[0].map((x,i)=>x-b.output[0][i]).subarray(1024));
-    assert.ok(diff>1e-6,{speed,diff},
-      "PV must apply real peak-phase locking, not merely display a different engine name");
+    if(speed===1)
+      assert.ok(diff<1e-5,{speed,diff},
+        "1x/0 semitone must be original PCM in both models");
+    else
+      assert.ok(diff>1e-6,{speed,diff},
+        "PV must apply real peak-phase locking when processing is requested");
   }
   const g=createSpectralTimePitch({
     sourceSampleRate:SR,outputSampleRate:SR,phaseLock:true
