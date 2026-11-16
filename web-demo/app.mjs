@@ -2446,6 +2446,12 @@ const labModel=$("#lab-model");
 labModel.value=lab.mode;
 const labShort=$("#lab-short"),labLong=$("#lab-long"),labWindows=$("#lab-windows"),labStatus=$("#lab-status"),labIndividual=$("#lab-individual-periods");
 const labPeriod=$("#lab-period-cycles"),labPeriodField=$("#lab-period-cycles-field");
+const labShortValue=$("#lab-short-value"),labLongValue=$("#lab-long-value"),
+  labWindowsValue=$("#lab-windows-value"),labPeriodValue=$("#lab-period-cycles-value");
+const syncLabInput=(input,value,disabled)=>{
+  input.disabled=disabled;
+  if(document.activeElement!==input)input.value=String(value);
+};
 const selectedPeriodCycles=()=>2**Number(labPeriod.value);
 function labStatusText(text){labStatus.textContent=text;}
 function labRefresh(){
@@ -2467,6 +2473,10 @@ function labRefresh(){
     (isPCMModel(lab.mode)&&lab.mode!=="dual");
   labWindows.disabled=lab.mode==="live"||isPCMModel(lab.mode)||lab.individual;
   labLong.max=lab.mode==="live"?"12":"13";
+  syncLabInput(labShortValue,lab.shortFftSize,labShort.disabled);
+  syncLabInput(labLongValue,lab.longFftSize,labLong.disabled);
+  syncLabInput(labWindowsValue,lab.referenceWindows,labWindows.disabled);
+  syncLabInput(labPeriodValue,lab.periodCycles,labPeriod.disabled);
   $("#lab-window-note").textContent=lab.mode==="spectral"?
     "STFTは2048点Hann窓と256サンプルの合成ホップで連続再生します。現在、解析窓の変更・個別波長処理は未接続です。":
     lab.mode==="pv"&&!lab.individual?
@@ -2525,7 +2535,7 @@ async function labSettingsChanged(){
   let nextShort=2**Number(labShort.value),nextLong=2**Number(labLong.value);
   const nextWindows=Number(labWindows.value),nextCycles=selectedPeriodCycles();
   if(nextMode==="dual"&&nextShort>=nextLong){
-    if(document.activeElement===labShort)nextLong=Math.min(8192,nextShort*2);
+    if(document.activeElement===labShort||document.activeElement===labShortValue)nextLong=Math.min(8192,nextShort*2);
     else nextShort=Math.max(256,nextLong/2);
     labShort.value=String(Math.log2(nextShort));
     labLong.value=String(Math.log2(nextLong));
@@ -2599,12 +2609,37 @@ async function labSettingsChanged(){
 [labModel,labShort,labLong,labWindows,labIndividual,labPeriod]
   .forEach(node=>node.addEventListener("change",()=>void labSettingsChanged()));
 function liveSliderValue(){
-  $("#lab-short-output").textContent=String(2**Number(labShort.value))+" samples";
-  $("#lab-long-output").textContent=String(2**Number(labLong.value))+" samples";
-  $("#lab-windows-output").textContent=labWindows.value+" 窓";
-  $("#lab-period-cycles-output").textContent=String(selectedPeriodCycles())+"周期";
+  const short=2**Number(labShort.value),long=2**Number(labLong.value),
+    windows=Number(labWindows.value),period=selectedPeriodCycles();
+  $("#lab-short-output").textContent=String(short)+" samples";
+  $("#lab-long-output").textContent=String(long)+" samples";
+  $("#lab-windows-output").textContent=String(windows)+" 窓";
+  $("#lab-period-cycles-output").textContent=String(period)+"周期";
+  for(const [field,value] of [[labShortValue,short],[labLongValue,long],
+    [labWindowsValue,windows],[labPeriodValue,period]])
+    if(document.activeElement!==field)field.value=String(value);
 }
 [labShort,labLong,labWindows,labPeriod].forEach(node=>node.addEventListener("input",liveSliderValue));
+for(const [input,slider,allowed,toSlider] of [
+  [labShortValue,labShort,[256,512,1024,2048],value=>Math.log2(value)],
+  [labLongValue,labLong,[1024,2048,4096,8192],value=>Math.log2(value)],
+  [labWindowsValue,labWindows,[2,4,6,8,10,12,14,16],value=>value],
+  [labPeriodValue,labPeriod,[.5,1,2,4,8,16,32],value=>Math.log2(value)]
+]){
+  input.addEventListener("change",()=>{
+    if(input.disabled)return;
+    const value=Number(input.value);
+    if(input.value.trim()===""||!allowed.includes(value)){
+      input.setCustomValidity("指定可能な値: "+allowed.join(", "));
+      input.reportValidity();return;
+    }
+    input.setCustomValidity("");
+    slider.value=String(toSlider(value));
+    liveSliderValue();
+    void labSettingsChanged();
+  });
+  input.addEventListener("input",()=>input.setCustomValidity(""));
+}
 async function startModelPlayback(offset=null,appliedOverride=null){
   // A seek must not replace the active Worker config with a requested but
   // unapplied model/speed. Capture the actual renderer settings at launch.
