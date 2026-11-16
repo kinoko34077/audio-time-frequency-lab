@@ -1,3 +1,4 @@
+import {loopSourcePosition,nextSourceSampleIndex} from "./source-timeline.mjs";
 /** #36 R3: EXPERIMENTAL coherent overlap-add granular pitch/signed-time synth.
  * Source-time speed and grain-local pitch have independent magnitudes.
  * This is not yet accepted as high-fidelity music, transient-preserving DSP,
@@ -76,16 +77,14 @@ export function createGranularTimePitch({
       else if(state.speed<0)direction=-1;
       const step=state.speed*srcPerOutput;
       const grainStep=direction*factor*srcPerOutput;
-      const looping=state.loopEnabled,a=state.loopStartFrame,b=state.loopEndFrame;
-      const wraps=n=>a+((n-a)%(b-a)+(b-a))%(b-a);
       let missing=0,firstMissingFrame=null;
       const baseOutput=outputFrames,baseSource=state.sourceFrame;
       const sampleAt=(ch,p)=>{
-        if(looping)p=wraps(p);
+        p=loopSourcePosition(p,state);
         if(p<0||p>=sourceFrames)return 0;
         const index=Math.floor(p),frac=p-index;
         const next=frac===0?index:
-          looping&&index+1>=b?a:Math.min(sourceFrames-1,index+1);
+          nextSourceSampleIndex(index,state,sourceFrames);
         const x=read(ch,index),y=frac===0?x:read(ch,next);
         return Number.isFinite(x)&&Number.isFinite(y)?x+(y-x)*frac:NaN;
       };
@@ -191,11 +190,11 @@ export function createGranularTimePitch({
             // Hold the local pitch of grains that were audible before edit.
             const localStep=direction*(grainRatios.get(k)??factor)*srcPerOutput;
             let p=grains.get(k)+(t-center)*localStep;
-            if(looping)p=wraps(p);
+            p=loopSourcePosition(p,state);
             if(p<0||p>=sourceFrames)continue;
             const index=Math.floor(p),frac=p-index;
             const next=frac===0?index:
-              looping&&index+1>=b?a:Math.min(sourceFrames-1,index+1);
+              nextSourceSampleIndex(index,state,sourceFrames);
             const left=read(ch,index),right=frac===0?left:read(ch,next);
             if(!Number.isFinite(left)||!Number.isFinite(right)){
               sampleMiss=true;

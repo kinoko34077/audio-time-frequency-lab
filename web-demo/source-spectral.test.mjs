@@ -165,11 +165,95 @@ test("real PV mode peak-locks neighboring spectral bins but retains signed sourc
       rms:rms(a.output[0].subarray(2048))});
     assert.ok(a.output[0].every(Number.isFinite));
     const diff=rms(a.output[0].map((x,i)=>x-b.output[0][i]).subarray(1024));
-    assert.ok(diff>1e-6,{speed,diff},
-      "PV must apply real peak-phase locking, not merely display a different engine name");
+    if(speed===1)
+      assert.ok(diff<1e-5,{speed,diff},
+        "1x/0 semitone must be original PCM in both models");
+    else
+      assert.ok(diff>1e-6,{speed,diff},
+        "PV must apply real peak-phase locking when processing is requested");
   }
   const g=createSpectralTimePitch({
     sourceSampleRate:SR,outputSampleRate:SR,phaseLock:true
   });
   assert.equal(g.state.algorithm,"phase-vocoder-peak-locked");
+});
+
+
+test("neutral 1x/0-semitone STFT and PV output the original PCM, not overlapping phased copies",()=>{
+  for(const phaseLock of [false,true]){
+    const {output,misses,end}=render(1,0,8192,{phaseLock});
+    assert.equal(misses,0);
+    assert.equal(end,CENTER+8192);
+    for(let ch=0;ch<2;ch++){
+      let maxError=0;
+      for(let i=0;i<8192;i++)
+        maxError=Math.max(maxError,Math.abs(output[ch][i]-source[ch][CENTER+i]));
+      assert.ok(maxError<1e-5,{phaseLock,ch,maxError});
+    }
+  }
+});
+
+test("neutral identity and short-loop spectral synthesis use the same source clock",()=>{
+  const a=88000,b=96000,p=createSourcePCMRenderer({
+    sourceFrames:FRAMES,sourceSampleRate:SR,outputSampleRate:SR,
+    channelCount:2,speed:1,startFrame:b-48,
+    loopStartFrame:a,loopEndFrame:b,loopEnabled:true
+  });
+  p.installWindow(START,source.map(x=>x.slice(START,START+65536)));
+  const model=createSpectralTimePitch({
+    sourceSampleRate:SR,outputSampleRate:SR,channelCount:2
+  });
+  const out=[new Float32Array(128),new Float32Array(128)];
+  assert.equal(p.renderSpectral(out,model),0);
+  for(let i=0;i<128;i++){
+    const original=a+((b-48+i-a)%(b-a));
+    for(let ch=0;ch<2;ch++)
+      assert.ok(Math.abs(out[ch][i]-source[ch][original])<1e-5,{ch,i});
+  }
+  assert.equal(p.timeline.state.sourceFrame,a+80);
+});
+
+
+test("neutral identity output fades from last audible PCM on an abrupt seek",()=>{
+  // Independent review: the synth resets on seek but 1x / 0-semitone raw
+  // identity had bypassed the synth fade, joining +0.8 to -0.8 instantly.
+  const n=32768,mid=n/2;
+  const pcm=[
+    Float32Array.from({length:n},(_,i)=>i<mid?.8:-.8),
+    Float32Array.from({length:n},(_,i)=>i<mid?.4:-.4)
+  ];
+  const renderer=createSourcePCMRenderer({
+    sourceFrames:n,sourceSampleRate:SR,outputSampleRate:SR,
+    channelCount:2,startFrame:512,speed:1
+  });
+  renderer.installWindow(0,pcm);
+  const synth=createSpectralTimePitch({
+    sourceSampleRate:SR,outputSampleRate:SR,channelCount:2,
+    pitchSemitones:0
+  });
+  const output=()=>[new Float32Array(128),new Float32Array(128)];
+  const before=output();
+  assert.equal(renderer.renderSpectral(before,synth),0);
+  assert.ok(Math.abs(before[0][127]-.8)<1e-6);
+  assert.ok(Math.abs(before[1][127]-.4)<1e-6);
+  // Mirrors the worklet's seek-window handler; do not recreate its node.
+  renderer.beginOutputTransition();
+  renderer.timeline.seek(mid+256);
+  synth.reset();
+  const after=output();
+  assert.equal(renderer.renderSpectral(after,synth),0);
+  assert.ok(Math.abs(after[0][0]-before[0][127])<.02,
+    "first sample after seek must preserve previous audible PCM");
+  assert.ok(Math.abs(after[1][0]-before[1][127])<.02);
+  assert.ok(Math.abs(after[0][127]+.8)<.03,
+    "transition must complete at the new source, not hold the old note");
+  assert.ok(Math.abs(after[1][127]+.4)<.02);
+  for(let i=1;i<128;i++){
+    assert.ok(Math.abs(after[0][i]-after[0][i-1])<.02,
+      "neutral seek crossfade must not introduce a sharp PCM step");
+  }
+  const steady=output();
+  assert.equal(renderer.renderSpectral(steady,synth),0);
+  assert.ok(steady[0].every(x=>Math.abs(x+.8)<1e-5));
+  assert.ok(steady[1].every(x=>Math.abs(x+.4)<1e-5));
 });

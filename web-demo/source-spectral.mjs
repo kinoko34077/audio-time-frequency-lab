@@ -1,3 +1,4 @@
+import {loopSourcePosition} from "./source-timeline.mjs";
 /** #36 spectral-first experimental continuous source-time renderer.
  * STFT phase-coherent overlap-add, NOT granular repetition. The original
  * source sample-frame clock remains in source-timeline.mjs; this module only
@@ -226,9 +227,7 @@ export function createSpectralTimePitch({
         throw RangeError("invalid spectral PCM render");
       const missing={first:null,total:0};
       const base=state.sourceFrame,sourceStep=state.speed*srcRatio;
-      const a=state.loopStartFrame,b=state.loopEndFrame,span=b-a;
-      const centerAt=position=>state.loopEnabled?
-        a+((position-a)%span+span)%span:position;
+      const centerAt=position=>loopSourcePosition(position,state);
       for(let i=0;i<output[0].length;i++){
         const t=outputFrames+i;
         while(nextStart<=t){

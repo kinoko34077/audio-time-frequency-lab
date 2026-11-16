@@ -7,6 +7,17 @@ const finite=v=>typeof v==="number"&&Number.isFinite(v);
 const frame=v=>Number.isSafeInteger(v)&&v>=0;
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 const wrap=(p,a,b)=>a+((p-a)%(b-a)+(b-a))%(b-a);
+// Single transport-owned A/B coordinate semantics for every realtime DSP.
+// A synth may choose the context it analyzes, but never independently define
+// source-loop wrap direction, endpoint inclusivity or interpolation neighbor.
+export function loopSourcePosition(position,state){
+  return state.loopEnabled?
+    wrap(position,state.loopStartFrame,state.loopEndFrame):position;
+}
+export function nextSourceSampleIndex(index,state,sourceFrames){
+  return state.loopEnabled&&index+1>=state.loopEndFrame?
+    state.loopStartFrame:Math.min(sourceFrames-1,index+1);
+}
 
 export function validatePlaybackSpeed(s){
   if(!finite(s)||s<-SPEED_LIMIT||s>SPEED_LIMIT)

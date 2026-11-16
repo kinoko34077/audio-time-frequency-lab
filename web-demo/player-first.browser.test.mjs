@@ -414,7 +414,7 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, swit
     // #63 U4: the user moves beyond old B and chooses "current position
     // as A". This must USE the tapped source sample, not reject it with a
     // browser validity bubble or require manually editing the old B first.
-    await page.click(".player-loop-precision summary");
+    assert.equal(await page.$eval(".player-loop-precision",el=>el.open),true);
     await page.click("#player-loop-a-now");
     assert.equal(Number(await page.$eval("#player-loop-a",e=>e.value)),finalSample,
       "new A must be exactly the selected source frame even when A passes old B");
@@ -758,4 +758,95 @@ test("U7 touch tap seeks without autoplay; deliberate drag auditions PCM, paused
       overviewDrag:overviewStarted
     }));
   }finally{await browser?.close();server.kill("SIGTERM");}
+});
+
+
+test("shared A/B updates every realtime model and compact numeric controls stay expanded",async()=>{
+  const port=18809;
+  const server=spawn("python3",["-m","http.server",String(port),"--bind","127.0.0.1"],{
+    cwd:path.resolve("_site"),stdio:"ignore"
+  });
+  let browser;
+  try{
+    browser=await puppeteer.launch({
+      executablePath:process.env.CHROME_BIN||"/usr/bin/google-chrome",
+      headless:true,args:["--no-sandbox","--disable-dev-shm-usage",
+        "--autoplay-policy=no-user-gesture-required"]
+    });
+    const page=await browser.newPage();
+    await page.goto("http://127.0.0.1:"+port+"/",{waitUntil:"domcontentloaded",timeout:20000});
+    await page.waitForFunction(()=>document.documentElement.dataset.fwBoot==="ready",{timeout:20000});
+    const ui=await page.evaluate(()=>({
+      modelInfo:document.querySelector(".model-info-controls").open,
+      modelDetails:document.querySelector(".model-extra-controls").open,
+      loopDetails:document.querySelector(".player-loop-precision").open,
+      inlinePitch:document.querySelector("#granular-pitch-value").closest(".player-tune-heading")!==null,
+      inlineSpeed:document.querySelector("#granular-speed-value").closest(".player-tune-heading")!==null,
+      inlineAB:document.querySelector("#player-loop-a").closest(".loop-point")!==null,
+      modelNumbers:["lab-short","lab-long","lab-windows","lab-period-cycles"]
+        .every(id=>document.querySelector("#"+id+"-value")?.type==="number"),
+      hiddenOutputs:["granular-pitch-output","granular-speed-output","lab-short-output"]
+        .every(id=>document.getElementById(id).hidden)
+    }));
+    assert.ok(Object.values(ui).every(Boolean),JSON.stringify(ui));
+    await (await page.$("#audio-file")).uploadFile(recording);
+    await page.waitForSelector("#play-main:not([disabled])",{timeout:20000});
+    await page.click("#play-main");
+    const routes={spectral:"spectral-realtime",pv:"pv-phase-locked",
+      wsola:"wsola-source-time",dual:"dual-transient-source-time",
+      granular:"granular-experimental"};
+    for(const [index,[mode,route]] of Object.entries(routes).entries()){
+      if(mode!=="spectral")await page.evaluate(selected=>{
+        const input=document.getElementById("lab-model");
+        input.value=selected;input.dispatchEvent(new Event("change",{bubbles:true}));
+      },mode);
+      await page.waitForFunction(expected=>
+        document.querySelector("#rt-telemetry")?.dataset.pcmTransport===expected,
+        {timeout:20000},route);
+      const starts=Number(await page.$eval("#rt-telemetry",el=>el.dataset.pcmNodeStarts));
+      const a=1000+index*150,b=4000+index*150;
+      await page.evaluate(({a,b})=>{
+        for(const [id,value] of [["player-loop-a",a],["player-loop-b",b]]){
+          const input=document.getElementById(id);
+          input.value=String(value);
+          input.dispatchEvent(new Event("change",{bubbles:true}));
+        }
+      },{a,b});
+      await page.waitForFunction(({a,b})=>{
+        const hint=document.querySelector("#player-loop-hint")?.textContent||"";
+        const frame=Number(document.querySelector("#granular-optin-status")?.dataset.renderFrame);
+        return hint.includes("反映が完了")&&Number.isFinite(frame)&&frame>=a&&frame<b;
+      },{timeout:12000},{a,b});
+      const after=Number(await page.$eval("#rt-telemetry",el=>el.dataset.pcmNodeStarts));
+      assert.equal(after,starts,mode+" must not recreate the Worklet on A/B edits");
+    }
+    // The number itself is editable; it is not an inert duplicate readout.
+    await page.evaluate(()=>{
+      const selected=document.querySelector("#lab-model");
+      selected.value="dual";
+      selected.dispatchEvent(new Event("change",{bubbles:true}));
+    });
+    await page.waitForFunction(()=>document.querySelector("#lab-short-value")?.disabled===false,
+      {timeout:10000});
+    await page.evaluate(()=>{
+      const input=document.querySelector("#lab-short-value");
+      input.value="256";
+      input.dispatchEvent(new Event("change",{bubbles:true}));
+    });
+    await page.waitForFunction(()=>document.querySelector("#lab-short").value==="8"&&
+      document.querySelector("#lab-short-value").value==="256"&&
+      document.querySelector("#lab-short-output").textContent==="256 samples",
+      {timeout:10000});
+    await page.evaluate(()=>{
+      const input=document.querySelector("#lab-short-value");
+      input.value="300";
+      input.dispatchEvent(new Event("change",{bubbles:true}));
+    });
+    assert.equal(await page.$eval("#lab-short",el=>el.value),"8",
+      "invalid freeform FFT size must not silently change the model");
+    assert.equal(await page.$eval("#lab-short-value",el=>el.validity.customError),true);
+  }finally{
+    await browser?.close();
+    server.kill("SIGTERM");
+  }
 });

@@ -67,6 +67,9 @@ test('full Chrome: inherited Rust AudioWorklet live independent speed/pitch UI',
     e.value='5';e.dispatchEvent(new Event('change',{bubbles:true}));
   });
   await page.click('#main-tab-model');
+  // Model sections are deliberately expanded; scroll the shared Play button
+  // into view before verifying it is actually hit-testable.
+  await page.$eval("#play-main",el=>el.scrollIntoView({block:"center"}));
   const stateBefore=await page.evaluate(()=>{
     const main=document.querySelector('#play-main');
     const r=main.getBoundingClientRect(),hit=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);

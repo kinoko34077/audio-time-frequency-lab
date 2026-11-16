@@ -68,6 +68,7 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
           // One atomic handler: install the requested destination PCM before
           // changing source time, without a render quantum between commands.
           this.renderer.installWindow(m.start,m.channels,null,"seek");
+          this.renderer.beginOutputTransition();
           const st=this.renderer.timeline.seek(m.frame);
           this.synth?.reset();
           this.pendingRequest=null;
@@ -98,6 +99,10 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
             throw RangeError("scratch source window missing");
           const previous=t.state.sourceFrame;
           const st=t.scrub(m.frame,m.speed);
+          // Ordinary near-sample scrubs must stay responsive. A large jump
+          // has no continuous source PCM phase to splice directly.
+          if(Math.abs(st.sourceFrame-previous)>128)
+            this.renderer.beginOutputTransition();
           this.synth?.shiftSource(st.sourceFrame-previous);
           this.pendingRequest=null;
           this.queueRenderReceipt(m.requestId,st);
@@ -113,6 +118,7 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
         if(m.type==="loop-config"){
           // No process() callback can run between endpoint-cache installation
           // and transport bounds/enable update in this synchronous handler.
+          this.renderer.beginOutputTransition();
           const st=this.renderer.applyLoopConfiguration(
             m.a,m.b,m.enabled,m.endpoints
           );
@@ -133,7 +139,9 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
         switch(m.op){
           case "play":this.running=true;break;
           case "pause":this.running=false;break;
-          case "seek":t.seek(m.frame);this.synth?.reset();break;
+          case "seek":
+            this.renderer.beginOutputTransition();
+            t.seek(m.frame);this.synth?.reset();break;
           case "speed":
             t.setSpeed(m.speed);
             // Keep the existing overlap grains and output-time epoch: a
@@ -147,9 +155,13 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
               throw RangeError("independent pitch requires spectral or granular mode");
             this.synth.setPitch(m.semitones);
             break;
-          case "bounds":t.setLoopBounds(m.a,m.b);
+          case "bounds":
+            this.renderer.beginOutputTransition();
+            t.setLoopBounds(m.a,m.b);
             this.synth?.reset();break;
-          case "loop":t.setLoopEnabled(m.enabled);
+          case "loop":
+            this.renderer.beginOutputTransition();
+            t.setLoopEnabled(m.enabled);
             this.synth?.reset();break;
           default:throw RangeError("unknown source PCM worklet command");
         }

@@ -40,7 +40,7 @@ async function layoutEvidence(page,tag){
     value.transport.top<value.speedPitch.top&&value.speedPitch.top<value.ab.top,
     "expected waveform > transport > speed/pitch > loop hierarchy "+tag);
   assert.equal(value.advancedOpen,false);
-  assert.equal(value.precisionOpen,false);
+  assert.equal(value.precisionOpen,true, "A/B detail must remain expanded by default");
   assert.equal(value.legacyVisible,false);
 }
 test("R4 usability visual captures: desktop and mobile player and folded research",async()=>{
@@ -76,7 +76,7 @@ test("R4 usability visual captures: desktop and mobile player and folded researc
     // extraction can inspect the actual browser pixels at the exact test HEAD.
     console.log("UI_REVIEW_JPEG_DESKTOP:"+Buffer.from(await page.screenshot({type:"jpeg",quality:30})).toString("base64"));
     await page.click("#main-tab-model");
-    assert.equal(await page.$eval(".model-extra-controls",el=>el.open),false);
+    assert.equal(await page.$eval(".model-extra-controls",el=>el.open),true);
     assert.equal(await page.$eval(".model-legacy-fold",el=>el.getClientRects().length),0,
       "Frequency Warp workbench must not appear in the Audio Time model UI");
     assert.equal(await page.$eval("#main-player-panel",el=>el.getClientRects().length),0,

@@ -2,7 +2,7 @@
  * Owns only source sample reads/interpolation and underrun measurement.
  * Transport decisions live in source-timeline.mjs.
  */
-import {createSourceTimeline} from "./source-timeline.mjs";
+import {createSourceTimeline,nextSourceSampleIndex} from "./source-timeline.mjs";
 
 export const SOURCE_WINDOW_FRAMES=65536;
 export const SOURCE_WINDOW_SLOTS=4;
@@ -47,8 +47,74 @@ export function createSourcePCMRenderer({
     const w=find(index);
     return w?w.channels[channel][index-w.start]:NaN;
   };
+  // Neutral sound belongs to the shared source reader, not to an individual
+  // DSP. Keep each selected synth running underneath so a subsequent pitch
+  // change has warm overlap/phase state instead of a new, silent startup.
+  // Crossfade only at real parameter transitions; do not double the signal.
+  let neutralBlend=null,identityOnlyRaw=false;
+  const lastAudible=new Float32Array(channelCount);
+  const transitionOrigin=new Float32Array(channelCount);
+  let transitionLeft=0;
+  const TRANSITION_FRAMES=128;
+  function rememberLastAudible(output){
+    const last=output[0].length-1;
+    if(last<0)return;
+    for(let ch=0;ch<channelCount;ch++)lastAudible[ch]=output[ch][last];
+  }
+  function beginOutputTransition(){
+    // The synth has its own smoothing, but the neutral PCM identity path
+    // bypasses that synth. Keep transport discontinuities click-free without
+    // adding a parallel audio node or resetting the source clock.
+    if(renderedFrames===0||!(neutralBlend>0))return;
+    transitionOrigin.set(lastAudible);
+    transitionLeft=TRANSITION_FRAMES;
+  }
+  function blendNeutralPCM(output,state,pitch){
+    // Tiny A/B intervals deliberately retain a synthesis context: directly
+    // repeating only 1..N samples would create DC/fixed-period comb artifacts.
+    const neutral=state.speed===1&&pitch===0&&
+      (!state.loopEnabled||state.loopEndFrame-state.loopStartFrame>=4096);
+    if(neutralBlend===null)neutralBlend=neutral?1:0;
+    identityOnlyRaw=true;
+    let missing=0;
+    for(let i=0;i<output[0].length;i++){
+      neutralBlend=Math.max(0,Math.min(1,
+        neutralBlend+(neutral?1:-1)/128));
+      const mix=neutralBlend;
+      if(mix!==1)identityOnlyRaw=false;
+      if(mix===0)continue;
+      // The transport, including A/B wrapping, owns this position for every
+      // model. The DSP receives a read-only position and cannot change it.
+      const pos=timeline.sourceFrameAt(i);
+      if(pos===null)continue;
+      const at=Math.floor(pos),fraction=pos-at;
+      const next=fraction===0?at:
+        nextSourceSampleIndex(at,state,sourceFrames);
+      let miss=false;
+      for(let ch=0;ch<channelCount;ch++){
+        const x=readFrame(ch,at),y=fraction===0?x:readFrame(ch,next);
+        if(!Number.isFinite(x)||!Number.isFinite(y)){
+          if(firstMissingFrame===null)
+            firstMissingFrame=Number.isFinite(x)?next:at;
+          output[ch][i]*=1-mix;
+          miss=true;
+        }else{
+          const original=x+(y-x)*fraction;
+          output[ch][i]=output[ch][i]*(1-mix)+original*mix;
+        }
+      }
+      if(transitionLeft>0&&mix>0){
+        const weight=transitionLeft/TRANSITION_FRAMES;
+        for(let ch=0;ch<channelCount;ch++)
+          output[ch][i]=transitionOrigin[ch]*weight+output[ch][i]*(1-weight);
+        transitionLeft--;
+      }
+      if(miss)missing++;
+    }
+    return missing;
+  }
   const api={
-    timeline,
+    timeline,beginOutputTransition,
     get firstMissingFrame(){return firstMissingFrame;},
     get statistics(){return Object.freeze({
       missingFrames,renderedFrames,windowCount:windows.length
@@ -183,10 +249,15 @@ export function createSourcePCMRenderer({
       const outcome=granular.render(
         output,state,readFrame,sourceFrames);
       firstMissingFrame=outcome.firstMissingFrame;
-      missingFrames+=outcome.missingFrames;
+      const identityMisses=blendNeutralPCM(output,state,
+        granular.state.pitchSemitones);
+      const misses=identityOnlyRaw?identityMisses:
+        Math.max(outcome.missingFrames,identityMisses);
+      missingFrames+=misses;
       renderedFrames+=output[0].length;
       timeline.advance(output[0].length);
-      return outcome.missingFrames;
+      rememberLastAudible(output);
+      return misses;
     },
     renderSpectral(output,spectral){
       // A phase-coherent STFT synthesizer owns only sound, never the source
@@ -202,10 +273,15 @@ export function createSourcePCMRenderer({
       }
       const result=spectral.render(output,state,readFrame,sourceFrames);
       firstMissingFrame=result.firstMissingFrame;
-      missingFrames+=result.missingFrames;
+      const identityMisses=blendNeutralPCM(output,state,
+        spectral.state.pitchSemitones);
+      const misses=identityOnlyRaw?identityMisses:
+        Math.max(result.missingFrames,identityMisses);
+      missingFrames+=misses;
       renderedFrames+=output[0].length;
       timeline.advance(output[0].length);
-      return result.missingFrames;
+      rememberLastAudible(output);
+      return misses;
     },
     render(output){
       if(!Array.isArray(output)||output.length!==channelCount||
@@ -224,8 +300,7 @@ export function createSourcePCMRenderer({
         }
         const at=Math.floor(position);
         const weight=position-at;
-        const next=weight>0&&loopState.loopEnabled&&at+1>=loopState.loopEndFrame
-          ?loopState.loopStartFrame:Math.min(sourceFrames-1,at+1);
+        const next=weight>0?nextSourceSampleIndex(at,loopState,sourceFrames):at;
         const left=find(at);
         const right=weight>0?find(next):left;
         if(!left||!right){
@@ -255,7 +330,7 @@ export function createSourcePCMRenderer({
       if(pos===null)return null;
       const at=Math.floor(pos);
       const s=timeline.state;
-      const next=s.loopEnabled&&at+1>=s.loopEndFrame?s.loopStartFrame:Math.min(sourceFrames-1,at+1);
+      const next=nextSourceSampleIndex(at,s,sourceFrames);
       return find(at)&&find(next)?null:at;
     }
   };

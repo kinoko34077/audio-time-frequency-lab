@@ -37,28 +37,28 @@
         </select>
       </label>
     </div>
-    <details class="model-info-controls"><summary>モデルの説明・現在の対応範囲</summary>
+    <details class="model-info-controls" open><summary>モデルの説明・現在の対応範囲</summary>
       <p id="lab-model-description" class="lab-note model-summary" aria-live="polite">選択した処理モデルの説明を表示します。</p>
       <p id="lab-model-compatibility" class="lab-note" role="status">処理モデルの対応範囲を表示します。</p>
     </details>
-    <details class="model-extra-controls">
+    <details class="model-extra-controls" open>
       <summary>処理モデルの詳細設定・解析</summary>
       <div class="lab-grid model-extra-grid">
-      <label class="lab-field">短窓 <output id="lab-short-output" for="lab-short">512 samples</output>
+      <div class="lab-field"><div class="lab-number-heading"><label for="lab-short">短窓</label><span class="inline-number"><input id="lab-short-value" type="number" min="256" max="2048" step="any" value="512" inputmode="numeric" aria-label="短窓サンプル数"> samples</span><output id="lab-short-output" for="lab-short" hidden>512 samples</output></div>
         <input id="lab-short" type="range" min="8" max="11" step="1" value="9" aria-label="短窓の長さ">
-      </label>
-      <label class="lab-field">長窓 <output id="lab-long-output" for="lab-long">2048 samples</output>
+      </div>
+      <div class="lab-field"><div class="lab-number-heading"><label for="lab-long">長窓</label><span class="inline-number"><input id="lab-long-value" type="number" min="1024" max="8192" step="any" value="2048" inputmode="numeric" aria-label="長窓サンプル数"> samples</span><output id="lab-long-output" for="lab-long" hidden>2048 samples</output></div>
         <input id="lab-long" type="range" min="10" max="13" step="1" value="11" aria-label="長窓の長さ">
-      </label>
-      <label class="lab-field">参照窓数 <output id="lab-windows-output" for="lab-windows">8 窓</output>
+      </div>
+      <div class="lab-field"><div class="lab-number-heading"><label for="lab-windows">参照窓数</label><span class="inline-number"><input id="lab-windows-value" type="number" min="2" max="16" step="2" value="8" inputmode="numeric" aria-label="前後参照窓数"> 窓</span><output id="lab-windows-output" for="lab-windows" hidden>8 窓</output></div>
         <input id="lab-windows" type="range" min="2" max="16" step="2" value="8" aria-label="前後参照窓数">
-      </label>
+      </div>
       </div>
     <label class="lab-note" for="lab-individual-periods"><input id="lab-individual-periods" type="checkbox" aria-describedby="lab-individual-note"> <strong>周波数ごとの個別波長</strong></label>
-    <label class="lab-field lab-period-field" id="lab-period-cycles-field" for="lab-period-cycles" hidden>解析窓の長さ <output id="lab-period-cycles-output" for="lab-period-cycles">8周期</output>
+    <div class="lab-field lab-period-field" id="lab-period-cycles-field" hidden><div class="lab-number-heading"><label for="lab-period-cycles">解析窓の長さ</label><span class="inline-number"><input id="lab-period-cycles-value" type="number" min="0.5" max="32" step="any" value="8" inputmode="decimal" aria-label="周波数別解析周期数" disabled> 周期</span><output id="lab-period-cycles-output" for="lab-period-cycles" hidden>8周期</output></div>
       <input id="lab-period-cycles" type="range" min="-1" max="5" step="1" value="3" aria-label="周波数別の解析に使う周期数（0.5から32周期）" disabled>
       <small>0.5 · 1 · 2 · 4 · 8 · 16 · 32周期</small>
-    </label>
+    </div>
     <p id="lab-individual-note" class="lab-note">オン：各周波数の周期窓から共通部分音を推定し、残差を上で選択したPV・WSOLA・短長複合・AMで処理します。Rust/WASMリアルタイムとの同時使用は未対応（オン時はPVへ明示的に切替）。オフ：各モデルを元音声に直接適用します。</p>
     <p id="lab-window-note" class="lab-note">複合窓では短窓が音の立ち上がり、長窓が音程の識別を担当します。</p>
     </details>
@@ -115,17 +115,15 @@
         <section id="granular-optin-controls" class="player-tune" aria-label="速度と音程" hidden>
           <div class="player-tune-grid">
             <div class="player-tune-control">
-              <div class="player-tune-heading"><label for="granular-speed">速度</label><output id="granular-speed-output" for="granular-speed">1.00×</output></div>
+              <div class="player-tune-heading"><label for="granular-speed">速度</label><span class="inline-number"><input id="granular-speed-value" type="number" min="-8" max="8" step="any" value="1" inputmode="decimal" aria-label="再生速度の精密入力（倍）"> 倍</span><output id="granular-speed-output" for="granular-speed" hidden>1.00×</output></div>
               <div class="player-tune-inputs">
                 <input id="granular-speed" type="range" min="-8" max="8" step=".01" value="1" aria-label="再生速度">
-                <input id="granular-speed-value" type="number" min="-8" max="8" step="any" value="1" inputmode="decimal" aria-label="再生速度の精密入力（倍）">
               </div>
             </div>
             <div class="player-tune-control">
-              <div class="player-tune-heading"><label for="granular-pitch">音程</label><output id="granular-pitch-output" for="granular-pitch">0.0 半音</output></div>
+              <div class="player-tune-heading"><label for="granular-pitch">音程</label><span class="inline-number"><input id="granular-pitch-value" type="number" min="-12" max="12" step="any" value="0" inputmode="decimal" aria-label="音程の精密入力（半音）"> 半音</span><output id="granular-pitch-output" for="granular-pitch" hidden>0.0 半音</output></div>
               <div class="player-tune-inputs">
                 <input id="granular-pitch" type="range" min="-12" max="12" step=".1" value="0" aria-label="音程の変更">
-                <input id="granular-pitch-value" type="number" min="-12" max="12" step="any" value="0" inputmode="decimal" aria-label="音程の精密入力（半音）">
               </div>
             </div>
           </div>
@@ -144,17 +142,11 @@
             <strong>A–B区間</strong>
             <label for="player-loop-enabled"><input id="player-loop-enabled" type="checkbox" checked> ループ</label>
           </div>
-          <details class="player-loop-precision">
+          <details class="player-loop-precision" open>
             <summary>区間の端点を数値で編集</summary>
             <div class="player-loop-fields">
-              <label for="player-loop-a">開始 A（元音源サンプル）
-                <input id="player-loop-a" type="number" min="0" step="1" value="0" inputmode="numeric">
-                <button id="player-loop-a-now" type="button">現在位置をAに</button>
-              </label>
-              <label for="player-loop-b">終端 B（元音源サンプル・含まない）
-                <input id="player-loop-b" type="number" min="1" step="1" value="1" inputmode="numeric">
-                <button id="player-loop-b-now" type="button">現在位置をBに</button>
-              </label>
+              <div class="loop-point"><label for="player-loop-a">開始 A</label><input id="player-loop-a" type="number" min="0" step="1" value="0" inputmode="numeric" aria-label="開始A（元音源サンプル）"><button id="player-loop-a-now" type="button">現在位置</button></div>
+              <div class="loop-point"><label for="player-loop-b">終端 B</label><input id="player-loop-b" type="number" min="1" step="1" value="1" inputmode="numeric" aria-label="終端B（含まない、元音源サンプル）"><button id="player-loop-b-now" type="button">現在位置</button></div>
             </div>
           </details>
           <p id="player-loop-hint" class="lab-note" aria-live="polite">波形上のA・Bをドラッグして区間を変更できます。</p>

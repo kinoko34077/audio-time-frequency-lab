@@ -65,8 +65,8 @@ try:
       assert page.locator("#model-transport-host #play-main").is_visible()
       assert page.locator("#granular-speed-value").input_value()=="1.5"
       assert page.locator("#granular-pitch-value").input_value()=="5"
-      # Advanced window sliders are disclosed on demand in the compact model UI.
-      page.locator(".model-extra-controls > summary").click()
+      # Model details are open by default, so clicking the summary would close them.
+      assert page.locator(".model-extra-controls").get_attribute("open") is not None
       assert page.locator("#lab-short").is_visible()
 
       page.locator("#lab-short").evaluate("(e)=>{e.value='8';e.dispatchEvent(new Event('change',{bubbles:true}));}")
@@ -80,17 +80,16 @@ try:
       # Long window is disabled in WSOLA and must not silently constrain short.
       assert page.locator("#lab-long").is_disabled()
       page.locator("#lab-short").evaluate("(e)=>{e.value='11';e.dispatchEvent(new Event('change',{bubbles:true}));}")
-      assert page.locator("#lab-short-output").inner_text()=="2048 samples"
-      assert page.locator("#lab-long-output").inner_text()=="1024 samples"
+      assert page.locator("#lab-short-value").input_value()=="2048"
+      assert page.locator("#lab-long-value").input_value()=="1024"
       page.locator("#play-main").click()
       page.wait_for_function("""() => document.querySelector('#rt-indicator')
         ?.textContent.includes('モデル再生中')""",timeout=25000)
       assert page.locator("#audio-state-summary").is_visible()
-      assert page.locator("#lab-short-output").inner_text()=="2048 samples"
-      assert page.locator("#lab-long-output").inner_text()=="1024 samples"
-      # Optional model explanation must be reachable through the disclosure,
-      # not assumed to be visible while the compact model page is folded.
-      page.locator(".model-info-controls > summary").click()
+      assert page.locator("#lab-short-value").input_value()=="2048"
+      assert page.locator("#lab-long-value").input_value()=="1024"
+      # Model information remains expanded, without a redundant toggle click.
+      assert page.locator(".model-info-controls").get_attribute("open") is not None
       assert page.locator("#lab-model-description").is_visible()
       assert '個別波長' in page.locator('#lab-model-description').inner_text()
       page.locator('#lab-model').select_option('dual')
