@@ -257,3 +257,109 @@ test("neutral identity output fades from last audible PCM on an abrupt seek",()=
   assert.ok(steady[0].every(x=>Math.abs(x+.8)<1e-5));
   assert.ok(steady[1].every(x=>Math.abs(x+.4)<1e-5));
 });
+
+
+test("micro-pitch actual PCM diagnostics: stable tones must be measured, not inferred from a mode label",()=>{
+  const sampleCount=65536,sourceAt=10000,outFrames=16384,f0=440;
+  const pcm=Float32Array.from({length:sampleCount},(_,i)=>
+    .35*Math.sin(2*Math.PI*f0*i/SR));
+  const fitTone=(out,atHz)=>{
+    const begin=4096,count=out.length-begin,omega=2*Math.PI*atHz/SR;
+    let cos=0,sin=0,power=0;
+    for(let i=begin;i<out.length;i++){
+      const v=out[i];cos+=v*Math.cos(omega*i);
+      sin+=v*Math.sin(omega*i);power+=v*v;
+    }
+    const a=2*cos/count,b=2*sin/count;
+    let residual=0;
+    for(let i=begin;i<out.length;i++){
+      const err=out[i]-a*Math.cos(omega*i)-b*Math.sin(omega*i);
+      residual+=err*err;
+    }
+    const amplitude=Math.hypot(a,b),rms=Math.sqrt(power/count);
+    const residualDb=20*Math.log10(Math.max(1e-15,Math.sqrt(residual/count))/Math.max(rms,1e-15));
+    const windowRms=[];
+    for(let i=begin;i+2048<=out.length;i+=2048){
+      let power=0;for(let j=0;j<2048;j++)power+=out[i+j]*out[i+j];
+      windowRms.push(Math.sqrt(power/2048));
+    }
+    const avg=windowRms.reduce((a,b)=>a+b,0)/windowRms.length;
+    const variance=windowRms.reduce((a,b)=>a+(b-avg)**2,0)/windowRms.length;
+    return {amplitude:Number(amplitude.toFixed(5)),
+      rms:Number(rms.toFixed(5)),
+      residualDb:Number(residualDb.toFixed(2)),
+      rmsCV:Number((Math.sqrt(variance)/avg).toFixed(4))};
+  };
+  const measurements=[];
+  for(const phaseLock of [false,true]){
+    for(const pitch of [-.1,-.02,.02,.1]){
+      const renderer=createSourcePCMRenderer({
+        sourceFrames:sampleCount,sourceSampleRate:SR,outputSampleRate:SR,
+        channelCount:1,startFrame:sourceAt,speed:1
+      });
+      renderer.installWindow(0,[pcm]);
+      const synth=createSpectralTimePitch({sourceSampleRate:SR,
+        outputSampleRate:SR,channelCount:1,pitchSemitones:pitch,phaseLock});
+      const output=new Float32Array(outFrames);
+      let misses=0;
+      const start=performance.now();
+      for(let i=0;i<outFrames;i+=128){
+        const block=new Float32Array(128);
+        misses+=renderer.renderSpectral([block],synth);
+        output.set(block,i);
+      }
+      assert.equal(misses,0,{phaseLock,pitch});
+      assert.equal(renderer.timeline.state.sourceFrame,sourceAt+outFrames);
+      const result=fitTone(output,f0*2**(pitch/12));
+      assert.ok(Object.values(result).every(Number.isFinite),{phaseLock,pitch,result});
+      measurements.push({mode:phaseLock?"pv":"spectral",pitch,...result,
+        renderMs:Number((performance.now()-start).toFixed(1))});
+    }
+  }
+  console.log("MICROPITCH_BASELINE_PCM "+JSON.stringify(measurements));
+});
+
+
+test("small fractional pitch changes retain harmonic amplitudes across low and high bins",()=>{
+  // The old unrotated j/j+1 deposition causes near-half-bin cancellation.
+  // This is heard as a comb-like EQ when harmonic numbers differ.
+  const frequencies=[220,440,880,1760,3520],amplitude=.12;
+  const n=65536,startFrame=10000,total=16384;
+  const pcm=Float32Array.from({length:n},(_,i)=>frequencies.reduce(
+    (sum,hz)=>sum+amplitude*Math.sin(2*Math.PI*hz*i/SR),0));
+  const measure=(out,f)=>{
+    const begin=4096,count=out.length-begin;
+    let a=0,b=0;
+    for(let i=begin;i<out.length;i++){
+      const theta=2*Math.PI*f*i/SR;
+      a+=out[i]*Math.cos(theta);b+=out[i]*Math.sin(theta);
+    }
+    return 2*Math.hypot(a,b)/count;
+  };
+  const gains=[];
+  for(const phaseLock of [false,true]){
+    for(const pitch of [-.1,.1]){
+      const renderer=createSourcePCMRenderer({
+        sourceFrames:n,sourceSampleRate:SR,outputSampleRate:SR,
+        channelCount:1,startFrame,speed:1
+      });
+      renderer.installWindow(0,[pcm]);
+      const synth=createSpectralTimePitch({sourceSampleRate:SR,
+        outputSampleRate:SR,channelCount:1,pitchSemitones:pitch,phaseLock});
+      const out=new Float32Array(total);
+      for(let i=0;i<total;i+=128){
+        const block=new Float32Array(128);
+        assert.equal(renderer.renderSpectral([block],synth),0);
+        out.set(block,i);
+      }
+      const ratios=frequencies.map(hz=>measure(out,hz*2**(pitch/12))/amplitude);
+      gains.push({model:phaseLock?"pv":"spectral",pitch,
+        gains:ratios.map(v=>Number(v.toFixed(4)))});
+      for(let i=0;i<ratios.length;i++)
+        assert.ok(ratios[i]>.8&&ratios[i]<1.2,
+          "tiny pitch must not cause comb-like harmonic notch"+
+          JSON.stringify({phaseLock,pitch,hz:frequencies[i],gain:ratios[i]}));
+    }
+  }
+  console.log("MICROPITCH_HARMONIC_GAIN "+JSON.stringify(gains));
+});

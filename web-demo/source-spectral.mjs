@@ -182,14 +182,25 @@ export function createSpectralTimePitch({
         // synthesis FFT bins are outputSampleRate. Keep 440 Hz as 440 Hz
         // even when a 44.1 kHz source plays through a 48 kHz device.
         const target=k*ratio*srcRatio,j=Math.floor(target),frac=target-j;
+        // The Hann analysis window is CENTERED at N/2. At that center,
+        // adjacent FFT carriers differ by pi. Reusing an identical complex
+        // phase for destination bins j and j+1 therefore CANCELS the source
+        // partial when fractional shift approaches half a bin (comb-like
+        // frequency-dependent loss even at a tiny nonzero pitch).
+        // Compensate the source->destination integer-bin parity. The center
+        // of each synthesized partial then retains the original relative
+        // phase; the outer timeline still owns time and looping.
+        const polarity=((j-k)&1)?-1:1;
+        const re=mag*Math.cos(phase),im=mag*Math.sin(phase);
         if(j<=half){
-          const gain=1-frac;
-          dest.re[j]+=gain*mag*Math.cos(phase);
-          dest.im[j]+=gain*mag*Math.sin(phase);
+          const gain=polarity*(1-frac);
+          dest.re[j]+=gain*re;
+          dest.im[j]+=gain*im;
         }
         if(frac>0&&j+1<=half){
-          dest.re[j+1]+=frac*mag*Math.cos(phase);
-          dest.im[j+1]+=frac*mag*Math.sin(phase);
+          const gain=-polarity*frac;
+          dest.re[j+1]+=gain*re;
+          dest.im[j+1]+=gain*im;
         }
       }
       for(let k=1;k<half;k++){dest.re[N-k]=dest.re[k];dest.im[N-k]=-dest.im[k];}
