@@ -37,7 +37,7 @@ const PLAYER_GRANULAR_AVAILABLE=true;
 // PV is a real peak-locked streaming Worklet unless period-joint is enabled.
 const isPCMModel=(mode,individual=lab.individual)=>
   mode==="spectral"||mode==="granular"||
-  ((mode==="pv"||mode==="wsola"||mode==="dual")&&!individual);
+  ((mode==="pv"||mode==="wsola"||mode==="dual"||mode==="am")&&!individual);
 const initialModel=GRANULAR_EXPERIMENT||
   new URLSearchParams(location.search).get("model")==="granular"?
   "granular":"spectral";
@@ -1597,7 +1597,8 @@ async function play(mode="wet",offset=null){
         (activeSynthMode==="spectral"?"spectral-realtime":
           activeSynthMode==="pv"?"pv-phase-locked":
           activeSynthMode==="wsola"?"wsola-source-time":
-          activeSynthMode==="dual"?"dual-transient-source-time":"granular-experimental"):
+          activeSynthMode==="dual"?"dual-transient-source-time":
+          activeSynthMode==="am"?"am-envelope-source-time":"granular-experimental"):
         "raw-experimental";
       telemetry.dataset.pcmNodeStarts=String(
         Number(telemetry.dataset.pcmNodeStarts||0)+1
@@ -1611,13 +1612,16 @@ async function play(mode="wet",offset=null){
           "WSOLA波形相関合成中 · 元音源同期/±8/0倍（音響品質検証中）":
           activeSynthMode==="dual"?
           "Dual短窓WSOLA＋長窓PV合成中 · 元音源同期/±8/0倍（音響品質検証中）":
+          activeSynthMode==="am"?
+          "AM包絡＋PV合成中 · 元音源同期/±8/0倍（音響品質検証中）":
           "粒状合成中 · 独立音程/±8/0倍（音質未受入）"):
         "原音再生中 · PCM実験経路（速度と音程は未連動）");
       message(granularActive?
         "再生中。"+(activeSynthMode==="spectral"?"STFT位相合成":
           activeSynthMode==="pv"?"PVピーク位相ロック":
           activeSynthMode==="wsola"?"WSOLA波形相関":
-          activeSynthMode==="dual"?"Dual短窓/長窓合成":"Granular")+
+          activeSynthMode==="dual"?"Dual短窓/長窓合成":
+          activeSynthMode==="am"?"AM包絡＋PV":"Granular")+
         "・極短ループ・実機可聴遅延は音響品質検証中。":
         "実験用PCM再生中。音程変更・0倍の音響品質は未実装です。","warning");
     }catch(err){
@@ -2481,6 +2485,8 @@ function labRefresh(){
     "STFTは2048点Hann窓と256サンプルの合成ホップで連続再生します。現在、解析窓の変更・個別波長処理は未接続です。":
     lab.mode==="pv"&&!lab.individual?
     "PV（実時間）は2048点・256合成ホップのピーク位相ロック処理です。個別波長をONにした場合のみ従来の先読みPV＋個別波長を使用します。":
+    lab.mode==="am"&&!lab.individual?
+    "AM（実時間）はピーク位相ロックPVを持続音キャリアとして、元音源の緩やかな振幅包絡を平滑に反映します。音源位置・速度・A/Bは共通Transportが管理します。2048点窓固定で、個別波長ONは従来の先読み経路です。":
     lab.mode==="wsola"&&!lab.individual?
     "WSOLA（実時間）は短窓で元音源波形を長めの相関参照と照合します。短窓の変更は再生処理を更新します。個別波長ONでは従来の先読み方式です。":
     lab.mode==="dual"&&!lab.individual?
@@ -2501,7 +2507,7 @@ function labRefresh(){
     pv:"位相ボコーダー：ピーク近傍の位相関係を保持するSTFT再合成です。通常は元音源位置と逆/0倍・スクラブに直接追従します。個別波長選択時は従来の先読み処理です。打音や極低速の音色は検証中です。",
     wsola:"WSOLA：ステレオ共通の正規化波形相関によって接続する実時間OLA。通常は元音源位置・正逆/0倍・スクラブに追従します。個別波長ONは従来の先読み方式です。極低速の周期性・打音品質は検証中です。",
     dual:"短窓WSOLA＋長窓PV：打音の短い波形と持続音の周波数成分を独立合成し、過渡音検出・ステレオ共通位相照合で切替える方式です。±8/0/逆とスクラブに対応しますが音響品質は未受入です。",
-    am:"AM包絡：伸縮した音の音量の輪郭をゆっくり整えます。音量を急に掛け直さず、コム状の濁りを抑える実験方式です。",
+    am:"AM包絡＋PV：元音源の緩やかな音量輪郭をピーク位相ロックPVに35msで平滑反映します。通常再生は共通PCMと正逆・0倍・A/Bに対応。個別波長ONは別の先読み研究処理です。",
     "period-joint":"周波数ごとの個別波長（研究版）：7つの周波数別周期窓から複数の共通部分音を推定し、残差も処理します。和音・変調・声・打音も再生対象ですが、物理的な音源分離・完全な位相/音色保持は未証明です。"
   };
   $("#lab-model-description").textContent=lab.individual&&!isPCMModel(lab.mode)?

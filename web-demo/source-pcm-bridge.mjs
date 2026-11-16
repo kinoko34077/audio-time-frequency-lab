@@ -40,7 +40,7 @@ export async function createSourcePCMBridge({
   if(!Number.isFinite(commandTimeoutMs)||commandTimeoutMs<1||commandTimeoutMs>60000)
     throw RangeError("invalid PCM command timeout");
   let currentSpeed=validatePlaybackSpeed(speed);
-  if(!["raw","granular","spectral","pv","wsola","dual"].includes(processingMode))
+  if(!["raw","granular","spectral","pv","wsola","dual","am"].includes(processingMode))
     throw RangeError("invalid PCM processing mode");
   if(![256,512,1024,2048,4096].includes(wsolaWindowFrames))
     throw RangeError("invalid WSOLA synthesis window");

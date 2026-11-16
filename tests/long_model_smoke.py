@@ -66,7 +66,15 @@ try:
         page.wait_for_function("""() => document.querySelector('#rt-telemetry')
           ?.dataset.pcmTransport==='dual-transient-source-time'""",timeout=25000)
         page.locator('#stop').click()
-        for model in ('pv','wsola','dual','am'):
+        # Native AM now applies its own RMS envelope correction over PV
+        # within the same continuously rendered PCM and source-time transport.
+        page.locator('#lab-model').select_option('am')
+        page.locator('#play-main').click()
+        page.wait_for_function("""() => document.querySelector('#rt-telemetry')
+          ?.dataset.pcmTransport==='am-envelope-source-time'""",timeout=25000)
+        page.locator('#stop').click()
+        # Previous period-joint Worker remains distinct and explicitly limited.
+        for model in ('pv','wsola','dual'):
             page.locator('#lab-model').select_option(model)
             page.locator('#lab-individual-periods').evaluate(
                 "(e)=>{e.checked="+("true" if model in ("pv","wsola","dual") else "false")+

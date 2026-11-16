@@ -1,5 +1,11 @@
 # Audio Lab — Source-time transport contract (#36)
 
+## 2026-11-17 AM-envelope native source-time DSP (Owner #36, PR #84 candidate)
+
+**Status: implementation candidate until exact-head CI/formal Review/main Pages acceptance.** Normal AM (individual-period OFF) uses the same PCM renderer, cache, source-time clock, loop bounds, zero/reverse/signed speed, scratch and render receipts as native STFT/PV/WSOLA/Dual. The AM model supplies **only sound**: a genuine peak-locked PV carrier, a local original-source RMS envelope estimate (12ms), a processed RMS envelope (12ms) and a bounded (.72–1.28) gain correction smoothed over 35ms, adapting the existing offline `amVocoder()` behavior. It never owns a second source cursor or A/B wrapping. This cannot be presented as a PV alias: differential PCM gain/shape is an acceptance requirement.
+
+AM with individual-period ON remains the older chunk Worker with separately limited capability. Normal AM's 2048-point PV carrier is fixed; do not imply the inactive long FFT slider modifies it. Physical iOS artifacts/CPU and one-sample perceptual timbre require separate evidence. Prior source-time contract remains authoritative for all other algorithms.
+
 ## 2026-11-16 model-specific continuous PCM DSP contract (#76–#79)
 
 **Source-of-truth:** Owner [#36](https://github.com/kinoko34077/audio-time-frequency-lab/issues/36) and live main/CI define accepted status; sections dated 2026-11-13/15 below are historical implementation checkpoints, **not a statement that native PV/WSOLA are still unavailable**. No DSP algorithm is accepted merely because a UI capability flag says supported.

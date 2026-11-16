@@ -794,7 +794,7 @@ test("shared A/B updates every realtime model and compact numeric controls stay 
     await page.click("#play-main");
     const routes={spectral:"spectral-realtime",pv:"pv-phase-locked",
       wsola:"wsola-source-time",dual:"dual-transient-source-time",
-      granular:"granular-experimental"};
+      am:"am-envelope-source-time",granular:"granular-experimental"};
     for(const [index,[mode,route]] of Object.entries(routes).entries()){
       if(mode!=="spectral")await page.evaluate(selected=>{
         const input=document.getElementById("lab-model");

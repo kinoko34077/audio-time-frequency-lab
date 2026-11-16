@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {performance} from "node:perf_hooks";
 import {createSpectralTimePitch} from "./source-spectral.mjs";
 import {createSourcePCMRenderer} from "./source-pcm-renderer.mjs";
+import {createAmTimePitch} from "./source-am.mjs";
 
 const SR=48000,FRAMES=262144,CENTER=90000,START=65536;
 const source=[new Float32Array(FRAMES),new Float32Array(FRAMES)];
@@ -362,4 +363,53 @@ test("small fractional pitch changes retain harmonic amplitudes across low and h
     }
   }
   console.log("MICROPITCH_HARMONIC_GAIN "+JSON.stringify(gains));
+});
+
+
+test("AM uses its own smoothed envelope DSP against one signed shared source-time clock",()=>{
+  const sr=48000,length=65536,A=10000,B=60000,start=30000;
+  const src=[new Float32Array(length),new Float32Array(length)];
+  for(let i=0;i<length;i++){
+    const time=i/sr,accent=.3+.4*Math.sin(2*Math.PI*4*time)**2;
+    const hit=i%7000<90?.22*Math.exp(-(i%7000)/40):0;
+    src[0][i]=accent*(.28*Math.sin(2*Math.PI*440*time))+hit;
+    src[1][i]=accent*(.24*Math.sin(2*Math.PI*330*time+.5))+hit*.5;
+  }
+  const run=(mode,speed,pitch=3.25)=>{
+    const reader=createSourcePCMRenderer({sourceFrames:length,
+      sourceSampleRate:sr,outputSampleRate:sr,channelCount:2,
+      startFrame:start,speed,loopEnabled:true,loopStartFrame:A,loopEndFrame:B});
+    reader.installWindow(0,src);
+    const dsp=mode==="am"?createAmTimePitch({sourceSampleRate:sr,
+      outputSampleRate:sr,channelCount:2,pitchSemitones:pitch}):
+      createSpectralTimePitch({sourceSampleRate:sr,outputSampleRate:sr,
+        channelCount:2,pitchSemitones:pitch,phaseLock:true});
+    const out=[new Float32Array(8192),new Float32Array(8192)];
+    let misses=0;
+    for(let i=0;i<8192;i+=128){
+      const frames=[new Float32Array(128),new Float32Array(128)];
+      misses+=reader.renderGranular(frames,dsp);
+      for(let ch=0;ch<2;ch++)out[ch].set(frames[ch],i);
+    }
+    return {out,misses,frame:reader.timeline.state.sourceFrame,state:dsp.state};
+  };
+  for(const speed of [-8,-1,0,1,8]){
+    const rendered=run("am",speed);
+    assert.equal(rendered.misses,0,{speed});
+    assert.equal(rendered.state.algorithm,"am-envelope-pv-continuous");
+    assert.equal(rendered.state.carrierAlgorithm,"phase-vocoder-peak-locked");
+    assert.ok(rendered.out.every(x=>x.every(Number.isFinite)));
+    assert.ok(rms(rendered.out[0].subarray(2048))>.01,{speed});
+    assert.ok(rendered.frame>=A&&rendered.frame<B,{speed,frame:rendered.frame});
+  }
+  const a=run("am",.65),p=run("pv",.65);
+  const difference=rms(a.out[0].map((value,i)=>value-p.out[0][i]).subarray(2048));
+  assert.ok(difference>1e-5,{difference,state:a.state},
+    "AM must apply audible gain-envelope changes, not alias PV by name");
+  assert.ok(a.state.correctionFrames>0,a.state);
+  const changed=createAmTimePitch({sourceSampleRate:sr,outputSampleRate:sr,
+    channelCount:2,pitchSemitones:0});
+  assert.equal(changed.setPitch(7.1234).pitchSemitones,7.1234);
+  assert.throws(()=>changed.setPitch(13),/pitch/);
+  assert.throws(()=>changed.shiftSource(Number.NaN),/scratch/);
 });
