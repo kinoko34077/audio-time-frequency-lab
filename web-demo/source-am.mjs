@@ -24,7 +24,11 @@ export function createAmTimePitch({sourceSampleRate,outputSampleRate,
   const sourceStride=16;
   const sourceAlpha=1-Math.exp(-sourceStride/(outputSampleRate*.012));
   const radius=Math.round(sourceSampleRate*.012);
-  const probeStride=16;
+  // Never subsample the *squared* source without a power-domain lowpass:
+  // a 3 kHz sine at 48 kHz repeats its phase every 16 frames, so a stride
+  // of 16 measured phase rather than RMS (0x freezes at a gain extreme).
+  // Full-rate integration is bounded to a local 24 ms observation window.
+  const probeStride=1;
   let sourceEnvelope=0,processedPower=0,gain=1,outputFrames=0;
   let sourcePeak=0,correctionFrames=0;
 
