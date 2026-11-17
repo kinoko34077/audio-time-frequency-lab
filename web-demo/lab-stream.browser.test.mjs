@@ -119,8 +119,13 @@ test("individual-period Worker plays through one shared PCM Worklet in Chrome",a
         pageErrors.push(message.text());
     });
     await page.evaluateOnNewDocument(()=>{
-      const audit={worklets:[],workers:[],jobs:[],workerResults:[],messages:[],bufferSources:0,probe:null};
+      const audit={worklets:[],workers:[],jobs:[],workerResults:[],messages:[],pointerEvents:[],bufferSources:0,probe:null};
       Object.defineProperty(window,"__labAudit",{value:audit});
+      for(const type of ["pointerdown","pointerup","click"])
+        document.addEventListener(type,event=>{
+          if(event.target?.id==="wave")audit.pointerEvents.push({type,
+            x:event.clientX,y:event.clientY});
+        },true);
       const NativeWorklet=window.AudioWorkletNode;
       const nativeConnect=NativeWorklet.prototype.connect;
       NativeWorklet.prototype.connect=function(destination,...rest){
@@ -406,10 +411,32 @@ test("individual-period Worker plays through one shared PCM Worklet in Chrome",a
       const rect=canvas.getBoundingClientRect();
       return {x:rect.x,y:rect.y,width:rect.width,height:rect.height};
     });
-    await page.mouse.click(wave.x+wave.width*.75,wave.y+wave.height/2);
-    await page.waitForFunction(()=>window.__labAudit.messages.some(message=>
-      message.type==="worker-state-accepted"&&
-      Math.abs(message.sourceFrame-216000)<=100),{timeout:10000});
+    const seekPoint={x:wave.x+wave.width*.75,y:wave.y+wave.height/2};
+    await page.mouse.click(seekPoint.x,seekPoint.y);
+    try{
+      await page.waitForFunction(()=>window.__labAudit.messages.some(message=>
+        message.type==="worker-state-accepted"&&
+        Math.abs(message.sourceFrame-216000)<=100),{timeout:10000});
+    }catch(error){
+      const diagnostic=await page.evaluate(point=>{
+        const audit=window.__labAudit,wave=document.querySelector("#wave");
+        const hit=document.elementFromPoint(point.x,point.y);
+        return {selectedModel:document.querySelector("#lab-model")?.value,
+          status:document.querySelector("#lab-status")?.textContent,
+          indicator:document.querySelector("#rt-indicator")?.textContent,
+          file:document.querySelector("#file-meta")?.textContent,
+          waveRect:wave?.getBoundingClientRect().toJSON(),
+          seekHit:{id:hit?.id,tag:hit?.tagName,className:hit?.className},
+          pointerEvents:audit.pointerEvents.slice(-8),
+          workerStates:audit.messages.filter(message=>
+            message.type==="worker-state-accepted").slice(-8),
+          workerProgress:audit.messages.filter(message=>
+            message.type==="progress"&&message.processingMode==="worker").slice(-8),
+          jobs:audit.jobs.slice(-8),results:audit.workerResults.slice(-8)};
+      },seekPoint);
+      console.log("Chrome seek acceptance diagnostic",JSON.stringify({diagnostic,pageErrors}));
+      throw error;
+    }
     const seekGeneration=await page.evaluate(()=>window.__labAudit.messages
       .filter(message=>message.type==="worker-state-accepted"&&
         Math.abs(message.sourceFrame-216000)<=100).at(-1).generation);
