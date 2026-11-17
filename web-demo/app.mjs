@@ -2493,6 +2493,15 @@ const syncLabInput=(input,value,disabled)=>{
 };
 const selectedPeriodCycles=()=>2**Number(labPeriod.value);
 function labStatusText(text){labStatus.textContent=text;}
+function labSettingsPending(applied){
+  return Boolean(applied&&(
+    applied.mode!==lab.mode||applied.speed!==lab.speed||
+    applied.semitones!==lab.semitones||applied.individual!==lab.individual||
+    applied.fftSize!==lab.fftSize||applied.shortFftSize!==lab.shortFftSize||
+    applied.longFftSize!==lab.longFftSize||
+    applied.referenceWindows!==lab.referenceWindows||
+    applied.periodCycles!==lab.periodCycles));
+}
 function labRefresh(){
   $("#lab-short-output").textContent=String(lab.shortFftSize)+" samples";
   $("#lab-long-output").textContent=String(lab.longFftSize)+" samples";
@@ -2715,9 +2724,7 @@ async function startModelPlayback(offset=null,appliedOverride=null){
     shortFftSize:lab.shortFftSize,longFftSize:lab.longFftSize,
     referenceWindows:lab.referenceWindows,periodCycles:lab.periodCycles
   });
-  const pending=Boolean(appliedOverride)&&(
-    applied.mode!==lab.mode||applied.speed!==lab.speed||
-    applied.semitones!==lab.semitones||applied.individual!==lab.individual);
+  const pending=labSettingsPending(applied);
   const where=clamp(offset??(state.player?playPosition():state.seek),0,Math.max(0,duration()-.001));
   if(state.player)await stop();
   // Native AudioContext (and original file decoder/transport) is inherited;
@@ -2738,13 +2745,17 @@ async function startModelPlayback(offset=null,appliedOverride=null){
       fftSize:applied.fftSize,shortFftSize:applied.shortFftSize,
       longFftSize:applied.longFftSize,referenceWindows:applied.referenceWindows,
       periodCycles:applied.periodCycles,startSeconds:where,
-      onStatus:text=>{if(state.player===player&&!pending)labStatusText(text);},
+      onStatus:text=>{
+        if(state.player===player&&!labSettingsPending(player.appliedConfig))
+          labStatusText(text);
+      },
       onStarted:at=>{
         if(state.player!==player)return;
         player.at=at;controls.stop.disabled=false;
         indicator("モデル再生中 · "+(applied.individual?"個別波長＋":"")+
           applied.mode.toUpperCase()+" · 自動先読み"+
-          (pending?"（新しいモデル設定は適用待ち）":""));
+          (labSettingsPending(player.appliedConfig)?
+            "（新しいモデル設定は適用待ち）":""));
         message("選択モデルを順次処理して再生中。全曲の計算は不要です。");
       },
       onFailure:error=>{

@@ -492,18 +492,49 @@ test("U1/U5 primary Play routes to REAL selected live/PV/Granular engines and on
     await page.evaluateOnNewDocument(()=>{
       const Worklet=window.AudioWorkletNode,NativeWorker=window.Worker;
       window.__engineCreations=[];
+      window.__workerMessages=[];
+      window.__workletFrames=[];
+      window.__lastPcmWorkletId=0;
       window.AudioWorkletNode=class extends Worklet{
         constructor(ctx,name,opts){
           super(ctx,name,opts);
-          window.__engineCreations.push({kind:"worklet",name});
+          const id=window.__engineCreations.length+1;
+          window.__engineCreations.push({kind:"worklet",name,id});
+          if(name==="audio-lab-source-pcm")window.__lastPcmWorkletId=id;
+          this.port.addEventListener("message",event=>{
+            if(Number.isSafeInteger(event.data?.sourceFrame))
+              window.__workletFrames.push({id,type:event.data.type,
+                sourceFrame:event.data.sourceFrame});
+          });
         }
       };
       window.Worker=class extends NativeWorker{
         constructor(url,options){
           super(url,options);
+          this.__labName=String(url);
           window.__engineCreations.push({kind:"worker",name:String(url)});
         }
+        postMessage(message,transfer){
+          if(String(this.__labName||"").includes("lab-processor.worker.mjs")){
+            window.__workerMessages.push({job:message?.job,
+              generation:message?.generation,startFrame:message?.plan?.start});
+          }
+          return super.postMessage(message,transfer);
+        }
       };
+      document.addEventListener("keydown",event=>{
+        if(event.target?.id!=="wave"||event.key!=="ArrowRight")return;
+        const id=window.__lastPcmWorkletId;
+        const current=[...window.__workletFrames].reverse().find(x=>
+          x.id===id&&Number.isSafeInteger(x.sourceFrame));
+        const canvas=document.getElementById("wave-detail");
+        const fileMeta=document.getElementById("file-meta")?.textContent||"";
+        const rate=Number(fileMeta.match(/(\d+)Hz/)?.[1]);
+        const totalFrames=Number(canvas?.getAttribute("aria-valuemax"))+1;
+        if(!current||!(rate>0&&totalFrames>1))return;
+        window.__expectedSeekFrame=Math.round(Math.min(
+          totalFrames/rate-.01,current.sourceFrame/rate+2)*rate);
+      },true);
     });
     await page.goto("http://127.0.0.1:"+port+"/?model=granular",{
       waitUntil:"domcontentloaded",timeout:20000
@@ -681,11 +712,26 @@ test("U1/U5 primary Play routes to REAL selected live/PV/Granular engines and on
       ?.textContent.includes("適用待ち"),{timeout:10000});
     const beforeSeekWorker=await page.evaluate(()=>window.__engineCreations
       .filter(x=>x.kind==="worker"&&x.name.includes("lab-processor.worker.mjs")).length);
+    const beforeSeekGeneration=await page.evaluate(()=>Math.max(-1,...window.__workerMessages
+      .filter(x=>Number.isSafeInteger(x.generation)).map(x=>x.generation)));
     await page.focus("#wave");
     await page.keyboard.press("ArrowRight");
-    await page.waitForFunction(before=>window.__engineCreations
-      .filter(x=>x.kind==="worker"&&x.name.includes("lab-processor.worker.mjs")).length>before,
-      {timeout:20000},beforeSeekWorker);
+    await page.waitForFunction(generation=>window.__workerMessages.some(x=>
+      Number.isSafeInteger(x.generation)&&x.generation>generation),
+      {timeout:20000},beforeSeekGeneration);
+    const expectedSeekFrame=await page.evaluate(()=>window.__expectedSeekFrame);
+    const seekRender=await page.evaluate(generation=>({
+      workerCount:window.__engineCreations
+        .filter(x=>x.kind==="worker"&&x.name.includes("lab-processor.worker.mjs")).length,
+      messages:window.__workerMessages.filter(x=>x.generation>generation)
+    }),beforeSeekGeneration);
+    assert.equal(seekRender.workerCount,beforeSeekWorker,
+      "seek keeps the existing Worker behind the shared PCM source clock");
+    assert.ok(Number.isSafeInteger(expectedSeekFrame),
+      "keyboard event must observe the shared source-frame cursor before seeking");
+    assert.ok(seekRender.messages.some(x=>x.startFrame===expectedSeekFrame),
+      "ArrowRight must submit a real Worker render from the clamped source frame: "+
+      JSON.stringify({expectedSeekFrame,messages:seekRender.messages}));
     await page.waitForFunction(()=>{
       const text=document.querySelector("#rt-indicator")?.textContent||"";
       return text.includes("モデル再生中")&&text.includes("PV");
