@@ -404,6 +404,14 @@ test("individual-period Worker plays through one shared PCM Worklet in Chrome",a
       assert.match(evidence.status,/欠落PCMを記録しました/);
 
     await page.$eval("#wave",canvas=>canvas.scrollIntoView({block:"center"}));
+    const targetFrames=await page.evaluate(()=>{
+      const progress=window.__labAudit.messages.filter(message=>
+        message.type==="progress"&&message.processingMode==="worker").at(-1);
+      const totalFrames=progress?.loopEndFrame;
+      if(!Number.isSafeInteger(totalFrames)||totalFrames<2)
+        throw Error("Worker source-frame extent is unavailable");
+      return {totalFrames,seek:Math.round(totalFrames*.75),nearEnd:Math.round(totalFrames*.98)};
+    });
     const missingBeforeSeek=await page.evaluate(()=>window.__labAudit.messages
       .filter(message=>message.type==="progress"&&
         message.processingMode==="worker").at(-1)?.missingFrames||0);
@@ -414,11 +422,11 @@ test("individual-period Worker plays through one shared PCM Worklet in Chrome",a
     const seekPoint={x:wave.x+wave.width*.75,y:wave.y+wave.height/2};
     await page.mouse.click(seekPoint.x,seekPoint.y);
     try{
-      await page.waitForFunction(()=>window.__labAudit.messages.some(message=>
+      await page.waitForFunction(target=>window.__labAudit.messages.some(message=>
         message.type==="worker-state-accepted"&&
-        Math.abs(message.sourceFrame-216000)<=100),{timeout:10000});
+        Math.abs(message.sourceFrame-target)<=100),{timeout:10000},targetFrames.seek);
     }catch(error){
-      const diagnostic=await page.evaluate(point=>{
+      const diagnostic=await page.evaluate(({point,targets})=>{
         const audit=window.__labAudit,wave=document.querySelector("#wave");
         const hit=document.elementFromPoint(point.x,point.y);
         return {selectedModel:document.querySelector("#lab-model")?.value,
@@ -428,35 +436,37 @@ test("individual-period Worker plays through one shared PCM Worklet in Chrome",a
           waveRect:wave?.getBoundingClientRect().toJSON(),
           seekHit:{id:hit?.id,tag:hit?.tagName,className:hit?.className},
           pointerEvents:audit.pointerEvents.slice(-8),
+          targets,
           workerStates:audit.messages.filter(message=>
             message.type==="worker-state-accepted").slice(-8),
           workerProgress:audit.messages.filter(message=>
             message.type==="progress"&&message.processingMode==="worker").slice(-8),
           jobs:audit.jobs.slice(-8),results:audit.workerResults.slice(-8)};
-      },seekPoint);
+      },{point:seekPoint,targets:targetFrames});
       console.log("Chrome seek acceptance diagnostic",JSON.stringify({diagnostic,pageErrors}));
       throw error;
     }
-    const seekGeneration=await page.evaluate(()=>window.__labAudit.messages
+    const seekGeneration=await page.evaluate(target=>window.__labAudit.messages
       .filter(message=>message.type==="worker-state-accepted"&&
-        Math.abs(message.sourceFrame-216000)<=100).at(-1).generation);
+        Math.abs(message.sourceFrame-target)<=100).at(-1)?.generation,targetFrames.seek);
     const seekPcmEvidence=await waitForWorkerPCM(page,{generation:seekGeneration,
       missingBeforeFrames:missingBeforeSeek});
     const missingBeforeLoop=await page.evaluate(()=>window.__labAudit.messages
       .filter(message=>message.type==="progress"&&
         message.processingMode==="worker").at(-1)?.missingFrames||0);
     await page.mouse.click(wave.x+wave.width*.98,wave.y+wave.height/2);
-    await page.waitForFunction(generation=>window.__labAudit.messages.some(message=>
+    await page.waitForFunction(({generation,target})=>window.__labAudit.messages.some(message=>
       message.type==="worker-state-accepted"&&message.generation>generation&&
-      Math.abs(message.sourceFrame-282240)<=100),
-      {timeout:10000},seekGeneration);
-    const loopGeneration=await page.evaluate(()=>window.__labAudit.messages
+      Math.abs(message.sourceFrame-target)<=100),
+      {timeout:10000},{generation:seekGeneration,target:targetFrames.nearEnd});
+    const loopGeneration=await page.evaluate(target=>window.__labAudit.messages
       .filter(message=>message.type==="worker-state-accepted"&&
-        Math.abs(message.sourceFrame-282240)<=100).at(-1).generation);
-    await page.waitForFunction(generation=>{
+        Math.abs(message.sourceFrame-target)<=100).at(-1).generation,targetFrames.nearEnd);
+    await page.waitForFunction(({generation,totalFrames})=>{
       const progress=window.__labAudit.messages.filter(message=>
         message.type==="progress"&&message.workerGeneration===generation);
-      const endIndex=progress.findIndex(message=>message.sourceFrame>287000);
+      const endIndex=progress.findIndex(message=>
+        message.sourceFrame>totalFrames*.9965);
       const wrapped=endIndex>=0&&progress.slice(endIndex+1).some(message=>
         message.sourceFrame<4096);
       if(!wrapped)return false;
@@ -464,18 +474,19 @@ test("individual-period Worker plays through one shared PCM Worklet in Chrome",a
       if(!probe||!pcm.length)return false;
       probe.getFloatTimeDomainData(pcm);
       return Math.sqrt(pcm.reduce((sum,value)=>sum+value*value,0)/pcm.length)>.01;
-    },{timeout:15000},loopGeneration);
-    const loopWrapEvidence=await page.evaluate((generation,missingBefore)=>{
+    },{timeout:15000},{generation:loopGeneration,totalFrames:targetFrames.totalFrames});
+    const loopWrapEvidence=await page.evaluate((generation,missingBefore,totalFrames)=>{
       const progress=window.__labAudit.messages.filter(message=>
         message.type==="progress"&&message.workerGeneration===generation);
-      const endIndex=progress.findIndex(message=>message.sourceFrame>287000);
+      const endIndex=progress.findIndex(message=>
+        message.sourceFrame>totalFrames*.9965);
       const nearEnd=progress[endIndex],afterWrap=progress.slice(endIndex+1)
         .find(message=>message.sourceFrame<4096);
       return {generation,nearEndFrame:nearEnd?.sourceFrame,
         afterWrapFrame:afterWrap?.sourceFrame,
         missingFrames:(afterWrap?.missingFrames||0)-missingBefore};
-    },loopGeneration,missingBeforeLoop);
-    assert.ok(loopWrapEvidence.nearEndFrame>287000&&
+    },loopGeneration,missingBeforeLoop,targetFrames.totalFrames);
+    assert.ok(loopWrapEvidence.nearEndFrame>targetFrames.totalFrames*.9965&&
       loopWrapEvidence.afterWrapFrame<4096,loopWrapEvidence);
 
     // A decode failure must leave the current Worker audio stream and source
