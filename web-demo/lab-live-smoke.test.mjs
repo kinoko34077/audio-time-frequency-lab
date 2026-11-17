@@ -84,7 +84,7 @@ test('full Chrome: inherited Rust AudioWorklet live independent speed/pitch UI',
   await page.click('#play-main');
   try{
     await page.waitForFunction(()=>document.querySelector('#rt-indicator')
-      ?.textContent.includes('稼働中 · Rust/WASM AudioWorklet'),{timeout:20000});
+      ?.textContent.includes('Rust engine 3部分音＋残差合成中 · 共通サンプル時計'),{timeout:20000});
   }catch(error){
     const info=await page.evaluate(()=>({status:document.querySelector('#status')?.textContent,
       indicator:document.querySelector('#rt-indicator')?.textContent,

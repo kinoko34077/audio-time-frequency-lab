@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {readFile} from "node:fs/promises";
 
 async function load() {
-  const binary=await readFile("web-demo/dsp_core.wasm");
+  const binary=await readFile((process.env.WARP_WEB_ROOT||"web-demo")+"/dsp_core.wasm");
   const {instance}=await WebAssembly.instantiate(binary,{});
   return instance.exports;
 }
@@ -153,6 +153,110 @@ test("alternate Rust engines are actually exported and differ acoustically",asyn
     assert.ok(compare(signals[0],signals[3])>0.02,"Pitch+Hz shift engine was not selected");
   }finally{
     e.warp_free_f32(input,frames);e.warp_free_f32(output,frames);
+  }
+});
+
+test("Rust engine 3 consumes source-time windows while synthesizing in output time",async()=>{
+  const e=await load();
+  assert.ok(e.warp_stream_process_source_window,
+    "Rust source-time partial/residual entry point is missing");
+  assert.ok(e.warp_stream_window_frames&&e.warp_stream_hop_frames);
+  const fs=48000,sourceRate=44100,channels=1,quality=1,hopDiv=8;
+  const stream=e.warp_stream_create_ext(fs,channels,1,20000,1,0,1,quality,1,
+    3,1.5,0,350,0,hopDiv);
+  assert.ok(stream);
+  const n=e.warp_stream_window_frames(stream),hop=e.warp_stream_hop_frames(stream);
+  assert.equal(n,2048);assert.equal(hop,256);
+  assert.equal(e.warp_stream_set_source_rate(stream,sourceRate),0);
+  assert.equal(e.warp_stream_set_a_options(stream,1,0),0);
+  assert.equal(e.warp_stream_set_a_quality(stream,100),0);
+  const input=e.warp_alloc_f32(n),probe=e.warp_alloc_f32(n),output=e.warp_alloc_f32(hop);
+  try{
+    const signals=[];
+    for(const speed of [0,8,-8]){
+      assert.equal(e.warp_stream_reset(stream),0);
+      const rendered=[];
+      for(let block=0;block<24;block++){
+        const center=22050+speed*hop*block*sourceRate/fs;
+        const source=new Float32Array(e.memory.buffer,input,n);
+        const ahead=new Float32Array(e.memory.buffer,probe,n);
+        const sampleAt=x=>{
+          const envelope=.58+.3*Math.cos(2*Math.PI*x/(sourceRate*.42));
+          return envelope*(.32*Math.sin(2*Math.PI*440*x/sourceRate)+
+            .17*Math.sin(2*Math.PI*1310*x/sourceRate));
+        };
+        for(let i=0;i<n;i++){
+          const x=center+i-n/2, y=x+n/4;
+          source[i]=sampleAt(x);
+          ahead[i]=sampleAt(y);
+        }
+        assert.equal(e.warp_stream_process_source_window(
+          stream,input,probe,output,block*hop,hop),0);
+        for(const sample of new Float32Array(e.memory.buffer,output,hop))
+          rendered.push(sample);
+      }
+      assert.ok(rendered.every(Number.isFinite));
+      const rms=Math.sqrt(rendered.slice(2048).reduce((sum,x)=>sum+x*x,0)/
+        (rendered.length-2048));
+      assert.ok(rms>.03,`source-time speed ${speed} was silent: ${rms}`);
+      signals.push(rendered);
+    }
+    const difference=(a,b)=>a.slice(2048).reduce((sum,x,i)=>
+      sum+Math.abs(x-b[i+2048]),0)/(a.length-2048);
+    assert.ok(difference(signals[0],signals[1])>1e-3,
+      "source-window traversal did not affect the Rust output");
+    assert.ok(difference(signals[1],signals[2])>1e-3,
+      "reverse source-window traversal did not affect the Rust output");
+  }finally{
+    e.warp_free_f32(input,n);e.warp_free_f32(probe,n);e.warp_free_f32(output,hop);
+    e.warp_stream_free(stream);
+  }
+});
+
+test("Rust source-time partials keep independent pitch across source/output rates",async()=>{
+  const e=await load();
+  const fs=48000,sourceRate=44100,n=2048,hop=256;
+  const stream=e.warp_stream_create_ext(fs,1,1,20000,1,0,1,1,1,
+    3,1.5,0,350,0,8);
+  assert.ok(stream);
+  assert.equal(e.warp_stream_set_source_rate(stream,sourceRate),0);
+  assert.equal(e.warp_stream_set_a_options(stream,1,0),0);
+  assert.equal(e.warp_stream_set_a_quality(stream,0),0);
+  const input=e.warp_alloc_f32(n),probe=e.warp_alloc_f32(n),output=e.warp_alloc_f32(hop);
+  try{
+    const rendered=[];
+    for(let block=0;block<24;block++){
+      const source=new Float32Array(e.memory.buffer,input,n);
+      const ahead=new Float32Array(e.memory.buffer,probe,n);
+      const center=sourceRate/2;
+      for(let i=0;i<n;i++){
+        const x=center+i-n/2,y=x+n/4;
+        source[i]=.4*Math.sin(2*Math.PI*440*x/sourceRate);
+        ahead[i]=.4*Math.sin(2*Math.PI*440*y/sourceRate);
+      }
+      assert.equal(e.warp_stream_process_source_window(
+        stream,input,probe,output,block*hop,hop),0);
+      for(const x of new Float32Array(e.memory.buffer,output,hop))rendered.push(x);
+    }
+    const pcm=rendered.slice(2048,6144);
+    const magnitude=hz=>{
+      let re=0,im=0;
+      for(let i=0;i<pcm.length;i++){
+        const phase=2*Math.PI*hz*i/fs;
+        re+=pcm[i]*Math.cos(phase);im-=pcm[i]*Math.sin(phase);
+      }
+      return Math.hypot(re,im);
+    };
+    let bestHz=0,best=-1;
+    for(let hz=620;hz<=700;hz++){
+      const value=magnitude(hz);
+      if(value>best){best=value;bestHz=hz;}
+    }
+    assert.ok(Math.abs(bestHz-660)<=3,
+      `independent pitch/source-rate mapping expected 660Hz, found ${bestHz}Hz`);
+  }finally{
+    e.warp_free_f32(input,n);e.warp_free_f32(probe,n);
+    e.warp_free_f32(output,hop);e.warp_stream_free(stream);
   }
 });
 

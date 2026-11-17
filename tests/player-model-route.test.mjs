@@ -5,25 +5,29 @@ import {MODEL_IDS,primaryModelCapability} from "../web-demo/model-route.mjs";
 test("selected engine has explicit source-time and A/B capabilities, not Granular disguise",()=>{
   assert.deepEqual(MODEL_IDS,["spectral","granular","live","pv","wsola","dual","am"]);
   for(const speed of [-8,-1.125,0,1,7.25,8]){
-    for(const model of ["spectral","granular","pv","wsola","dual","am"]){
+    for(const model of ["spectral","granular","live","pv","wsola","dual","am"]){
       const cap=primaryModelCapability(model,speed);
       assert.equal(cap.supported,true);
       assert.equal(cap.signed,true);assert.equal(cap.sampleAB,true);
     }
   }
-  for(const model of MODEL_IDS.filter(x=>!["spectral","granular","pv","wsola","dual","am"].includes(x))){
+  for(const model of ["pv","wsola","dual","am"]){
     for(const speed of [-8,-1,0,.499,2.001,8]){
-      const cap=primaryModelCapability(model,speed);
+      const cap=primaryModelCapability(model,speed,{individual:true});
       assert.equal(cap.supported,false);
       assert.match(cap.reason,/未対応/);
       assert.equal(cap.sampleAB,false);
       assert.equal(cap.signed,false);
     }
     for(const speed of [.5,1,1.237,2])
-      assert.equal(primaryModelCapability(model,speed).supported,true);
+      assert.equal(primaryModelCapability(model,speed,{individual:true}).supported,true);
   }
   assert.equal(primaryModelCapability("spectral",0).realtime,true);
   assert.equal(primaryModelCapability("live",1).realtime,true);
+  assert.equal(primaryModelCapability("live",0).sampleAB,true);
+  assert.equal(primaryModelCapability("live",-8).signed,true);
+  assert.equal(primaryModelCapability("live",0,{individual:true}).supported,false);
+  assert.equal(primaryModelCapability("live",1,{individual:true}).sampleAB,false);
   assert.equal(primaryModelCapability("pv",1).realtime,true);
   assert.equal(primaryModelCapability("pv",0,{individual:true}).supported,false);
   assert.equal(primaryModelCapability("pv",0,{individual:true}).realtime,false);
