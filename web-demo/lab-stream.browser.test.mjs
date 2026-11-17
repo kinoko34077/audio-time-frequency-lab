@@ -15,12 +15,15 @@ async function waitForWorkerPCM(page,{backend=null,generation=null,
         (!expected.backend||job.jointBackend===expected.backend))
         .map(job=>job.generation))]:[expected.generation];
     const current=generations.find(current=>{
-      const job=audit.jobs.filter(item=>item.generation===current&&
-        (!expected.backend||item.jointBackend===expected.backend)).at(-1);
-      return job&&audit.workerResults.some(result=>result.job===job.job&&
-        result.ok)&&audit.messages.some(message=>
+      const jobs=audit.jobs.filter(item=>item.generation===current&&
+        (!expected.backend||item.jointBackend===expected.backend));
+      const rendered=jobs.findLast(job=>audit.workerResults.some(result=>
+        result.job===job.job&&result.ok)&&audit.messages.some(message=>
           message.type==="rendered-chunk-accepted"&&
-          message.generation===current)&&audit.messages.some(message=>
+          message.generation===current&&!message.stale&&
+          message.startFrame===job.planStart&&
+          message.endFrame===job.planEnd));
+      return rendered&&audit.messages.some(message=>
           message.type==="progress"&&
           message.workerGeneration===current);
     });
@@ -50,20 +53,27 @@ async function waitForWorkerPCM(page,{backend=null,generation=null,
   const evidence=await page.evaluate(async expected=>{
     const audit=window.__labAudit;
     const current=expected.generation;
-    const job=audit.jobs.filter(item=>item.generation===current&&
-      (!expected.backend||item.jointBackend===expected.backend)).at(-1);
+    const jobs=audit.jobs.filter(item=>item.generation===current&&
+      (!expected.backend||item.jointBackend===expected.backend));
+    const job=jobs.findLast(item=>audit.workerResults.some(result=>
+      result.job===item.job&&result.ok)&&audit.messages.some(message=>
+        message.type==="rendered-chunk-accepted"&&
+        message.generation===current&&!message.stale&&
+        message.startFrame===item.planStart&&message.endFrame===item.planEnd));
     const start=audit.messages.filter(message=>message.type==="progress"&&
       message.workerGeneration===current).at(-1);
     let peakRms=0,lastProgress=start,advanceFrames=0;
+    const loopLength=start.loopEndFrame-start.loopStartFrame;
     const probe=audit.probe,pcm=new Float32Array(probe?.fftSize||0);
     const deadline=performance.now()+12000;
     while(performance.now()<deadline){
       const currentProgress=audit.messages.filter(message=>
         message.type==="progress"&&message.workerGeneration===current).at(-1);
       if(currentProgress){
+        let delta=currentProgress.sourceFrame-lastProgress.sourceFrame;
+        if(delta< -loopLength/2)delta+=loopLength;
+        if(delta>0)advanceFrames+=delta;
         lastProgress=currentProgress;
-        advanceFrames=Math.max(advanceFrames,
-          currentProgress.sourceFrame-start.sourceFrame);
       }
       if(probe&&pcm.length){
         probe.getFloatTimeDomainData(pcm);
@@ -77,9 +87,11 @@ async function waitForWorkerPCM(page,{backend=null,generation=null,
       peakRms,advanceFrames,
       missingFrames:Math.max(0,(lastProgress?.missingFrames||0)-
         (expected.missingBeforeFrames??start?.missingFrames??0)),
-      accepted:audit.messages.some(message=>
+      accepted:!!job&&audit.messages.some(message=>
         message.type==="rendered-chunk-accepted"&&
-        message.generation===current),startSourceFrame:start?.sourceFrame,
+        message.generation===current&&!message.stale&&
+        message.startFrame===job.planStart&&message.endFrame===job.planEnd),
+      renderedJob:job?.job,startSourceFrame:start?.sourceFrame,
       lastSourceFrame:lastProgress?.sourceFrame,
       missingTotal:lastProgress?.missingFrames||0,
       firstMissingFrame:lastProgress?.firstMissingFrame,
@@ -323,10 +335,10 @@ test("individual-period Worker plays through one shared PCM Worklet in Chrome",a
       node.value="1.33";node.dispatchEvent(new Event("change",{bubbles:true}));
     });
     await page.waitForFunction(()=>window.__labAudit.messages.some(message=>
-      message.type==="worker-state-accepted"&&message.speed===1.33),
+      message.type==="worker-state-activated"&&message.speed===1.33),
       {timeout:10000});
     const speedGeneration=await page.evaluate(()=>window.__labAudit.messages
-      .filter(message=>message.type==="worker-state-accepted"&&
+      .filter(message=>message.type==="worker-state-activated"&&
         message.speed===1.33).at(-1).generation);
     await page.waitForFunction(({generation,frame})=>window.__labAudit.messages.some(
       message=>message.type==="progress"&&
@@ -345,15 +357,25 @@ test("individual-period Worker plays through one shared PCM Worklet in Chrome",a
       node.value="2";node.dispatchEvent(new Event("change",{bubbles:true}));
     });
     await page.waitForFunction(generation=>window.__labAudit.messages.some(message=>
-      message.type==="worker-state-accepted"&&message.pitchSemitones===2&&
-      message.generation>generation),
+      message.type==="worker-state-activated"&&message.pitchSemitones===2&&
+        message.generation>generation),
       {timeout:10000},speedGeneration);
     const pitchAccepted=await page.evaluate(generation=>window.__labAudit.messages
-      .filter(message=>message.type==="worker-state-accepted"&&
+      .filter(message=>message.type==="worker-state-activated"&&
         message.pitchSemitones===2&&message.generation>generation).at(-1),
       speedGeneration);
-    assert.ok(Math.abs(pitchAccepted.sourceFrame-fractionalProgress)<8192,
-      JSON.stringify({fractionalProgress,pitchAccepted}));
+    const pitchStage=await page.evaluate(generation=>window.__labAudit.messages
+      .filter(message=>message.type==="worker-state-staged"&&
+        message.generation>generation).at(-1),speedGeneration);
+    const loopEnd=await page.evaluate(()=>window.__labAudit.messages
+      .filter(message=>message.type==="progress").at(-1)?.loopEndFrame);
+    const expectedDistance=((pitchStage.sourceFrame-fractionalProgress)%loopEnd+
+      loopEnd)%loopEnd;
+    const actualDistance=((pitchAccepted.sourceFrame-fractionalProgress)%loopEnd+
+      loopEnd)%loopEnd;
+    assert.ok(Math.abs(actualDistance-expectedDistance)<8192,
+      JSON.stringify({fractionalProgress,pitchStage,pitchAccepted,
+        expectedDistance,actualDistance,loopEnd}));
     const backendPcmEvidence=[];
     let missingBeforeModel=await page.evaluate(()=>window.__labAudit.messages
       .filter(message=>message.type==="progress"&&
@@ -373,22 +395,31 @@ test("individual-period Worker plays through one shared PCM Worklet in Chrome",a
       backendPcmEvidence.push(await waitForWorkerPCM(page,{backend:model,
         minimumGeneration:0,missingBeforeFrames:missingBeforeModel}));
     }
-    evidence=await page.evaluate(()=>({
+    evidence=await page.evaluate(()=>{
+      const progress=window.__labAudit.messages.filter(message=>
+        message.type==="progress"&&message.processingMode==="worker");
+      const active=progress.at(-1);
+      const activeProgress=progress.filter(message=>
+        message.workerGeneration===active?.workerGeneration);
+      const missingBaseline=activeProgress[0]?.missingFrames||0;
+      return {
       worklets:window.__labAudit.worklets,
       workletStates:window.__labAudit.messages.filter(message=>
-        message.type==="worker-state-accepted"),
+        message.type==="worker-state-accepted"||
+          message.type==="worker-state-activated"),
       retainedBackendJobs:window.__labAudit.jobs.filter(job=>
         ["pv","wsola","dual","am"].includes(job.jointBackend)),
       successfulBackendJobs:window.__labAudit.workerResults.map(result=>({
         ...result,job:window.__labAudit.jobs.find(item=>item.job===result.job)
       })).filter(result=>result.ok&&["pv","wsola","dual","am"]
         .includes(result.job?.jointBackend)),
-      maxMissingFrames:Math.max(0,...window.__labAudit.messages
-        .filter(message=>message.type==="progress"&&message.processingMode==="worker")
-        .map(message=>message.missingFrames||0)),
+      activeGeneration:active?.workerGeneration,
+      maxMissingFrames:Math.max(0,...activeProgress.map(message=>
+        (message.missingFrames||0)-missingBaseline)),
       buffers:window.__labAudit.bufferSources,
       status:document.querySelector("#lab-status")?.textContent
-    }));
+      };
+    });
     assert.equal(evidence.worklets.length,1,evidence);
     assert.equal(evidence.buffers,0,evidence);
     assert.ok(evidence.workletStates.length>=5,evidence);

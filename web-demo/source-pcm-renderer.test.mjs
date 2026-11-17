@@ -542,3 +542,45 @@ test("directional window placement is bounded even at original source endpoints"
   }
   assert.equal(chooseSourceWindowStart(2,3,65536,1),0);
 });
+
+test("staged Worker generation activates after a loop-spanning queue and late fallback",()=>{
+  const speed=1.33,p=createSourcePCMRenderer({sourceFrames:288000,
+    sourceSampleRate:48000,outputSampleRate:48000,channelCount:1,speed,
+    startFrame:263605,loopStartFrame:0,loopEndFrame:288000,loopEnabled:true});
+  p.resetRenderedChunks(1,{speed,pitchSemitones:0});
+  const chunk=(generation,sequence,startFrame,endFrame,value)=>{
+    const coreFrames=Math.ceil((endFrame-startFrame)/speed);
+    return {generation,sequence,startFrame,endFrame,speed,coreFrames,
+      channels:[new Float32Array(coreFrames+2).fill(value)]};
+  };
+  assert.equal(p.installRenderedChunk(chunk(1,0,216000,288000,1)),1);
+  assert.equal(p.installRenderedChunk(chunk(1,1,0,72000,1)),2);
+  assert.deepEqual(p.stageRenderedState({generation:2,speed,
+    pitchSemitones:2}),{sourceFrame:72000,sequence:2,bufferedSegments:2});
+
+  const render=frames=>p.renderBuffered([new Float32Array(frames)]);
+  let guard=0;
+  while(p.timeline.state.sourceFrame>72000&&guard++<1000)render(128);
+  while(p.timeline.state.sourceFrame<70000&&guard++<2000)render(128);
+  while(p.timeline.state.sourceFrame<71950&&guard++<3000)render(64);
+  assert.ok(guard<3000,"playback reaches the staged loop boundary");
+  assert.equal(p.installRenderedChunk(chunk(1,2,72000,144000,1)),2,
+    "late active-generation PCM fills the held boundary");
+  render(8192);
+  assert.ok(p.timeline.state.sourceFrame>80000,
+    "the fallback lets the shared clock pass the staged boundary");
+  const positionBeforeActivation=p.timeline.state.sourceFrame;
+  assert.equal(p.installRenderedChunk(chunk(2,2,72000,144000,2)),1,
+    "staged PCM replaces the matching queued fallback occurrence");
+  render(128);
+  const activation=p.takeWorkerActivation();
+  assert.equal(p.workerState.generation,2);
+  assert.equal(p.workerState.pitchSemitones,2);
+  assert.equal(activation.generation,2);
+  assert.equal(activation.sourceFrame,positionBeforeActivation,
+    "late activation preserves the fractional source position exactly");
+  assert.ok(Math.abs(p.timeline.state.sourceFrame-
+    (positionBeforeActivation+128*speed))<1e-7,
+    "the shared clock keeps its fractional phase across the setting edit");
+  assert.equal(p.statistics.missingFrames,0);
+});

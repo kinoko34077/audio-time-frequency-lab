@@ -415,7 +415,13 @@ export function createSourcePCMRenderer({
           const activationFrame=position>=segment.startFrame&&
             position<segment.endFrame?position:segment.startFrame;
           beginOutputTransition(output,i);
-          const activated=timeline.scrub(activationFrame,staged.speed);
+          // A staged edit often arrives after the source clock has crossed
+          // its boundary. Preserve its fractional sample position when it is
+          // already inside the replacement chunk; scrub() is intentionally
+          // integer-frame-only for user seeks and would throw here.
+          const activated=activationFrame===position?
+            timeline.setSpeed(staged.speed):
+            timeline.scrub(activationFrame,staged.speed);
           state=timeline.state;
           position=activated.sourceFrame;
           renderedGeneration=staged.generation;
