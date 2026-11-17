@@ -126,6 +126,101 @@ test("Rust engine 3 uses the shared PCM cursor and sounds distinct from PV",asyn
   }
 });
 
+test("Rust source-time startup and resets do not amplify the first overlap-add hop",async()=>{
+  const wasmBytes=await loadWasm();
+  const sampleRate=48000,sourceFrames=sampleRate;
+  const source=Float32Array.from({length:sourceFrames},(_,i)=>
+    .2*Math.sin(2*Math.PI*440*i/sampleRate));
+  const renderer=createSourcePCMRenderer({
+    sourceFrames,sourceSampleRate:sampleRate,outputSampleRate:sampleRate,
+    channelCount:1,speed:1,startFrame:sampleRate/2
+  });
+  renderer.installWindow(0,[source]);
+  const rust=createRustTimePitch({
+    wasmBytes,rustSettings:rustSettings(sampleRate),
+    sourceSampleRate:sampleRate,outputSampleRate:sampleRate,
+    channelCount:1,pitchSemitones:12
+  });
+  const block=new Float32Array(256),peaks=[];
+  const renderHop=()=>{
+    assert.equal(renderer.renderRust([block],rust),0);
+    return Math.max(...block.map(sample=>Math.abs(sample)));
+  };
+  try{
+    for(let hop=0;hop<32;hop++)peaks.push(renderHop());
+    const steadyPeak=Math.max(...peaks.slice(16));
+    assert.ok(peaks[0]<=steadyPeak*2,
+      "the first Rust hop must stay within 2x steady-state peak; measured "+
+      JSON.stringify({firstHopPeak:peaks[0],steadyPeak}));
+
+    renderer.timeline.seek(sampleRate*.7);
+    rust.reset();
+    const seekPeak=renderHop();
+    assert.ok(seekPeak<=steadyPeak*2,
+      "a seek reset must reprime Rust overlap history: "+
+      JSON.stringify({seekPeak,steadyPeak}));
+
+    renderer.timeline.setLoopBounds(sampleRate*.25,sampleRate*.35);
+    renderer.timeline.setLoopEnabled(true);
+    renderer.timeline.seek(sampleRate*.3);
+    rust.reset();
+    const loopPeak=renderHop();
+    assert.ok(loopPeak<=steadyPeak*2,
+      "an A/B reset must reprime Rust overlap history: "+
+      JSON.stringify({loopPeak,steadyPeak}));
+
+    renderer.timeline.setLoopEnabled(false);
+    renderer.timeline.seek(0);
+    rust.reset();
+    const clipStartPeak=renderHop();
+    assert.ok(clipStartPeak<=steadyPeak*2,
+      "source-boundary zero padding must not amplify Rust startup: "+
+      JSON.stringify({clipStartPeak,steadyPeak}));
+    assert.ok(clipStartPeak>steadyPeak*.8,
+      "priming at the clip start must retain its first audible samples: "+
+      JSON.stringify({clipStartPeak,steadyPeak}));
+    console.log("RUST_STARTUP_OVERLAP_MEASUREMENT "+JSON.stringify({
+      firstHopPeak:peaks[0],steadyPeak,seekResetFirstHopPeak:seekPeak,
+      loopResetFirstHopPeak:loopPeak,clipStartFirstHopPeak:clipStartPeak
+    }));
+  }finally{rust.dispose();}
+});
+
+test("Rust source-time overlap startup stays bounded when frozen or reversed",async()=>{
+  const wasmBytes=await loadWasm();
+  const sampleRate=48000,sourceFrames=sampleRate;
+  const source=Float32Array.from({length:sourceFrames},(_,i)=>
+    .2*Math.sin(2*Math.PI*440*i/sampleRate));
+  const measurements=[];
+  for(const speed of [0,-1]){
+    const renderer=createSourcePCMRenderer({
+      sourceFrames,sourceSampleRate:sampleRate,outputSampleRate:sampleRate,
+      channelCount:1,speed,startFrame:sampleRate/2
+    });
+    renderer.installWindow(0,[source]);
+    const rust=createRustTimePitch({
+      wasmBytes,rustSettings:rustSettings(sampleRate),
+      sourceSampleRate:sampleRate,outputSampleRate:sampleRate,
+      channelCount:1,pitchSemitones:12
+    });
+    const block=new Float32Array(256),peaks=[];
+    try{
+      for(let hop=0;hop<24;hop++){
+        assert.equal(renderer.renderRust([block],rust),0);
+        peaks.push(Math.max(...block.map(sample=>Math.abs(sample))));
+      }
+      const steadyPeak=Math.max(...peaks.slice(12));
+      assert.ok(steadyPeak>1e-3,
+        `${speed}x Rust source-time startup must emit real PCM`);
+      assert.ok(peaks[0]<=steadyPeak*2,
+        `${speed}x Rust startup first-hop spike: `+
+        JSON.stringify({firstHopPeak:peaks[0],steadyPeak}));
+      measurements.push({speed,firstHopPeak:peaks[0],steadyPeak});
+    }finally{rust.dispose();}
+  }
+  console.log("RUST_STARTUP_SIGNED_PCM "+JSON.stringify(measurements));
+});
+
 test("Rust source windows retain in-range PCM at both unlooped endpoints",async()=>{
   const wasmBytes=await loadWasm();
   const sourceRate=48000,sourceFrames=12000;
@@ -198,8 +293,10 @@ test("Rust analysis and probe windows follow the shared cursor at signed speeds"
         reads.length=0;
         const state=renderer.timeline.state;
         rust.render([block],state,read,sourceFrames,renderer.timeline.sourceFrameAt);
-        const inputReads=reads.filter((_,index)=>index%2===0);
-        const probeReads=reads.filter((_,index)=>index%2===1);
+        // Rust now consumes source-clock history to prime OLA before exposing
+        // audio. The final pair of windows belongs to this emitted hop.
+        const inputReads=reads.filter((_,index)=>index%2===0).slice(-windowFrames);
+        const probeReads=reads.filter((_,index)=>index%2===1).slice(-windowFrames);
         assert.deepEqual(inputReads,expected,
           `${speed}x hop ${hop} analysis window must begin at the shared cursor`);
         const probeStart=firstSample+direction*windowFrames/4;

@@ -75,16 +75,17 @@ export function createRustTimePitch({
       new Float32Array(output.buffer,output.byteOffset+channel*hopFrames*4,hopFrames));
     const last=new Float32Array(channelCount),fadeFrom=new Float32Array(channelCount);
     let pitch=pitchSemitones,pitchRatio=ratio,pitchRevision=0;
-    let outputFrames=0,nextStart=0,pendingIndex=hopFrames;
+    let outputFrames=0,nextStart=0,pendingIndex=hopFrames,primed=false;
     let fadeLeft=0,missingFirst=null,missingTotal=0;
     const fadeLength=128;
+    const primeFrames=Math.ceil((windowFrames-hopFrames)/hopFrames)*hopFrames;
 
     function beginTransition(){fadeFrom.set(last);fadeLeft=fadeLength;}
     function reset(){
       beginTransition();
       if(e.warp_stream_reset(stream)!==0)
         throw Error("Rust source-time stream reset failed");
-      outputFrames=0;nextStart=0;pendingIndex=hopFrames;
+      outputFrames=0;nextStart=0;pendingIndex=hopFrames;primed=false;
       for(const channel of hop)channel.fill(0);
     }
     function setPitch(semitones){
@@ -117,6 +118,33 @@ export function createRustTimePitch({
       }
       return x+(y-x)*fraction;
     }
+    function processWindow(outputStart,sourceOffset,state,read,
+        sourceFrames,sourceFrameAt,missing,allowOutside=false){
+      const direction=state.speed<0?-1:1;
+      const sourceStart=sourceFrameAt(sourceOffset,{allowOutside});
+      const sourceCenter=sourceStart===null?null:sourceStart+
+        (state.speed===0?0:direction*windowFrames/2);
+      input.fill(0);probe.fill(0);
+      if(sourceCenter!==null){
+        for(let channel=0;channel<channelCount;channel++){
+          const base=channel*windowFrames;
+          for(let sample=0;sample<windowFrames;sample++){
+            // Index zero represents the source position at the output-window
+            // start. Reverse the analysis window with transport; at 0x hold
+            // symmetric context around the shared frozen cursor.
+            const offset=direction*(sample-windowFrames/2);
+            input[base+sample]=sampleWindow(sourceCenter,offset,
+              read,sourceFrames,state,channel,missing);
+            probe[base+sample]=sampleWindow(sourceCenter+
+              direction*windowFrames/4,offset,read,sourceFrames,state,
+              channel,missing);
+          }
+        }
+      }
+      const code=e.warp_stream_process_source_window(stream,inputPtr,
+        probePtr,outputPtr,outputStart,hopFrames);
+      if(code!==0)throw Error("Rust source-time render returned "+code);
+    }
     function render(outputChannels,state,read,sourceFrames,sourceFrameAt){
       if(disposed||!Array.isArray(outputChannels)||
          outputChannels.length!==channelCount||
@@ -129,30 +157,19 @@ export function createRustTimePitch({
       const missing={first:null,total:0};
       for(let i=0;i<frames;i++){
         if(pendingIndex>=hopFrames){
-          const direction=state.speed<0?-1:1;
-          const sourceStart=sourceFrameAt(nextStart-outputFrames);
-          const sourceCenter=sourceStart===null?null:sourceStart+
-            (state.speed===0?0:direction*windowFrames/2);
-          input.fill(0);probe.fill(0);
-          if(sourceCenter!==null){
-            for(let channel=0;channel<channelCount;channel++){
-              const base=channel*windowFrames;
-              for(let sample=0;sample<windowFrames;sample++){
-                // Index zero represents the next source sample at the output
-                // cursor. Reverse the analysis window with reverse transport;
-                // at 0x hold a symmetric context around the frozen cursor.
-                const offset=direction*(sample-windowFrames/2);
-                input[base+sample]=sampleWindow(sourceCenter,offset,
-                  read,sourceFrames,state,channel,missing);
-                probe[base+sample]=sampleWindow(sourceCenter+
-                  direction*windowFrames/4,
-                  offset,read,sourceFrames,state,channel,missing);
-              }
+          if(!primed){
+            // Populate the existing engine-3 overlap history with the source
+            // windows preceding the current shared cursor. Their audio hops
+            // are discarded; the first exposed hop is emitted at primeFrames
+            // and reads sourceFrameAt(0), so transport remains sample-anchored.
+            for(let start=0;start<primeFrames;start+=hopFrames){
+              processWindow(start,start-primeFrames-outputFrames,state,read,
+                sourceFrames,sourceFrameAt,missing,true);
             }
+            nextStart=primeFrames;primed=true;
           }
-          const code=e.warp_stream_process_source_window(stream,inputPtr,
-            probePtr,outputPtr,nextStart,hopFrames);
-          if(code!==0)throw Error("Rust source-time render returned "+code);
+          processWindow(nextStart,nextStart-primeFrames-outputFrames,state,
+            read,sourceFrames,sourceFrameAt,missing);
           pendingIndex=0;nextStart+=hopFrames;
         }
         const mix=fadeLeft>0?fadeLeft/fadeLength:0;

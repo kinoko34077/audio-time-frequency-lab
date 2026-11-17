@@ -71,12 +71,15 @@ export function createSourceTimeline({
   reconcile();
   const api={
     get state(){return state();},
-    sourceFrameAt(outputOffset=0){
-      if(!frame(outputOffset))throw RangeError("invalid output-frame offset");
-      if(ended&&!loop)return null;
+    sourceFrameAt(outputOffset=0,{allowOutside=false}={}){
+      // Signed offsets are read-only look-ahead/look-behind queries against
+      // this same clock. advance() still accepts only rendered frame counts.
+      if(!Number.isSafeInteger(outputOffset)||typeof allowOutside!=="boolean")
+        throw RangeError("invalid output-frame offset");
+      if(ended&&!loop&&!allowOutside)return null;
       const p=position+delta(outputOffset);
       if(loop)return wrap(p,A,B);
-      return p>=0&&p<sourceFrames?p:null;
+      return allowOutside||p>=0&&p<sourceFrames?p:null;
     },
     sampleIndexAt(outputOffset=0){
       const p=api.sourceFrameAt(outputOffset);
