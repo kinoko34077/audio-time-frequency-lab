@@ -163,6 +163,54 @@ test("Rust source windows retain in-range PCM at both unlooped endpoints",async(
     "Rust must keep rendering the valid part of unlooped endpoint analysis windows");
 });
 
+test("Rust analysis and probe windows follow the shared cursor at signed speeds",async()=>{
+  const wasmBytes=await loadWasm();
+  const sampleRate=48000,sourceFrames=60000,startFrame=30000;
+  const source=Float32Array.from({length:sourceFrames},(_,i)=>{
+    const hz=i<20000?233:i<40000?587:997;
+    return .25*Math.sin(2*Math.PI*hz*i/sampleRate)+(i%997===0?.2:0);
+  });
+  const windowFrames=2048,hopFrames=256;
+  for(const speed of [1,8,-1,-8,0]){
+    const renderer=createSourcePCMRenderer({
+      sourceFrames,sourceSampleRate:sampleRate,outputSampleRate:sampleRate,
+      channelCount:1,speed,startFrame
+    });
+    const rust=createRustTimePitch({
+      wasmBytes,rustSettings:rustSettings(sampleRate),
+      sourceSampleRate:sampleRate,outputSampleRate:sampleRate,channelCount:1,
+      pitchSemitones:5
+    });
+    const direction=speed<0?-1:1;
+    const block=new Float32Array(256),reads=[];
+    const read=(channel,index)=>{
+      assert.equal(channel,0);
+      reads.push(index);
+      return source[index];
+    };
+    const sourceWindow=(start,step,count)=>
+      Array.from({length:count},(_,i)=>start+step*i);
+    try{
+      for(let hop=0;hop<2;hop++){
+        const cursor=renderer.timeline.state.sourceFrame;
+        const firstSample=speed===0?cursor-windowFrames/2:cursor;
+        const expected=sourceWindow(firstSample,direction,windowFrames);
+        reads.length=0;
+        const state=renderer.timeline.state;
+        rust.render([block],state,read,sourceFrames,renderer.timeline.sourceFrameAt);
+        const inputReads=reads.filter((_,index)=>index%2===0);
+        const probeReads=reads.filter((_,index)=>index%2===1);
+        assert.deepEqual(inputReads,expected,
+          `${speed}x hop ${hop} analysis window must begin at the shared cursor`);
+        const probeStart=firstSample+direction*windowFrames/4;
+        assert.deepEqual(probeReads,sourceWindow(probeStart,direction,windowFrames),
+          `${speed}x hop ${hop} probe must follow the same signed source direction`);
+        renderer.timeline.advance(hopFrames);
+      }
+    }finally{rust.dispose();}
+  }
+});
+
 test("Rust analysis windows read across short A/B loops as one periodic source",async()=>{
   const wasmBytes=await loadWasm();
   const sourceRate=44100,outputRate=48000,sourceFrames=sourceRate;

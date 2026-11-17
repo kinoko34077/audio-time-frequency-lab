@@ -2527,9 +2527,9 @@ function labRefresh(){
     "このモデルは0/逆再生・サンプル単位A/B・スクラブ対応。再生/モデルの両タブが同じ設定値です。":
     (cap.reason||"研究モデルは0.5〜2倍のみ対応。A/B・0/逆再生・即時スクラブ非対応（元のA/B設定は保持）。");
   if(!state.player?.labStream)labStatusText(!cap.supported?
-    "未適用: "+cap.reason:isPCMModel(lab.mode)?
-    lab.mode.toUpperCase()+" · 主再生・選択モデル一致":lab.mode==="live"?
+    "未適用: "+cap.reason:lab.mode==="live"?
     "Rust/WASMの部分音処理 · 選択時に主再生へ適用":
+    isPCMModel(lab.mode)?lab.mode.toUpperCase()+" · 主再生・選択モデル一致":
     (lab.individual?"個別波長＋":"")+lab.mode.toUpperCase()+" · 自動先読み処理。実音切替はバッファ待ちあり");
 }
 function labInvalidate(){lab.job++;lab.worker?.terminate();lab.worker=null;lab.processed=null;}

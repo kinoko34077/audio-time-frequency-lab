@@ -129,23 +129,23 @@ export function createRustTimePitch({
       const missing={first:null,total:0};
       for(let i=0;i<frames;i++){
         if(pendingIndex>=hopFrames){
-          let sourceCenter=sourceFrameAt(nextStart+windowFrames/2-outputFrames);
-          if(sourceCenter===null&&!state.loopEnabled){
-            // The render window can extend past a clip boundary while its
-            // output hop is still in range. Anchor at the nearest endpoint;
-            // sampleWindow zero-pads only the out-of-range part of each window.
-            sourceCenter=state.speed<0?0:state.speed>0?sourceFrames-1:
-              Math.max(0,Math.min(sourceFrames-1,state.sourceFrame));
-          }
+          const direction=state.speed<0?-1:1;
+          const sourceStart=sourceFrameAt(nextStart-outputFrames);
+          const sourceCenter=sourceStart===null?null:sourceStart+
+            (state.speed===0?0:direction*windowFrames/2);
           input.fill(0);probe.fill(0);
           if(sourceCenter!==null){
             for(let channel=0;channel<channelCount;channel++){
               const base=channel*windowFrames;
               for(let sample=0;sample<windowFrames;sample++){
-                const offset=sample-windowFrames/2;
+                // Index zero represents the next source sample at the output
+                // cursor. Reverse the analysis window with reverse transport;
+                // at 0x hold a symmetric context around the frozen cursor.
+                const offset=direction*(sample-windowFrames/2);
                 input[base+sample]=sampleWindow(sourceCenter,offset,
                   read,sourceFrames,state,channel,missing);
-                probe[base+sample]=sampleWindow(sourceCenter+windowFrames/4,
+                probe[base+sample]=sampleWindow(sourceCenter+
+                  direction*windowFrames/4,
                   offset,read,sourceFrames,state,channel,missing);
               }
             }
