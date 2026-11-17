@@ -155,7 +155,8 @@ export async function createSourcePCMBridge({
       rustReadyReject?.(Error(data.message));rustReadyResolve=null;rustReadyReject=null;
     }else if(data.type==="command-accepted"||
              data.type==="rendered-chunk-accepted"||
-             data.type==="worker-state-accepted"||data.type==="error"){
+             data.type==="worker-state-accepted"||
+             data.type==="worker-state-staged"||data.type==="error"){
       const ticket=pending.get(data.requestId);
       if(ticket){
         pending.delete(data.requestId);
@@ -305,6 +306,17 @@ export async function createSourcePCMBridge({
         return Promise.reject(RangeError("invalid legacy Worker playback state"));
       currentSpeed=nextSpeed;
       return submit({type:"worker-state",frame,speed:nextSpeed,
+        pitchSemitones:nextPitch,generation});
+    },
+    stageWorkerPlayback({speed:nextSpeed,pitchSemitones:nextPitch,
+      generation}={}){
+      if(processingMode!=="worker")
+        return Promise.reject(Error("staged playback requires Worker processing mode"));
+      if(!Number.isFinite(nextSpeed)||nextSpeed<.5||nextSpeed>2||
+         !Number.isFinite(nextPitch)||nextPitch<-12||nextPitch>12||
+         !Number.isSafeInteger(generation)||generation<1)
+        return Promise.reject(RangeError("invalid staged legacy Worker playback state"));
+      return submit({type:"worker-stage",speed:nextSpeed,
         pitchSemitones:nextPitch,generation});
     },
     get latest(){return latest;},

@@ -2,6 +2,7 @@
 // The existing model DSP renders bounded chunks in a module Worker. Its PCM
 // feeds the persistent source-time Worklet, which alone advances playback.
 import {createSourcePCMBridge} from "./source-pcm-bridge.mjs";
+import {RENDERED_CHUNK_SLOTS} from "./source-pcm-renderer.mjs";
 export const CHUNK_SECONDS=1.5;
 export function planChunk({totalFrames,sampleRate,speed,startSeconds,startFrame=null,model='dual',fftSize=2048,shortFftSize=512,longFftSize=fftSize,referenceWindows=8,jointBackend=null}){
   if(!(totalFrames>0&&sampleRate>0&&speed>0))throw RangeError('invalid source range');
@@ -34,19 +35,41 @@ export async function createModelStream({ctx,sourceChannels,sampleRate,speed,sem
      !Number.isFinite(speed)||speed<.5||speed>2||
      !Number.isFinite(semitones)||semitones<-12||semitones>12)
     throw RangeError("legacy Worker supports positive 0.5..2x and -12..12 semitones");
-  let stopped=false,started=false,pending=false,job=0,generation=0;
+  let stopped=false,started=false,pending=false,staging=false,job=0;
+  let handoffWorker=null,handoffPending=false,handoffInstalling=false;
+  let handoffJobId=0,handoffGeneration=null,handoffResult=null;
+  let handoffUnavailableGeneration=null;
+  let generation=0,activeGeneration=0,stagedGeneration=null;
   let bufferedSegments=0,lastMissingFrames=0,latestFrame=0,appliedRevision=0;
-  let cursorFrame=0,activeJob=0,activeJobGeneration=0;
+  let cursorFrame=0,sequenceCursor=0,activeJob=0,activeJobGeneration=0;
+  let activeJobConfig=null,activeJobSequence=0;
   let config={speed,semitones,model,fftSize,shortFftSize,longFftSize,
     referenceWindows,periodCycles,jointBackend};
+  let activeConfig=config;
+  const configs=new Map([[0,config]]),transitionWaiters=new Map();
   const initial=Math.min(totalFrames-1,Math.max(0,
     Math.floor((((startSeconds%duration)+duration)%duration)*sampleRate)));
   cursorFrame=latestFrame=initial;
   const worker=new Worker('./lab-processor.worker.mjs',{type:'module'});
   let bridge=null,master=null;
+  const resolveTransition=(id,value)=>{
+    const waiter=transitionWaiters.get(id);
+    if(!waiter)return;
+    transitionWaiters.delete(id);waiter.resolve(value);
+  };
+  const rejectTransitions=error=>{
+    for(const waiter of transitionWaiters.values())waiter.reject(error);
+    transitionWaiters.clear();
+  };
+  const cancelHandoff=()=>{
+    try{handoffWorker?.terminate();}catch{}
+    handoffWorker=null;handoffPending=false;handoffJobId=0;
+    handoffGeneration=null;handoffResult=null;
+  };
   const cleanup=()=>{
     if(stopped)return;
-    stopped=true;worker.terminate();
+    stopped=true;worker.terminate();cancelHandoff();
+    rejectTransitions(Error("model stream stopped"));
     try{bridge?.dispose();}catch{}
     try{master?.disconnect();}catch{}
   };
@@ -54,17 +77,14 @@ export async function createModelStream({ctx,sourceChannels,sampleRate,speed,sem
     if(stopped)return;
     onFailure(message||"Worker処理失敗");cleanup();
   };
-  const pump=()=>{
-    if(stopped||pending||bufferedSegments>=2)return;
-    const activeConfig=config,activeGeneration=generation;
+  const prepareChunk=(jobConfig,startFrame,sequence)=>{
     const plan=planChunk({totalFrames,sampleRate,
-      speed:activeConfig.speed,startSeconds:cursorFrame/sampleRate,
-      startFrame:cursorFrame,
-      model:activeConfig.model,fftSize:activeConfig.fftSize,
-      shortFftSize:activeConfig.shortFftSize,
-      longFftSize:activeConfig.longFftSize,
-      referenceWindows:activeConfig.referenceWindows,
-      jointBackend:activeConfig.jointBackend});
+      speed:jobConfig.speed,startSeconds:startFrame/sampleRate,
+      startFrame,model:jobConfig.model,fftSize:jobConfig.fftSize,
+      shortFftSize:jobConfig.shortFftSize,
+      longFftSize:jobConfig.longFftSize,
+      referenceWindows:jobConfig.referenceWindows,
+      jointBackend:jobConfig.jointBackend});
     const channels=sourceChannels.map(ch=>{
       const core=ch.slice(plan.from,plan.to);
       if(!plan.wrapRight)return core;
@@ -72,23 +92,149 @@ export async function createModelStream({ctx,sourceChannels,sampleRate,speed,sem
       const input=new Float32Array(core.length+wrapped.length);
       input.set(core);input.set(wrapped,core.length);return input;
     });
-    pending=true;activeJob=++job;activeJobGeneration=activeGeneration;
+    return {plan,channels,sequence};
+  };
+  const installHandoffResult=async()=>{
+    const result=handoffResult;handoffResult=null;
+    if(!result)return;
+    if(stopped||result.generation!==generation){
+      resolveTransition(result.generation,{stale:true});return;
+    }
+    const {plan}=result;
+    const accepted=await bridge.pushRenderedChunk({
+      generation:result.generation,sequence:result.sequence,
+      startFrame:plan.start,
+      endFrame:plan.start+plan.core,speed:result.config.speed,
+      coreFrames:plan.coreFrames,channels:result.channels});
+    if(stopped)return;
+    if(result.generation!==generation){
+      resolveTransition(result.generation,{stale:true});return;
+    }
+    if(accepted.stale){stagedGeneration=null;return;}
+    bufferedSegments=accepted.bufferedSegments;
+    sequenceCursor=result.sequence+1;
+    cursorFrame=plan.start+plan.core>=totalFrames?0:plan.start+plan.core;
+  };
+  const startHandoffJob=(targetGeneration,targetConfig,startFrame,sequence)=>{
+    const taskJob=++job;
+    let nextWorker;
+    try{nextWorker=new Worker('./lab-processor.worker.mjs',{type:'module'});}
+    catch{
+      handoffUnavailableGeneration=targetGeneration;
+      stagedGeneration=null;
+      onStatus('並行Workerを準備できず、旧PCM境界で切替を続行');
+      return;
+    }
+    const {plan,channels}=prepareChunk(targetConfig,startFrame,sequence);
+    handoffWorker=nextWorker;handoffPending=true;
+    handoffJobId=taskJob;handoffGeneration=targetGeneration;
+    const fallback=()=>{
+      if(stopped||handoffJobId!==taskJob)return;
+      handoffPending=false;handoffWorker=null;handoffJobId=0;
+      handoffGeneration=null;handoffUnavailableGeneration=targetGeneration;
+      stagedGeneration=null;
+      try{nextWorker.terminate();}catch{}
+      onStatus('並行Workerを準備できず、旧PCM境界で切替を続行');
+      if(!pending)pump();
+    };
+    nextWorker.onerror=fallback;
+    nextWorker.onmessage=({data})=>{
+      if(stopped||data.job!==taskJob||handoffJobId!==taskJob)return;
+      handoffPending=false;handoffWorker=null;handoffJobId=0;
+      handoffGeneration=null;
+      try{nextWorker.terminate();}catch{}
+      if(data.generation!==targetGeneration||targetGeneration!==generation){
+        resolveTransition(targetGeneration,{stale:true});pump();return;
+      }
+      if(!data.ok){fallback();return;}
+      handoffUnavailableGeneration=null;
+      handoffResult={generation:targetGeneration,config:targetConfig,
+        plan,sequence,channels:data.channels};
+      pump();
+    };
+    try{nextWorker.postMessage({job:taskJob,generation:targetGeneration,
+      channels,sampleRate,speed:targetConfig.speed,
+      semitones:targetConfig.semitones,model:targetConfig.model,
+      fftSize:targetConfig.fftSize,shortFftSize:targetConfig.shortFftSize,
+      longFftSize:targetConfig.longFftSize,
+      referenceWindows:targetConfig.referenceWindows,
+      periodCycles:targetConfig.periodCycles,
+      jointBackend:targetConfig.jointBackend,plan},channels.map(ch=>ch.buffer));}
+    catch{fallback();}
+  };
+  const pump=()=>{
+    if(stopped||staging||handoffInstalling)return;
+    if(handoffResult&&!pending){
+      handoffInstalling=true;
+      void installHandoffResult().catch(error=>fail(error.message))
+        .finally(()=>{handoffInstalling=false;pump();});
+      return;
+    }
+    const requestedGeneration=generation,requestedConfig=config;
+    const transitioning=requestedGeneration!==activeGeneration;
+    if(transitioning&&stagedGeneration!==requestedGeneration){
+      staging=true;
+      onStatus('設定を切替中 · 現在のPCMを再生しながら次の世代を準備中');
+      void bridge.stageWorkerPlayback({speed:requestedConfig.speed,
+        pitchSemitones:requestedConfig.semitones,
+        generation:requestedGeneration}).then(accepted=>{
+        if(stopped)return;
+        if(requestedGeneration!==generation){
+          resolveTransition(requestedGeneration,{stale:true});return;
+        }
+        stagedGeneration=requestedGeneration;
+        cursorFrame=accepted.sourceFrame;
+        sequenceCursor=accepted.sequence;
+        bufferedSegments=accepted.bufferedSegments??bufferedSegments;
+        if(pending&&handoffUnavailableGeneration!==requestedGeneration)
+          startHandoffJob(requestedGeneration,requestedConfig,
+            accepted.sourceFrame,accepted.sequence);
+      }).catch(error=>{
+        if(requestedGeneration===generation){
+          const waiter=transitionWaiters.get(requestedGeneration);
+          if(waiter){transitionWaiters.delete(requestedGeneration);waiter.reject(error);}
+          fail(error.message);
+        }else resolveTransition(requestedGeneration,{stale:true});
+      }).finally(()=>{staging=false;pump();});
+      return;
+    }
+    if(pending||handoffPending)return;
+    const bufferLimit=RENDERED_CHUNK_SLOTS;
+    if(bufferedSegments>=bufferLimit)return;
+    const jobConfig=requestedConfig,jobGeneration=requestedGeneration;
+    const {plan,channels,sequence}=prepareChunk(jobConfig,cursorFrame,
+      sequenceCursor++);
+    pending=true;activeJob=++job;activeJobGeneration=jobGeneration;
+    activeJobConfig=jobConfig;activeJobSequence=sequence;
     onStatus(lastMissingFrames>0?
       'Worker処理が再生時計に遅れ、実際の欠落PCMを記録しました':
       started?'次の区間をWorkerで処理中':'モデルの先頭区間を準備中…');
-    try{worker.postMessage({job:activeJob,generation:activeGeneration,
-      channels,sampleRate,speed:activeConfig.speed,
-      semitones:activeConfig.semitones,model:activeConfig.model,
-      fftSize:activeConfig.fftSize,shortFftSize:activeConfig.shortFftSize,
-      longFftSize:activeConfig.longFftSize,
-      referenceWindows:activeConfig.referenceWindows,
-      periodCycles:activeConfig.periodCycles,
-      jointBackend:activeConfig.jointBackend,plan},channels.map(ch=>ch.buffer));}
+    try{worker.postMessage({job:activeJob,generation:jobGeneration,
+      channels,sampleRate,speed:jobConfig.speed,
+      semitones:jobConfig.semitones,model:jobConfig.model,
+      fftSize:jobConfig.fftSize,shortFftSize:jobConfig.shortFftSize,
+      longFftSize:jobConfig.longFftSize,
+      referenceWindows:jobConfig.referenceWindows,
+      periodCycles:jobConfig.periodCycles,
+      jointBackend:jobConfig.jointBackend,plan},channels.map(ch=>ch.buffer));}
     catch(error){pending=false;fail(error.message);}
   };
   const onBridgeEvent=data=>{
-    if(data.type==="progress"){
-      if(data.workerGeneration===generation&&
+    if(data.type==="worker-state-activated"){
+      if(data.generation>=activeGeneration){
+        activeGeneration=data.generation;stagedGeneration=null;
+        activeConfig=configs.get(activeGeneration)||activeConfig;
+        latestFrame=data.sourceFrame;appliedRevision=data.revision;
+        for(const key of configs.keys())
+          if(key!==activeGeneration&&key!==generation)configs.delete(key);
+        onStatus(activeGeneration===generation?
+          'モデル設定を切替 · 共通PCM音源時計':
+          '次のモデル設定を準備中 · 共通PCM音源時計を継続');
+        resolveTransition(activeGeneration,data);
+        pump();
+      }
+    }else if(data.type==="progress"){
+      if(data.workerGeneration===activeGeneration&&
          Number.isFinite(data.sourceFrame)&&data.sourceFrame>=0&&
          data.sourceFrame<totalFrames&&data.revision>=appliedRevision)
         latestFrame=data.sourceFrame;
@@ -101,12 +247,11 @@ export async function createModelStream({ctx,sourceChannels,sampleRate,speed,sem
       }
       pump();
     }else if(data.type==="worker-state-accepted"&&
-             data.generation===generation){
+             data.generation===activeGeneration){
       latestFrame=data.sourceFrame;appliedRevision=data.revision;
       bufferedSegments=data.bufferedSegments??0;
       pump();
-    }else if(data.type==="rendered-chunk-accepted"&&
-             data.generation===generation){
+    }else if(data.type==="rendered-chunk-accepted"){
       bufferedSegments=data.bufferedSegments??bufferedSegments;
     }else if(data.type==="fatal-error")fail(data.message);
   };
@@ -120,19 +265,27 @@ export async function createModelStream({ctx,sourceChannels,sampleRate,speed,sem
   }catch(error){worker.terminate();try{master?.disconnect();}catch{}throw error;}
   worker.onmessage=async({data})=>{
     if(stopped||data.job!==activeJob)return;
-    if(data.generation!==generation||
-       activeJobGeneration!==generation){pending=false;pump();return;}
+    const resultGeneration=activeJobGeneration,resultConfig=activeJobConfig;
+    if(data.generation!==resultGeneration){pending=false;pump();return;}
+    if(resultGeneration!==activeGeneration&&resultGeneration!==generation){
+      pending=false;pump();return;
+    }
     if(!data.ok){pending=false;fail(data.message||'DSP処理失敗');return;}
     const plan=data.plan;
     try{
       const accepted=await bridge.pushRenderedChunk({
-        generation:data.generation,startFrame:plan.start,
-        endFrame:plan.start+plan.core,speed:config.speed,
+        generation:resultGeneration,sequence:activeJobSequence,
+        startFrame:plan.start,
+        endFrame:plan.start+plan.core,speed:resultConfig.speed,
         coreFrames:plan.coreFrames,channels:data.channels});
       if(stopped)return;
-      if(data.generation!==generation){pending=false;pump();return;}
       if(accepted.stale){pending=false;pump();return;}
+      if(resultGeneration!==activeGeneration&&resultGeneration!==generation){
+        pending=false;pump();return;
+      }
       bufferedSegments=accepted.bufferedSegments;
+      if(resultGeneration===generation)
+        sequenceCursor=Math.max(sequenceCursor,activeJobSequence+1);
       cursorFrame=plan.start+plan.core>=totalFrames?0:plan.start+plan.core;
       pending=false;
       if(!started){
@@ -145,10 +298,15 @@ export async function createModelStream({ctx,sourceChannels,sampleRate,speed,sem
         onStatus('モデル音声を再生中 · 共通PCM音源時計');
       }
       pump();
-    }catch(error){pending=false;fail(error.message);}
+    }catch(error){
+      pending=false;
+      if(resultGeneration===activeGeneration||resultGeneration===generation)
+        fail(error.message);
+      else pump();
+    }
   };
   worker.onerror=event=>{if(!stopped)fail(event.message||'Worker起動失敗');};
-  const reset=async(frame,nextConfig)=>{
+  const validateNext=(frame,nextConfig)=>{
     if(stopped)throw Error("model stream stopped");
     if(!Number.isSafeInteger(frame)||frame<0||frame>=totalFrames)
       throw RangeError("invalid Worker source frame");
@@ -162,7 +320,15 @@ export async function createModelStream({ctx,sourceChannels,sampleRate,speed,sem
       model:next.model,fftSize:next.fftSize,
       shortFftSize:next.shortFftSize,longFftSize:next.longFftSize,
       referenceWindows:next.referenceWindows,jointBackend:next.jointBackend});
-    config=next;generation++;cursorFrame=latestFrame=frame;
+    return next;
+  };
+  const reset=async(frame,nextConfig)=>{
+    const next=validateNext(frame,nextConfig);
+    for(const id of [...transitionWaiters.keys()])
+      resolveTransition(id,{stale:true});
+    config=activeConfig=next;generation++;activeGeneration=generation;
+    configs.clear();configs.set(generation,next);
+    stagedGeneration=null;cursorFrame=latestFrame=frame;sequenceCursor=0;
     bufferedSegments=0;lastMissingFrames=0;
     const requestedGeneration=generation;
     const accepted=await bridge.resetWorkerPlayback({frame,speed:next.speed,
@@ -173,13 +339,30 @@ export async function createModelStream({ctx,sourceChannels,sampleRate,speed,sem
     }
     return accepted;
   };
+  const stageSettings=({frame,speed,semitones,...settings}={})=>{
+    const targetFrame=frame??latestFrame;
+    // Validate against the caller's source position, but the audible source
+    // clock chooses the next safe retained-PCM boundary for activation.
+    const next=validateNext(targetFrame,{...settings,
+      speed:speed??config.speed,semitones:semitones??config.semitones});
+    for(const id of [...transitionWaiters.keys()])
+      resolveTransition(id,{stale:true});
+    config=next;generation++;
+    configs.set(generation,next);
+    for(const key of configs.keys())
+      if(key!==activeGeneration&&key!==generation)configs.delete(key);
+    lastMissingFrames=0;
+    const requestedGeneration=generation;
+    onStatus('設定を切替中 · 現在のPCMを継続再生');
+    const promise=new Promise((resolve,reject)=>
+      transitionWaiters.set(requestedGeneration,{resolve,reject}));
+    pump();
+    return promise;
+  };
   return {master,start(){pump();},stop:cleanup,
     sourcePositionAt(){return latestFrame/sampleRate;},
     seek(frame){return reset(frame,{});},
-    updateSettings({frame,speed,semitones,...settings}={}){
-      return reset(frame,{...settings,
-        speed:speed??config.speed,semitones:semitones??config.semitones});
-    },
+    updateSettings:stageSettings,
     get active(){return !stopped},get firstScheduled(){return started},
     get bufferedSegments(){return bufferedSegments}};
 }

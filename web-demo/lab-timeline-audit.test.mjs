@@ -92,6 +92,8 @@ test('legacy Worker PCM is rendered by one shared Worklet source clock',async()=
   workers[0].flush();await settle();await settle();
   assert.equal(stream.firstScheduled,true);
   assert.equal(stream.bufferedSegments,2);
+  assert.deepEqual(worklets[0].segments.map(segment=>segment.sequence),[0,1],
+    "Worker PCM chunks receive ordered identities on the shared source clock");
   worklets[0].advance(16000);await settle();
   assert.ok(Math.abs(stream.sourcePositionAt()-4.75)<1e-6,
     "playhead follows Worklet source frames rather than wall time");
@@ -100,9 +102,18 @@ test('legacy Worker PCM is rendered by one shared Worklet source clock',async()=
   assert.equal(worklets.length,1,"seek reuses the same Worklet");
   assert.ok(worklets[0].port.messages.some(m=>m.type==="worker-state"&&
     m.frame===88000&&m.generation===1));
-  const newestRequest=workers[0].requests.at(-1);
+  let newestRequest=workers[0].requests.at(-1);
+  if(newestRequest.generation!==1){
+    assert.equal(newestRequest.generation,0,
+      "a seek may finish an already-running old-generation DSP job first");
+    workers[0].flush();await settle();await settle();
+    newestRequest=workers[0].requests.at(-1);
+  }
   assert.equal(newestRequest.generation,1);
   assert.equal(newestRequest.plan.start,88000);
+  workers[0].flush();await settle();await settle();
+  assert.equal(worklets[0].segments.at(-1).sequence,0,
+    "an immediate seek starts a fresh ordered PCM queue generation");
  }finally{stream?.stop();globalThis.Worker=OriginalWorker;
   globalThis.AudioWorkletNode=OriginalWorklet;}
 });

@@ -72,10 +72,28 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
           const bufferedSegments=this.renderer.installRenderedChunk(m);
           this.port.postMessage({type:"rendered-chunk-accepted",
             requestId:m.requestId,generation:m.generation,
+            sequence:m.sequence,
             startFrame:m.startFrame,endFrame:m.endFrame,speed:m.speed,
             coreFrames:m.coreFrames,outputFrames:m.channels?.[0]?.length,
             stale:bufferedSegments===false,
             bufferedSegments:this.renderer.statistics.renderedChunkCount});
+          return;
+        }
+        if(m.type==="worker-stage"){
+          if(this.processingMode!=="worker"||
+             !Number.isSafeInteger(m.generation)||
+             m.generation<=this.workerGeneration)
+            throw RangeError("invalid staged legacy Worker playback state");
+          const staged=this.renderer.stageRenderedState({
+            generation:m.generation,speed:m.speed,
+            pitchSemitones:m.pitchSemitones
+          });
+          this.port.postMessage({type:"worker-state-staged",
+            requestId:m.requestId,generation:m.generation,
+            sourceFrame:staged.sourceFrame,sequence:staged.sequence,
+            speed:m.speed,
+            pitchSemitones:m.pitchSemitones,
+            bufferedSegments:staged.bufferedSegments});
           return;
         }
         if(m.type==="worker-state"){
@@ -87,7 +105,9 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
              !Number.isSafeInteger(m.generation)||
              m.generation<=this.workerGeneration)
             throw RangeError("invalid legacy Worker playback state");
-          this.renderer.resetRenderedChunks(m.generation);
+          this.renderer.resetRenderedChunks(m.generation,{
+            speed:m.speed,pitchSemitones:m.pitchSemitones
+          });
           const st=this.renderer.timeline.scrub(m.frame,m.speed);
           this.workerGeneration=m.generation;
           this.workerPitchSemitones=m.pitchSemitones;
@@ -319,6 +339,14 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
       this.renderer.renderRust(out,this.synth):
       this.synth?this.renderer.renderGranular(out,this.synth):
       this.renderer.render(out);
+    const workerActivation=this.processingMode==="worker"?
+      this.renderer.takeWorkerActivation():null;
+    if(workerActivation){
+      this.workerGeneration=workerActivation.generation;
+      this.workerPitchSemitones=workerActivation.pitchSemitones;
+      this.port.postMessage({type:"worker-state-activated",
+        ...workerActivation});
+    }
     this.emitRenderReceipt(sourceFrame,missing);
     this.blocks++;
     // Host window cache refill is outside the audio callback and never

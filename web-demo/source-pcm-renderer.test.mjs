@@ -153,6 +153,117 @@ test("Worker PCM queue is generation-scoped and bounded",()=>{
   assert.equal(p.statistics.renderedChunkCount,3);
 });
 
+test("staged Worker settings keep queued PCM and switch the shared clock at the boundary",()=>{
+  const p=createSourcePCMRenderer({sourceFrames:32,sourceSampleRate:4,
+    outputSampleRate:4,channelCount:1,speed:1,startFrame:0});
+  p.installRenderedChunk({generation:0,startFrame:0,endFrame:4,
+    speed:1,coreFrames:4,channels:[Float32Array.from([1,1,1,1,1,1])]});
+  assert.equal(typeof p.stageRenderedState,"function",
+    "Worker settings must be staged separately from an immediate seek reset");
+  assert.deepEqual(p.stageRenderedState({generation:1,speed:2,
+    pitchSemitones:5}),{sourceFrame:4,sequence:1,bufferedSegments:1},
+    "the current old chunk remains audible while the new generation prepares");
+  assert.equal(p.installRenderedChunk({generation:1,startFrame:4,endFrame:8,
+    speed:2,coreFrames:2,channels:[Float32Array.from([2,2,2,2])]}),2);
+  const output=[new Float32Array(6)];
+  assert.equal(p.renderBuffered(output),0,
+    "contiguous staged PCM must not create missing output frames");
+  assert.equal(p.workerState.generation,1);
+  assert.equal(p.workerState.pitchSemitones,5);
+  assert.equal(p.timeline.state.speed,2,
+    "the shared source clock applies the new speed at the staged boundary");
+  assert.equal(p.timeline.state.sourceFrame,8);
+});
+
+test("staged Worker settings trim queued tail to the active chunk boundary",()=>{
+  const p=createSourcePCMRenderer({sourceFrames:32,sourceSampleRate:4,
+    outputSampleRate:4,channelCount:1,speed:1,startFrame:0});
+  const chunk=(generation,start,value,speed=1,coreFrames=4)=>({
+    generation,startFrame:start,endFrame:start+4,speed,coreFrames,
+    channels:[new Float32Array(coreFrames+2).fill(value)]
+  });
+  p.installRenderedChunk(chunk(0,0,1));
+  p.installRenderedChunk(chunk(0,4,9));
+  p.installRenderedChunk(chunk(0,8,9));
+  const first=[new Float32Array(2)];
+  assert.equal(p.renderBuffered(first),0);
+  assert.deepEqual(Array.from(first[0]),[1,1]);
+
+  const staged=p.stageRenderedState({generation:1,speed:2,pitchSemitones:5});
+  assert.deepEqual(staged,{sourceFrame:8,sequence:2,bufferedSegments:2},
+    "retain the active and one following PCM chunk, then stage before the old queue tail");
+  assert.equal(p.installRenderedChunk(chunk(1,8,2,2,2)),3);
+  const output=[new Float32Array(8)];
+  assert.equal(p.renderBuffered(output),0);
+  assert.deepEqual(Array.from(output[0].slice(0,7)),[1,1,1,9,9,9,9],
+    "the staged generation must begin after retained PCM without replacing its tail early");
+  assert.ok(output[0][7]<9&&output[0][7]>8.9,
+    "the in-quantum transition fade must start from the immediately preceding output sample");
+  assert.equal(p.workerState.generation,1);
+  assert.equal(p.timeline.state.speed,2);
+  assert.equal(p.timeline.state.sourceFrame,12);
+  assert.equal(p.statistics.missingFrames,0);
+  assert.equal(p.installRenderedChunk(chunk(1,12,3,2,2)),2,
+    "later chunks in the staged generation remain contiguous after its first chunk");
+});
+
+test("staged Worker PCM replaces the matching old fallback without rewinding source time",()=>{
+  const p=createSourcePCMRenderer({sourceFrames:16,sourceSampleRate:4,
+    outputSampleRate:4,channelCount:1,speed:1,startFrame:0});
+  const chunk=(generation,start,end,value)=>({generation,startFrame:start,
+    endFrame:end,speed:1,coreFrames:end-start,
+    channels:[new Float32Array(end-start).fill(value)]});
+  p.installRenderedChunk(chunk(0,0,4,1));
+  const beforeStage=[new Float32Array(4)];
+  assert.equal(p.renderBuffered(beforeStage),0);
+  assert.equal(p.timeline.state.sourceFrame,4);
+  assert.deepEqual(p.stageRenderedState({generation:1,speed:1,
+    pitchSemitones:0}),{sourceFrame:4,sequence:1,bufferedSegments:1});
+  p.installRenderedChunk(chunk(0,4,8,9));
+  const fallback=[new Float32Array(2)];
+  assert.equal(p.renderBuffered(fallback),0);
+  assert.deepEqual(Array.from(fallback[0]),[9,9]);
+  assert.equal(p.timeline.state.sourceFrame,6);
+  assert.equal(p.installRenderedChunk(chunk(1,4,8,2)),1,
+    "the staged chunk replaces, rather than queues behind, its old fallback");
+  const switched=[new Float32Array(2)];
+  assert.equal(p.renderBuffered(switched),0);
+  assert.equal(switched[0][0],9,
+    "the existing short transition fade starts from the last old-model PCM");
+  assert.ok(switched[0][1]<9&&switched[0][1]>8.9,
+    "the staged PCM blends in without a discontinuous sample jump");
+  assert.equal(p.workerState.generation,1);
+  assert.equal(p.timeline.state.sourceFrame,8,
+    "late staged PCM activates at the current source frame without replay");
+  assert.equal(p.takeWorkerActivation().sourceFrame,6);
+  assert.equal(p.statistics.missingFrames,0);
+});
+
+test("staged Worker replacement follows queue order when a full-track source range repeats",()=>{
+  const p=createSourcePCMRenderer({sourceFrames:8,sourceSampleRate:1,
+    outputSampleRate:1,channelCount:1,speed:1,startFrame:0,
+    loopStartFrame:0,loopEndFrame:8,loopEnabled:true});
+  const chunk=(generation,sequence,start,end,value)=>({generation,sequence,
+    startFrame:start,endFrame:end,speed:1,coreFrames:end-start,
+    channels:[new Float32Array(end-start).fill(value)]});
+  p.installRenderedChunk(chunk(0,0,0,4,1));
+  p.installRenderedChunk(chunk(0,1,4,8,9));
+  p.installRenderedChunk(chunk(0,2,0,4,7));
+  const staged=p.stageRenderedState({generation:1,speed:1,pitchSemitones:0});
+  assert.deepEqual(staged,{sourceFrame:0,sequence:2,bufferedSegments:2});
+  assert.equal(p.installRenderedChunk(chunk(0,2,0,4,7)),3,
+    "the in-flight old Worker result fills the staged queue occurrence");
+  assert.equal(p.installRenderedChunk(chunk(1,2,0,4,2)),3,
+    "replace the old fallback at the staged loop occurrence, not the first matching source range");
+  const output=[new Float32Array(9)];
+  assert.equal(p.renderBuffered(output),0);
+  assert.deepEqual(Array.from(output[0].slice(0,8)),[1,1,1,1,9,9,9,9],
+    "the old loop remains audible until the selected queued occurrence");
+  assert.equal(p.workerState.generation,1);
+  assert.equal(p.timeline.state.sourceFrame,1);
+  assert.equal(p.takeWorkerActivation().sourceFrame,0);
+});
+
 test("negative fractional speed wraps 1 frame loop instead of inventing dropped samples",()=>{
   const p=mk([[1,2,3]],{
     speed:-.001,startFrame:1,loopStartFrame:1,loopEndFrame:2,loopEnabled:true

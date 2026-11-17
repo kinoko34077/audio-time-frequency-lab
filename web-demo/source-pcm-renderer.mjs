@@ -39,6 +39,9 @@ export function createSourcePCMRenderer({
   const renderedChunks=[];
   let missingFrames=0,renderedFrames=0,firstMissingFrame=null;
   let renderedGeneration=0,previousRendered=null,workerMode=false;
+  let nextRenderedSequence=0;
+  let stagedWorkerState=null,workerActivation=null;
+  let workerState={generation:0,speed,pitchSemitones:0};
   let workerTransitionLeft=0;
   const find=(index)=>{
     for(let i=windows.length-1;i>=0;i--){
@@ -65,17 +68,20 @@ export function createSourcePCMRenderer({
     if(last<0)return;
     for(let ch=0;ch<channelCount;ch++)lastAudible[ch]=output[ch][last];
   }
-  function beginOutputTransition(){
+  function beginOutputTransition(output=null,frameIndex=0){
     // The synth has its own smoothing, but the neutral PCM identity path
     // bypasses that synth. Keep transport discontinuities click-free without
     // adding a parallel audio node or resetting the source clock.
     if(renderedFrames===0)return;
+    const priorOutput=output&&frameIndex>0?output:null;
     if(neutralBlend>0){
-      transitionOrigin.set(lastAudible);
+      for(let ch=0;ch<channelCount;ch++)
+        transitionOrigin[ch]=priorOutput?priorOutput[ch][frameIndex-1]:lastAudible[ch];
       transitionLeft=TRANSITION_FRAMES;
     }
     if(workerMode){
-      transitionOrigin.set(lastAudible);
+      for(let ch=0;ch<channelCount;ch++)
+        transitionOrigin[ch]=priorOutput?priorOutput[ch][frameIndex-1]:lastAudible[ch];
       workerTransitionLeft=TRANSITION_FRAMES;
     }
   }
@@ -126,6 +132,10 @@ export function createSourcePCMRenderer({
   const api={
     timeline,beginOutputTransition,
     get firstMissingFrame(){return firstMissingFrame;},
+    get workerState(){return {...workerState};},
+    takeWorkerActivation(){
+      const activated=workerActivation;workerActivation=null;return activated;
+    },
     get statistics(){return Object.freeze({
       missingFrames,renderedFrames,windowCount:windows.length,
       renderedChunkCount:renderedChunks.length
@@ -237,7 +247,7 @@ export function createSourcePCMRenderer({
      * selected legacy DSP; this renderer owns the only audible source clock.
      * A stale generation is ignored, never replayed after emitted output.
      */
-    installRenderedChunk({generation,startFrame,endFrame,speed,coreFrames,channels}={}){
+    installRenderedChunk({generation,sequence,startFrame,endFrame,speed,coreFrames,channels}={}){
       if(!Number.isSafeInteger(generation)||generation<0||
          !Number.isSafeInteger(startFrame)||!Number.isSafeInteger(endFrame)||
          startFrame<0||startFrame>=endFrame||endFrame>sourceFrames||
@@ -247,30 +257,100 @@ export function createSourcePCMRenderer({
          channels.some(ch=>!(ch instanceof Float32Array)||
            ch.length<coreFrames||ch.length>14_000_000/channelCount))
         throw RangeError("invalid rendered PCM chunk");
-      if(generation!==renderedGeneration)return false;
-      if(speed!==timeline.state.speed)
+      const active=generation===renderedGeneration;
+      const staged=stagedWorkerState?.generation===generation?
+        stagedWorkerState:null;
+      if(!active&&!staged)return false;
+      const queueSequence=sequence??(staged&&!staged.firstChunkAccepted?
+        staged.sequence:nextRenderedSequence);
+      if(!Number.isSafeInteger(queueSequence)||queueSequence<0)
+        throw RangeError("invalid rendered PCM queue sequence");
+      const expectedSpeed=active?timeline.state.speed:staged.speed;
+      if(speed!==expectedSpeed)
         throw RangeError("rendered PCM speed does not match source clock");
+      if(staged&&!staged.firstChunkAccepted&&startFrame!==staged.frame)
+        throw RangeError("staged PCM must begin at the staged source boundary");
+      const replacementIndex=staged&&!staged.firstChunkAccepted?
+        renderedChunks.findIndex(segment=>
+          segment.generation===renderedGeneration&&
+          segment.sequence===staged.sequence):-1;
+      if(replacementIndex>=0){
+        renderedChunks[replacementIndex]={generation,sequence:queueSequence,
+          startFrame,endFrame,speed,coreFrames,channels};
+        staged.firstChunkAccepted=true;
+        workerMode=true;
+        return renderedChunks.length;
+      }
+      if(staged&&!staged.firstChunkAccepted&&
+         queueSequence!==staged.sequence)
+        throw RangeError("staged PCM queue sequence does not match its boundary");
+      if(renderedChunks.some(segment=>segment.sequence===queueSequence))
+        return false;
       if(renderedChunks.length>=RENDERED_CHUNK_SLOTS)
         throw RangeError("rendered PCM chunk queue full");
       const previous=renderedChunks.at(-1)||previousRendered;
       if(previous){
         const expected=previous.endFrame>=sourceFrames?0:previous.endFrame;
-        if(startFrame!==expected)
+        if(startFrame!==expected||queueSequence!==previous.sequence+1)
           throw RangeError("rendered PCM chunks are not source-contiguous");
+      }else if(queueSequence!==nextRenderedSequence){
+        throw RangeError("rendered PCM queue sequence is not contiguous");
       }
       workerMode=true;
       if(renderedFrames>0&&renderedChunks.length===0)
         workerTransitionLeft=TRANSITION_FRAMES;
-      renderedChunks.push({generation,startFrame,endFrame,speed,coreFrames,channels});
+      renderedChunks.push({generation,sequence:queueSequence,startFrame,endFrame,
+        speed,coreFrames,channels});
+      nextRenderedSequence=queueSequence+1;
+      if(staged)stagedWorkerState.firstChunkAccepted=true;
       return renderedChunks.length;
     },
+    /** Stage a new Worker configuration after the currently audible chunk. */
+    stageRenderedState({generation,speed,pitchSemitones}={}){
+      if(!Number.isSafeInteger(generation)||generation<=renderedGeneration||
+         !Number.isFinite(speed)||speed<.5||speed>2||
+         !Number.isFinite(pitchSemitones)||pitchSemitones<-12||pitchSemitones>12)
+        throw RangeError("invalid staged Worker playback state");
+      const state=timeline.state;
+      const position=state.sourceFrame;
+      const activeChunks=renderedChunks.filter(segment=>
+        segment.generation===renderedGeneration);
+      const current=activeChunks.find(segment=>
+        (position>=segment.startFrame&&position<segment.endFrame)||
+        (state.loopEnabled&&segment.endFrame===sourceFrames&&
+          position<segment.startFrame))||activeChunks[0]||null;
+      let frame,sequence;
+      if(current){
+        const currentIndex=activeChunks.indexOf(current);
+        const retained=activeChunks.slice(currentIndex,currentIndex+2);
+        const tail=retained.at(-1);
+        frame=tail.endFrame>=sourceFrames?0:tail.endFrame;
+        sequence=tail.sequence+1;
+        renderedChunks.splice(0,renderedChunks.length,...retained);
+      }else{
+        frame=Math.floor(position);
+        sequence=nextRenderedSequence;
+        renderedChunks.length=0;
+        previousRendered=null;
+      }
+      nextRenderedSequence=sequence;
+      stagedWorkerState={generation,frame,sequence,speed,pitchSemitones,
+        firstChunkAccepted:false};
+      workerMode=true;
+      return {sourceFrame:frame,sequence,
+        bufferedSegments:renderedChunks.length};
+    },
     /** Invalidate queued output after a seek or model-setting change. */
-    resetRenderedChunks(generation){
+    resetRenderedChunks(generation,state={}){
       if(!Number.isSafeInteger(generation)||generation<=renderedGeneration)
         throw RangeError("rendered PCM generation must advance");
       renderedGeneration=generation;
       renderedChunks.length=0;
       previousRendered=null;
+      nextRenderedSequence=0;
+      stagedWorkerState=null;workerActivation=null;
+      workerState={generation,speed:state.speed??timeline.state.speed,
+        pitchSemitones:state.pitchSemitones??workerState.pitchSemitones};
       workerMode=true;
       workerTransitionLeft=0;
       return renderedGeneration;
@@ -281,8 +361,9 @@ export function createSourcePCMRenderer({
          output.some(ch=>!(ch instanceof Float32Array)||
            ch.length!==output[0].length))
         throw RangeError("invalid output PCM block");
-      const len=output[0].length,state=timeline.state;
-      let missing=0,framesToAdvance=0;firstMissingFrame=null;
+      const len=output[0].length;
+      let state=timeline.state;
+      let missing=0;firstMissingFrame=null;
       const read=(channel,segment,index,wrapDepth=0)=>{
         const samples=segment.channels[channel];
         if(!Number.isFinite(index)||index<0||index>=samples.length)return NaN;
@@ -312,19 +393,39 @@ export function createSourcePCMRenderer({
       };
       const fadeFrames=Math.max(1,Math.round(.018*outputSampleRate));
       for(let i=0;i<len;i++){
-        const position=timeline.sourceFrameAt(i);
+        state=timeline.state;
+        let position=timeline.sourceFrameAt(0);
         if(position===null){for(const ch of output)ch[i]=0;continue;}
         while(renderedChunks.length){
           const head=renderedChunks[0];
           const wrapped=state.loopEnabled&&head.endFrame===sourceFrames&&
             position<head.startFrame;
           if(position>=head.endFrame||wrapped){
+            if(head.generation!==renderedGeneration)break;
             previousRendered=renderedChunks.shift();
             continue;
           }
           break;
         }
-        const segment=renderedChunks[0];
+        let segment=renderedChunks[0];
+        if(segment&&segment.generation!==renderedGeneration&&
+           stagedWorkerState?.generation===segment.generation&&
+           segment.sequence===stagedWorkerState.sequence){
+          const staged=stagedWorkerState;
+          const activationFrame=position>=segment.startFrame&&
+            position<segment.endFrame?position:segment.startFrame;
+          beginOutputTransition(output,i);
+          const activated=timeline.scrub(activationFrame,staged.speed);
+          state=timeline.state;
+          position=activated.sourceFrame;
+          renderedGeneration=staged.generation;
+          workerState={generation:staged.generation,speed:staged.speed,
+            pitchSemitones:staged.pitchSemitones};
+          stagedWorkerState=null;
+          workerActivation={...workerState,sourceFrame:position,
+            revision:activated.revision};
+        }
+        segment=renderedChunks[0];
         let invalid=!segment||position<segment.startFrame||
           position>=segment.endFrame||segment.generation!==renderedGeneration||
           segment.speed!==state.speed;
@@ -345,7 +446,6 @@ export function createSourcePCMRenderer({
           for(const ch of output)ch[i]=0;
           continue;
         }
-        framesToAdvance++;
         const prior=previousRendered;
         const adjacent=prior&&prior.endFrame===segment.startFrame&&
           segment.startFrame>0;
@@ -370,13 +470,12 @@ export function createSourcePCMRenderer({
           output[1][i]=transitionOrigin[1]*(1-transition)+value1*transition;
         if(workerTransitionLeft>0)workerTransitionLeft--;
         if(adjacent&&mix>=1)previousRendered=null;
+        timeline.advance(1);
       }
       missingFrames+=missing;
       renderedFrames+=len;
-      // Worker PCM can arrive later than one output quantum. Hold the shared
-      // source clock at the first missing frame so late PCM resumes in order
-      // instead of silently skipping source material while the output is 0.
-      timeline.advance(framesToAdvance);
+      // Worker PCM can arrive later than one output quantum. The clock advances
+      // once for each emitted sample and holds at the first missing frame.
       rememberLastAudible(output);
       return missing;
     },
