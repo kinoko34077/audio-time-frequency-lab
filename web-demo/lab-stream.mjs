@@ -57,9 +57,9 @@ export async function createModelStream({ctx,sourceChannels,sampleRate,speed,sem
     if(!waiter)return;
     transitionWaiters.delete(id);waiter.resolve(value);
   };
-  const rejectTransitions=error=>{
-    for(const waiter of transitionWaiters.values())waiter.reject(error);
-    transitionWaiters.clear();
+  const cancelTransitions=()=>{
+    for(const id of [...transitionWaiters.keys()])
+      resolveTransition(id,{cancelled:true});
   };
   const cancelHandoff=()=>{
     try{handoffWorker?.terminate();}catch{}
@@ -69,7 +69,7 @@ export async function createModelStream({ctx,sourceChannels,sampleRate,speed,sem
   const cleanup=()=>{
     if(stopped)return;
     stopped=true;worker.terminate();cancelHandoff();
-    rejectTransitions(Error("model stream stopped"));
+    cancelTransitions();
     try{bridge?.dispose();}catch{}
     try{master?.disconnect();}catch{}
   };

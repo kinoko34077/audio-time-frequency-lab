@@ -114,6 +114,11 @@ test('legacy Worker PCM is rendered by one shared Worklet source clock',async()=
   workers[0].flush();await settle();await settle();
   assert.equal(worklets[0].segments.at(-1).sequence,0,
     "an immediate seek starts a fresh ordered PCM queue generation");
+  const transition=stream.updateSettings({frame:88000,speed:1.25});
+  stream.stop();
+  const stopped=await transition;
+  assert.equal(stopped.cancelled,true,
+    "normal stream stop cancels a pending model transition without rejecting");
  }finally{stream?.stop();globalThis.Worker=OriginalWorker;
   globalThis.AudioWorkletNode=OriginalWorklet;}
 });
