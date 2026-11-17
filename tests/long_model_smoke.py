@@ -21,10 +21,45 @@ try:
         browser=p.chromium.launch(channel='chromium',headless=True,args=['--no-sandbox','--autoplay-policy=no-user-gesture-required','--disable-dev-shm-usage'])
         page=browser.new_page()
         page.add_init_script("""(() => {
-          window.__labStarts=0;
-          const original=AudioBufferSourceNode.prototype.start;
-          AudioBufferSourceNode.prototype.start=function(...args){
-            window.__labStarts++;return original.apply(this,args);
+          window.__labWorkerResults=[];
+          window.__labWorkerCounter=0;
+          window.__labLatestWorkerId=0;
+          const NativeWorker=window.Worker;
+          window.Worker=class extends NativeWorker{
+            constructor(url,options){
+              super(url,options);
+              if(!String(url).includes('lab-processor.worker.mjs'))return;
+              const id=++window.__labWorkerCounter;
+              window.__labLatestWorkerId=id;
+              this.addEventListener('message',({data})=>{
+                if(!Number.isSafeInteger(data?.job))return;
+                window.__labWorkerResults.push({id,job:data.job,
+                  generation:data.generation,ok:data.ok===true,
+                  startFrame:data.plan?.start,
+                  outputFrames:data.channels?.[0]?.length||0,
+                  channelCount:data.channels?.length||0});
+              });
+            }
+          };
+          window.__labWorkletProgress=[];
+          window.__labWorkletCounter=0;
+          window.__labLatestSourceWorkletId=0;
+          const NativeWorklet=window.AudioWorkletNode;
+          window.AudioWorkletNode=class extends NativeWorklet{
+            constructor(ctx,name,options){
+              super(ctx,name,options);
+              const id=++window.__labWorkletCounter;
+              if(name!=='audio-lab-source-pcm')return;
+              window.__labLatestSourceWorkletId=id;
+              this.port.addEventListener('message',({data})=>{
+                if(data?.type==='progress'&&data.processingMode==='worker')
+                  window.__labWorkletProgress.push({id,
+                    sourceFrame:data.sourceFrame,
+                    renderedFrames:data.renderedFrames,
+                    missingFrames:data.missingFrames,
+                    workerGeneration:data.workerGeneration});
+              });
+            }
           };
         })()""")
         failures=[]
@@ -87,12 +122,33 @@ try:
                 raise AssertionError(f'{model} could not start: '+page.locator('#lab-status').inner_text()) from err
             assert 'メモリ上限' not in page.locator('#lab-status').inner_text()
             if model=='pv':
-                # 1.5sec input chunks at 0.5x occupy about 3sec playback.
-                # Multiple native AudioBufferSource starts prove continuous
-                # replenishment past the first processed preview segment.
+                # The shared PCM Worklet owns playback. Verify that multiple
+                # actual Worker PCM results reach it and its source-frame
+                # clock advances; counting AudioBufferSource.start() would
+                # only observe the retired per-segment playback route.
+                worker_id,worklet_id=page.evaluate("""() => [
+                  window.__labLatestWorkerId,window.__labLatestSourceWorkletId]""")
                 page.wait_for_timeout(7600)
-                started=page.evaluate('window.__labStarts')
-                assert started>=3, f'only {started} preview segment(s) scheduled'
+                evidence=page.evaluate("""({workerId,workletId})=>{
+                  const results=window.__labWorkerResults.filter(x=>
+                    x.id===workerId&&x.ok&&x.channelCount===2&&x.outputFrames>0);
+                  const progress=window.__labWorkletProgress.filter(x=>
+                    x.id===workletId&&x.workerGeneration===results.at(-1)?.generation);
+                  return {workerId,workletId,completedChunks:results.length,
+                    distinctChunkStarts:new Set(results.map(x=>x.startFrame)).size,
+                    outputFrames:results.reduce((sum,x)=>sum+x.outputFrames,0),
+                    progressSamples:progress.length,
+                    renderedFrames:progress.at(-1)?.renderedFrames||0,
+                    missingFrames:progress.at(-1)?.missingFrames||0,
+                    sourceStart:progress[0]?.sourceFrame,
+                    sourceEnd:progress.at(-1)?.sourceFrame};
+                }""",{"workerId":worker_id,"workletId":worklet_id})
+                print('LONG_WORKER_PCM_PREVIEW',evidence,flush=True)
+                assert evidence['completedChunks']>=3, evidence
+                assert evidence['distinctChunkStarts']>=3, evidence
+                assert evidence['outputFrames']>0, evidence
+                assert evidence['renderedFrames']>0, evidence
+                assert evidence['sourceStart'] is not None and evidence['sourceEnd']>evidence['sourceStart'], evidence
                 assert 'モデル再生中' in page.locator('#rt-indicator').inner_text()
             # Seek directly to mid-song; replacement preview must start at
             # the requested source timeline without waiting for full render.
