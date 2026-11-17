@@ -10,18 +10,42 @@ function wav(){
  bytes.writeUInt32LE(16,16);bytes.writeUInt16LE(1,20);bytes.writeUInt16LE(1,22);
  bytes.writeUInt32LE(rate,24);bytes.writeUInt32LE(rate*2,28);bytes.writeUInt16LE(2,32);bytes.writeUInt16LE(16,34);
  bytes.write('data',36);bytes.writeUInt32LE(n*2,40);
- for(let i=0;i<n;i++)bytes.writeInt16LE(Math.round(8000*Math.sin(2*Math.PI*440*i/rate)),44+2*i);
+ let phase=0;
+ for(let i=0;i<n;i++){
+  const hz=[220,440,659][Math.floor(i/rate)];
+  phase+=2*Math.PI*hz/rate;
+  const transient=i%rate===0 ? .08 : 0;
+  const sample=.68*Math.sin(phase)+.24*Math.sin(phase*2)+transient;
+  bytes.writeInt16LE(Math.round(8000*sample),44+2*i);
+ }
  return bytes;
 }
+const pythonCommand=process.env.PYTHON||
+ (process.platform==='win32'?'python':'python3');
+const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 test('full Chrome: inherited Rust AudioWorklet live independent speed/pitch UI',async()=>{
  const temp=await mkdtemp(path.join(os.tmpdir(),'lab-live-'));
- const server=spawn('python3',['-m','http.server','8769','--bind','127.0.0.1'],{cwd:path.resolve(process.env.WARP_WEB_ROOT||'_site'),stdio:'ignore'});
+ const server=spawn(pythonCommand,['-m','http.server','8769','--bind','127.0.0.1'],{cwd:path.resolve(process.env.WARP_WEB_ROOT||'_site'),stdio:'ignore'});
  let browser;
  try{
   const audioFile=path.join(temp,'tone.wav');await writeFile(audioFile,wav());
   browser=await puppeteer.launch({executablePath:process.env.CHROME_BIN||'/usr/bin/google-chrome',headless:true,args:['--no-sandbox','--disable-dev-shm-usage','--autoplay-policy=no-user-gesture-required']});
   const page=await browser.newPage();const errors=[];
   page.on('pageerror',error=>errors.push(error.message));
+  await page.evaluateOnNewDocument(()=>{
+   const connect=AudioNode.prototype.connect;
+   window.__rustOutputAnalysers=[];
+   AudioNode.prototype.connect=function(target,...args){
+    const media=typeof MediaStreamAudioDestinationNode!=="undefined"&&
+      target instanceof MediaStreamAudioDestinationNode;
+    if(target===this.context.destination||media){
+     const analyser=this.context.createAnalyser();analyser.fftSize=2048;
+     connect.call(this,analyser,...args);connect.call(analyser,target);
+     window.__rustOutputAnalysers.push(analyser);return target;
+    }
+    return connect.call(this,target,...args);
+   };
+  });
   await page.goto('http://127.0.0.1:8769/',{waitUntil:'domcontentloaded'});
   await page.waitForSelector('html[data-fw-boot="ready"]');
   // The research/model controls now live on their explicit top-level tab.
@@ -81,6 +105,15 @@ test('full Chrome: inherited Rust AudioWorklet live independent speed/pitch UI',
   assert.equal(stateBefore.visible&&stateBefore.hit,true,
     'shared main Play must be hit-testable on the model tab: '+JSON.stringify(stateBefore));
   assert.equal(stateBefore.model,'live');
+  await page.evaluate(()=>{
+   const set=(id,value)=>{
+    const el=document.getElementById(id);el.value=String(value);
+    el.dispatchEvent(new Event('change',{bubbles:true}));
+   };
+   set('player-loop-a',0);set('player-loop-b',48000);
+   const loop=document.querySelector('#player-loop-enabled');
+   if(!loop.checked)loop.click();
+  });
   await page.click('#play-main');
   try{
     await page.waitForFunction(()=>document.querySelector('#rt-indicator')
@@ -93,6 +126,50 @@ test('full Chrome: inherited Rust AudioWorklet live independent speed/pitch UI',
   }
   assert.equal(await page.$eval('#granular-speed-value',e=>e.value),'1.5');
   assert.equal(await page.$eval('#granular-pitch-value',e=>e.value),'5');
+  await page.waitForFunction(()=>window.__rustOutputAnalysers?.length>0,
+   {timeout:10000});
+  const setSpeed=async speed=>{
+   const previous=Number(await page.$eval('#granular-optin-status',
+    e=>e.dataset.renderRevision||0));
+   await page.$eval('#granular-speed-value',(el,value)=>{
+    el.value=String(value);el.dispatchEvent(new Event('change',{bubbles:true}));
+   },speed);
+   await page.waitForFunction(({speed,previous})=>{
+    const status=document.querySelector('#granular-optin-status');
+    return Number(document.querySelector('#granular-speed-value')?.value)===speed&&
+      status?.dataset.renderRunning==='true'&&
+      Number(status?.dataset.renderRevision)>previous;
+   },{timeout:10000},{speed,previous});
+   await sleep(100);
+   const readings=[];
+   for(let i=0;i<7;i++){
+    await sleep(40);
+    readings.push(await page.evaluate(()=>{
+     const paths=(window.__rustOutputAnalysers||[]).map(analyser=>{
+      const pcm=new Float32Array(analyser.fftSize);
+      analyser.getFloatTimeDomainData(pcm);
+      let power=0,peak=0;
+      for(const sample of pcm){power+=sample*sample;peak=Math.max(peak,Math.abs(sample));}
+      return {rms:Math.sqrt(power/pcm.length),peak};
+     });
+     return {rms:Math.max(0,...paths.map(x=>x.rms)),
+      peak:Math.max(0,...paths.map(x=>x.peak))};
+    }));
+   }
+   return {speed,maxRms:Math.max(...readings.map(x=>x.rms)),
+    maxPeak:Math.max(...readings.map(x=>x.peak)),
+    active:readings.filter(x=>x.rms>1e-4).length,
+    renderFrame:Number(await page.$eval('#granular-optin-status',e=>e.dataset.renderFrame)),
+    route:await page.$eval('#rt-telemetry',e=>e.dataset.pcmTransport)};
+  };
+  for(const speed of [8,-8]){
+   const output=await setSpeed(speed);
+   console.log('RUST_SIGNED_EXTREME_ACTUAL_OUTPUT '+JSON.stringify(output));
+   assert.equal(output.route,'rust-engine3-source-time');
+   assert.ok(output.active>=5&&output.maxRms>1e-4,
+    'Rust AudioWorklet must output measured nonzero PCM at '+speed+'x: '+JSON.stringify(output));
+   assert.ok(output.maxPeak>1e-3&&Number.isFinite(output.renderFrame));
+  }
   assert.deepEqual(errors,[]);
   await (await page.$('#stop')).click();
  }finally{await browser?.close();server.kill();await rm(temp,{recursive:true,force:true});}

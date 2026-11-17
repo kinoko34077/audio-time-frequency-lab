@@ -2599,6 +2599,8 @@ async function labSettingsChanged(){
        (nextMode==="wsola"&&!nextIndividual&&previousShort!==nextShort)||
        (nextMode==="dual"&&!nextIndividual&&
          (previousShort!==nextShort||previousLong!==nextLong))||
+       (nextMode==="live"&&!previousIndividual&&!lab.individual&&
+         previousLong!==nextLong)||
        (isPCMModel(nextMode,nextIndividual)&&!player.rawPCM)||
        (!isPCMModel(nextMode,nextIndividual)&&player.rawPCM)){
       await stop();

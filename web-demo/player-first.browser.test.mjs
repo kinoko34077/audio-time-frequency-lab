@@ -562,6 +562,35 @@ test("U1/U5 primary Play routes to REAL selected live/PV/Granular engines and on
     assert.equal(await page.evaluate(()=>window.__engineCreations.some(e=>
       e.kind==="worklet"&&e.name==="frequency-warp-rust")),false,
       "Rust primary playback must not launch its separate legacy Worklet");
+    // The Rust FFT size is fixed when its WASM renderer is constructed. A
+    // live long-window edit must rebuild the same shared PCM route so the new
+    // setting reaches the DSP instead of changing only the visible control.
+    await page.click("#main-tab-model");
+    const nodeStartsBeforeLongChange=Number(await page.$eval("#rt-telemetry",
+      el=>el.dataset.pcmNodeStarts));
+    const currentLong=await page.$eval("#lab-long",el=>el.value);
+    const nextLong=currentLong==="12"?"11":"12";
+    await set("lab-long",nextLong);
+    await page.waitForFunction(before=>{
+      const telemetry=document.querySelector("#rt-telemetry");
+      return Number(telemetry?.dataset.pcmNodeStarts)>before&&
+        telemetry?.dataset.pcmTransport==="rust-engine3-source-time"&&
+        document.querySelector("#granular-optin-status")?.dataset.renderRunning==="true";
+    },{timeout:20000},nodeStartsBeforeLongChange);
+    const afterLongChange=await page.evaluate(()=>({
+      starts:Number(document.querySelector("#rt-telemetry").dataset.pcmNodeStarts),
+      route:document.querySelector("#rt-telemetry").dataset.pcmTransport,
+      speed:document.querySelector("#granular-speed-value").value,
+      pitch:document.querySelector("#granular-optin-status").dataset.renderPitch,
+      long:document.querySelector("#lab-long").value
+    }));
+    assert.equal(afterLongChange.starts,nodeStartsBeforeLongChange+1,
+      "changing the Rust long window recreates one shared renderer");
+    assert.equal(afterLongChange.route,"rust-engine3-source-time");
+    assert.equal(afterLongChange.speed,"1.237");
+    assert.equal(afterLongChange.pitch,"0.125");
+    assert.equal(afterLongChange.long,nextLong);
+    await page.click("#main-tab-player");
     await page.click("#main-tab-model");
     await set("lab-model","pv");
     await page.waitForFunction(()=>document.querySelector("#rt-telemetry")
