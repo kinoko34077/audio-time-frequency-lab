@@ -43,6 +43,59 @@ test("native Chrome experimental source-PCM AudioWorklet renders and loops witho
       analyser.getFloatTimeDomainData(pcm);
       const rms=Math.sqrt(pcm.reduce((a,v)=>a+v*v,0)/pcm.length);
       await player.pause();
+      const wasmBytes=await (await fetch("./dsp_core.wasm")).arrayBuffer();
+      const {fullBandPartialOptions}=await import("./lab-contract.mjs");
+      const rustSettings={
+        low:1,high:Math.min(20000,ctx.sampleRate*.49),
+        curvature:1,invert:0,mode:"blend",outside:"pass",
+        qualityIndex:1,hopDiv:8,engine:3,pitchRatio:2,shiftHz:0,
+        carrierHz:350,zeroMode:0,axisShift:0,axisReference:350,
+        ringEnabled:false,rationalEnabled:true,axisPivot:350,axisSlope:1,
+        zeroReflectGain:1,zeroReflectDecay:0,crusherBits:0,crusherHold:1,
+        ...fullBandPartialOptions(ctx.sampleRate)
+      };
+      const rustEvents=[];
+      const rust=await createSourcePCMBridge({
+        ctx,sourceChannels:[data],sourceSampleRate:48000,startFrame:24000,
+        speed:0,processingMode:"live",pitchSemitones:12,
+        wasmBytes,rustSettings,onEvent:event=>{
+          if(event.type==="error"||event.type==="rust-error")
+            rustEvents.push(event.message||event.type);
+        }
+      });
+      rust.connect(analyser);
+      await rust.play();
+      await new Promise(resolve=>setTimeout(resolve,280));
+      const rustFreeze=rust.latest;
+      const rustPcm=new Float32Array(4096);
+      analyser.getFloatTimeDomainData(rustPcm);
+      const rustRms=Math.sqrt(rustPcm.reduce((sum,v)=>sum+v*v,0)/rustPcm.length);
+      let rustPeak=0,rustFrequency=0;
+      for(let hz=850;hz<=910;hz++){
+        let re=0,im=0;
+        for(let i=0;i<rustPcm.length;i++){
+          const phase=2*Math.PI*hz*i/ctx.sampleRate;
+          re+=rustPcm[i]*Math.cos(phase);im-=rustPcm[i]*Math.sin(phase);
+        }
+        const magnitude=Math.hypot(re,im);
+        if(magnitude>rustPeak){rustPeak=magnitude;rustFrequency=hz;}
+      }
+      await rust.setSpeed(8);
+      await rust.setLoopBounds(12000,36000);
+      await rust.setLoopEnabled(true);
+      await new Promise(resolve=>setTimeout(resolve,140));
+      const rustLoop=rust.latest;
+      await rust.setLoopEnabled(false);
+      await rust.setSpeed(0);
+      await rust.seek(42000);
+      await rust.setSpeed(-8);
+      await new Promise(resolve=>setTimeout(resolve,60));
+      const rustReverse=rust.latest;
+      await rust.scrub(22000,0);
+      await new Promise(resolve=>setTimeout(resolve,60));
+      const rustScrub=rust.latest;
+      await rust.pause();
+      rust.dispose();
       await player.setLoopBounds(97,99);
       await player.setLoopEnabled(true);
       await player.seek(97);
@@ -147,6 +200,9 @@ test("native Chrome experimental source-PCM AudioWorklet renders and loops witho
       await ctx.close();
       return {
         first,loop,rms,stable,loopMissing,transitions,afterDispose,
+        rust:{freeze:rustFreeze,rms:rustRms,loop:rustLoop,
+          frequency:rustFrequency,reverse:rustReverse,scrub:rustScrub,
+          errors:rustEvents},
         oldInFlightReceipts,
         failureRecovery:{crashRejected,fatalCount,afterCrashRejected,
           timedOut,timeoutFatalCount,postTimeoutAck:afterTimeout.length},
@@ -164,6 +220,19 @@ test("native Chrome experimental source-PCM AudioWorklet renders and loops witho
     });
     assert.deepEqual(pageErrors,[]);
     assert.deepEqual(evidence.errors,[]);
+    assert.deepEqual(evidence.rust.errors,[]);
+    assert.equal(evidence.rust.freeze?.sourceFrame,24000,evidence.rust);
+    assert.equal(evidence.rust.freeze?.pitchSemitones,12,evidence.rust);
+    assert.equal(evidence.rust.freeze?.running,true,evidence.rust);
+    assert.ok(evidence.rust.rms>.02,evidence.rust);
+    assert.ok(Math.abs(evidence.rust.frequency-880)<=4,evidence.rust);
+    assert.ok(evidence.rust.loop?.sourceFrame>=12000&&
+      evidence.rust.loop?.sourceFrame<36000,evidence.rust);
+    assert.equal(evidence.rust.loop?.loopEnabled,true,evidence.rust);
+    assert.ok(evidence.rust.reverse?.sourceFrame<42000,evidence.rust);
+    assert.ok(evidence.rust.reverse?.sourceFrame>0,evidence.rust);
+    assert.equal(evidence.rust.scrub?.sourceFrame,22000,evidence.rust);
+    assert.equal(evidence.rust.scrub?.speed,0,evidence.rust);
     assert.ok(evidence.first?.renderedFrames>=1024,evidence);
     assert.ok(evidence.loop?.renderedFrames>evidence.first.renderedFrames,evidence);
     assert.equal(evidence.loop.missingFrames,0,evidence);

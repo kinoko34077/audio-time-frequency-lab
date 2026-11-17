@@ -44,6 +44,28 @@ test("forward, reverse, and zero source-time advancement",()=>{
   assert.equal(t.state.revision,2);
 });
 
+test("shared source cursor can map signed look-behind without advancing",()=>{
+  const forward=make({startFrame:12000,speed:2,outputSampleRate:48000});
+  assert.equal(forward.sourceFrameAt(-256),11488);
+  assert.equal(forward.state.sourceFrame,12000);
+  forward.setSpeed(-2);
+  assert.equal(forward.sourceFrameAt(-256),12512);
+  assert.equal(forward.state.sourceFrame,12000);
+
+  const loop=make({startFrame:10,speed:1,loopStartFrame:10,
+    loopEndFrame:14,loopEnabled:true});
+  assert.equal(loop.sourceFrameAt(-1),13,
+    "look-behind must use the same exclusive A/B loop boundary");
+  assert.equal(loop.advance(0),10);
+
+  const edge=make({sourceFrames:10,startFrame:0,speed:1});
+  assert.equal(edge.sourceFrameAt(-1),null,
+    "playback-facing source queries remain bounded by the clip");
+  assert.equal(edge.sourceFrameAt(-1,{allowOutside:true}),-1,
+    "DSP context can read the canonical clock position beyond the clip edge");
+  assert.equal(edge.state.sourceFrame,0);
+});
+
 test("unlooped bounds stop; reverse from EOF starts at last source sample",()=>{
   const t=make({startFrame:48000,speed:-1});
   assert.equal(t.sampleIndexAt(0),47999);

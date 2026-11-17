@@ -283,6 +283,32 @@ export function createSourcePCMRenderer({
       rememberLastAudible(output);
       return misses;
     },
+    renderRust(output,rust){
+      // The Rust engine owns only its partial/residual sound model. It reads
+      // source windows and receives the shared timeline cursor read-only;
+      // the renderer advances the sole transport exactly once.
+      if(!rust||typeof rust.render!=="function")
+        throw RangeError("invalid Rust source-time engine");
+      const state=timeline.state;
+      if(state.ended&&!state.loopEnabled){
+        for(const channel of output)channel.fill(0);
+        firstMissingFrame=null;
+        renderedFrames+=output[0].length;
+        return 0;
+      }
+      const result=rust.render(output,state,readFrame,sourceFrames,
+        timeline.sourceFrameAt);
+      firstMissingFrame=result.firstMissingFrame;
+      const identityMisses=blendNeutralPCM(output,state,
+        rust.state.pitchSemitones);
+      const misses=identityOnlyRaw?identityMisses:
+        Math.max(result.missingFrames,identityMisses);
+      missingFrames+=misses;
+      renderedFrames+=output[0].length;
+      timeline.advance(output[0].length);
+      rememberLastAudible(output);
+      return misses;
+    },
     render(output){
       if(!Array.isArray(output)||output.length!==channelCount||
          output.some(ch=>!(ch instanceof Float32Array)||

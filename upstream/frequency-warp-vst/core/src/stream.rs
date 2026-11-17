@@ -7,6 +7,7 @@ use super::{fft,fold_frequency,map_frequency,translate_frequency_affine,translat
 
 pub struct Stream {
     sample_rate:f64,
+    source_sample_rate:f64,
     channels:usize,
     n:usize,
     hop:usize,
@@ -44,6 +45,8 @@ pub struct Stream {
     window_sq:Vec<f64>,
     spectrum:Vec<Vec<Complex>>,
     previous:Vec<Vec<Complex>>,
+    source_probe:Vec<Vec<Complex>>,
+    source_time_mode:bool,
     mag:Vec<f64>,
     candidates:Vec<usize>,
     peaks:Vec<usize>,
@@ -53,6 +56,9 @@ pub struct Stream {
     complement:Vec<Complex>,
     relocated:Vec<Complex>,
     synthesized_peak_mask:Vec<bool>,
+    residual_phase:Vec<f64>,
+    residual_frequency:Vec<f64>,
+    residual_valid:Vec<bool>,
 }
 
 impl Stream {
@@ -75,7 +81,7 @@ impl Stream {
         let hop=q.n / hop_div as usize;
         // Per-block processing has no persistent large file buffer.
         Ok(Self{
-            sample_rate,channels,n:q.n,hop,max_peaks:q.max_peaks,
+            sample_rate,source_sample_rate:sample_rate,channels,n:q.n,hop,max_peaks:q.max_peaks,
             floor:q.floor,settings,outside,engine,pitch_ratio,shift_hz,carrier_hz,
             ring_enabled:engine==2,axis_shift:0.0,
             axis_reference:350.0,axis_pivot:350.0,axis_slope:1.0,rational_enabled:engine==3,crusher_bits:0,crusher_hold:1,crusher_counter:0,
@@ -93,6 +99,8 @@ impl Stream {
             }).collect(),
             spectrum:vec![vec![Complex::ZERO;q.n];channels],
             previous:vec![vec![Complex::ZERO;q.n];channels],
+            source_probe:vec![vec![Complex::ZERO;q.n];channels],
+            source_time_mode:false,
             mag:vec![0.0;q.n/2+1],
             candidates:Vec::with_capacity(q.n/2),
             peaks:Vec::with_capacity(q.max_peaks*4),
@@ -102,9 +110,18 @@ impl Stream {
             complement:vec![Complex::ZERO;q.n],
             relocated:vec![Complex::ZERO;q.n],
             synthesized_peak_mask:vec![false;q.n/2+1],
+            residual_phase:vec![0.0;q.n/2+1],
+            residual_frequency:vec![0.0;q.n/2+1],
+            residual_valid:vec![false;q.n/2+1],
         })
     }
     pub fn latency(&self)->usize{self.n-1} // all engines now use the shared warp stage
+    pub fn set_source_sample_rate(&mut self,rate:f64)->Result<(),&'static str>{
+        if self.engine!=3||!rate.is_finite()||!(8000.0..=384000.0).contains(&rate){
+            return Err("invalid source-time sample rate");
+        }
+        self.source_sample_rate=rate;Ok(())
+    }
     pub fn configure(&mut self,settings:Settings,outside:u32)->Result<(),&'static str>{
         if settings.quality!=self.settings.quality{
             return Err("quality change requires stream rebuild");
@@ -266,13 +283,17 @@ impl Stream {
         for x in &mut self.output{x.fill(0.0);}
         for x in &mut self.spectrum{x.fill(Complex::ZERO);}
         for x in &mut self.previous{x.fill(Complex::ZERO);}
+        for x in &mut self.source_probe{x.fill(Complex::ZERO);}
         self.weights.fill(0.0);
         self.tracks.clear();self.next_tracks.clear();
+        self.residual_phase.fill(0.0);self.residual_frequency.fill(0.0);
+        self.residual_valid.fill(false);self.source_time_mode=false;
     }
     pub fn process(&mut self,input:&[f32],output:&mut [f32],frames:usize)->Result<(),&'static str>{
         if frames==0||frames>2048||input.len()!=frames*self.channels||output.len()!=input.len(){
             return Err("invalid streaming planar block");
         }
+        if self.source_time_mode{self.reset();}
         // Input and output layout: [channel0 frames][channel1 frames].
         for i in 0..frames {
             let t=self.received as usize;
@@ -298,6 +319,45 @@ impl Stream {
         self.post_process(output,frames);
         Ok(())
     }
+    /// Render one source-positioned analysis window into one output-time hop.
+    /// The host owns sourceFrame and supplies the immutable current/probe PCM
+    /// windows; this Stream still owns the canonical engine-3 partial and
+    /// residual transform, track phases, and overlap-add state.
+    pub fn process_source_window(&mut self,input:&[f32],probe:&[f32],
+        output:&mut [f32],start:usize,frames:usize)->Result<(),&'static str>{
+        let window_samples=self.n*self.channels;
+        if self.engine!=3||frames!=self.hop||input.len()!=window_samples||
+           probe.len()!=window_samples||output.len()!=frames*self.channels||
+           start%self.hop!=0{return Err("invalid Rust source-time window");}
+        if !self.source_time_mode{
+            if self.received>0{self.reset();}
+            self.source_time_mode=true;
+        }
+        for c in 0..self.channels{
+            for i in 0..self.n{
+                let slot=(start+i)%self.n;
+                self.input[c][slot]=input[c*self.n+i] as f64;
+                self.source_probe[c][i]=Complex{
+                    r:probe[c*self.n+i] as f64*self.window_sq[i].sqrt(),i:0.0
+                };
+            }
+            fft(&mut self.source_probe[c],false);
+        }
+        self.process_frame(start);
+        for i in 0..frames{
+            let slot=(start+i)%(self.n*2);
+            let weight=self.weights[slot];
+            for c in 0..self.channels{
+                output[c*frames+i]=if weight>1e-9{
+                    (self.output[c][slot]/weight) as f32
+                }else{0.0};
+                self.output[c][slot]=0.0;
+            }
+            self.weights[slot]=0.0;
+        }
+        self.post_process(output,frames);
+        Ok(())
+    }
     // Apply Ring Mod to ONLY mapped [L,H] components before mixing the
     // separately reconstructed out-of-band Pass signal. Each overlapping
     // analysis window uses the same absolute source-frame phase.
@@ -310,7 +370,11 @@ impl Stream {
     }
     fn process_frame(&mut self,start:usize){
         let half=self.n/2;
-        let step=self.sample_rate/self.n as f64;
+        let source_step=if self.source_time_mode{
+            self.source_sample_rate/self.n as f64
+        }else{self.sample_rate/self.n as f64};
+        let output_step=self.sample_rate/self.n as f64;
+        let step=source_step;
         let source_anchor=self.source_pivot_anchor();
         for c in 0..self.channels{
             for i in 0..self.n{
@@ -461,7 +525,17 @@ impl Stream {
             let ref_ch=if self.spectrum[0][k].magnitude()>1e-10{0}else{self.channels-1};
             let phase=self.spectrum[ref_ch][k].angle();
             let magnitude=self.mag[k];
-            let frequency=if self.received>=self.n as u64{
+            let frequency=if self.source_time_mode{
+                // The source PCM probe is shifted by N/4 independently of
+                // output speed. This estimates local source frequency even
+                // when the canonical cursor is held or moving backwards.
+                let probe=self.source_probe[ref_ch][k];
+                let probe_shift=self.n/4;
+                let delta=(probe.angle()-phase-
+                    TAU*k as f64*probe_shift as f64/self.n as f64+PI)
+                    .rem_euclid(TAU)-PI;
+                k as f64*step+delta/(TAU*probe_shift as f64/self.source_sample_rate)
+            }else if self.received>=self.n as u64{
                 let prev=self.previous[ref_ch][k];
                 if prev.magnitude()>1e-8{
                     let delta=(phase-prev.angle()-TAU*k as f64*self.hop as f64/self.n as f64+PI)
@@ -483,7 +557,8 @@ impl Stream {
                     self.axis_pivot,self.axis_slope,
                     self.axis_reference,self.settings.curvature,self.axis_shift)
             };
-            let (target,fade_gain)=match self.resolve_all(frequency,target,step,source_anchor){
+            let resolve_step=if self.source_time_mode{output_step}else{step};
+            let (target,fade_gain)=match self.resolve_all(frequency,target,resolve_step,source_anchor){
                 Some(v)=>v,None=>continue
             };
             if !(target>0.0&&target<self.sample_rate/2.0){continue;}
@@ -499,10 +574,22 @@ impl Stream {
                 if dist<(3.0*step).max(0.05*frequency){
                     self.used[j]=true;
                     let old=self.tracks[j];
-                    shift=old.phase_shift+PI*(old.difference+diff)*self.hop as f64/self.sample_rate;
+                    if self.source_time_mode{
+                        // In source-time mode phase_shift is the last output
+                        // carrier phase, and difference stores its frequency.
+                        // Advance by output hop regardless of source movement.
+                        let output_phase=old.phase_shift+
+                            PI*(old.difference+target)*self.hop as f64/self.sample_rate;
+                        shift=output_phase-(phase+PI*k as f64);
+                    }else{
+                        shift=old.phase_shift+PI*(old.difference+diff)*self.hop as f64/self.sample_rate;
+                    }
                 }
             }
-            self.next_tracks.push(Track{frequency,difference:diff,phase_shift:shift});
+            let track_phase=phase+PI*k as f64+shift;
+            self.next_tracks.push(Track{frequency,
+                difference:if self.source_time_mode{target}else{diff},
+                phase_shift:if self.source_time_mode{track_phase}else{shift}});
             // Hann analysis spreads a locally sinusoidal partial into
             // neighbouring bins. Exclude those bins from the residual to
             // avoid double-counting the tracked oscillator and its lobes.
@@ -541,6 +628,51 @@ impl Stream {
         // not specially modelled.
         if self.a_quality_percent>0 {
             let residual_gain=self.a_quality_percent as f64/100.0;
+            if self.source_time_mode{
+                // Residual bins have their own output-time phase state. A
+                // fixed (dest-k)*start correction only works when source
+                // time advances one frame per output frame; it produces the
+                // wrong phase at freeze and reverse speeds.
+                for k in 1..half{
+                    if self.synthesized_peak_mask[k]{
+                        self.residual_valid[k]=false;continue;
+                    }
+                    let f=k as f64*step;
+                    if f<self.settings.low.max(self.a_min_hz)||f>self.settings.high{
+                        self.residual_valid[k]=false;continue;
+                    }
+                    let base=match map_frequency(f,self.settings){
+                        Ok(value)=>value,Err(_)=>{self.residual_valid[k]=false;continue;}
+                    };
+                    let staged=if self.rational_enabled{
+                        self.pitch_ratio*base+self.shift_hz
+                    }else{base};
+                    let target=if staged<=0.0{staged}else{
+                        translate_frequency_anchored(staged,source_anchor,
+                            self.axis_pivot,self.axis_slope,self.axis_reference,
+                            self.settings.curvature,self.axis_shift)
+                    };
+                    let resolve_step=if self.source_time_mode{output_step}else{step};
+                    let (target,_)=match self.resolve_all(f,target,resolve_step,source_anchor){
+                        Some(v)=>v,None=>{self.residual_valid[k]=false;continue;}
+                    };
+                    if target>=self.sample_rate/2.0{
+                        self.residual_valid[k]=false;continue;
+                    }
+                    let dest=((target/output_step).round() as usize).max(1);
+                    if dest>=half{self.residual_valid[k]=false;continue;}
+                    let ref_ch=if self.spectrum[0][k].magnitude()>1e-10{0}else{self.channels-1};
+                    let source_phase=self.spectrum[ref_ch][k].angle()+PI*k as f64;
+                    let output_frequency=dest as f64*output_step;
+                    let phase=if self.residual_valid[k]{
+                        self.residual_phase[k]+PI*(self.residual_frequency[k]+
+                            output_frequency)*self.hop as f64/self.sample_rate
+                    }else{source_phase};
+                    self.residual_phase[k]=phase;
+                    self.residual_frequency[k]=output_frequency;
+                    self.residual_valid[k]=true;
+                }
+            }
             for c in 0..self.channels {
                 self.relocated.fill(Complex::ZERO);
                 for k in 1..half {
@@ -558,19 +690,31 @@ impl Stream {
                             self.axis_pivot,self.axis_slope,self.axis_reference,
                             self.settings.curvature,self.axis_shift)
                     };
-                    let (target,fade_gain)=match self.resolve_all(f,target,step,source_anchor){
+                    let resolve_step=if self.source_time_mode{output_step}else{step};
+                    let (target,fade_gain)=match self.resolve_all(f,target,resolve_step,source_anchor){
                         Some(v)=>v,None=>continue
                     };
                     if target>=self.sample_rate/2.0{continue;}
-                    let dest=((target/step).round() as usize).max(1);
+                    let dest=((target/if self.source_time_mode{output_step}else{step}).round() as usize).max(1);
                     if dest>=half{continue;}
-                    let phase=TAU*(dest as f64-k as f64)
-                        *(start%self.n) as f64/self.n as f64;
-                    let (sin,cos)=phase.sin_cos();
                     let z=self.spectrum[c][k];
                     let gain=fade_gain*residual_gain;
-                    self.relocated[dest].r+=(z.r*cos-z.i*sin)*gain;
-                    self.relocated[dest].i+=(z.r*sin+z.i*cos)*gain;
+                    if self.source_time_mode{
+                        let ref_ch=if self.spectrum[0][k].magnitude()>1e-10{0}else{self.channels-1};
+                        let reference_phase=self.spectrum[ref_ch][k].angle();
+                        let relative=(z.angle()-reference_phase+PI).rem_euclid(TAU)-PI;
+                        let phase=self.residual_phase[k]+relative-PI*dest as f64;
+                        let (sin,cos)=phase.sin_cos();
+                        let magnitude=z.magnitude();
+                        self.relocated[dest].r+=magnitude*cos*gain;
+                        self.relocated[dest].i+=magnitude*sin*gain;
+                    }else{
+                        let phase=TAU*(dest as f64-k as f64)
+                            *(start%self.n) as f64/self.n as f64;
+                        let (sin,cos)=phase.sin_cos();
+                        self.relocated[dest].r+=(z.r*cos-z.i*sin)*gain;
+                        self.relocated[dest].i+=(z.r*sin+z.i*cos)*gain;
+                    }
                 }
                 fft(&mut self.relocated,true);
                 for i in 0..self.n{
@@ -711,6 +855,34 @@ pub unsafe extern "C" fn warp_stream_process(
     match stream.process(inp,out,frames as usize){Ok(_)=>0,Err(_)=>-2}
 }
 
+/// Process one externally positioned engine-3 source window and one output hop.
+/// Input/probe are planar [channel0 N][channel1 N]; output is planar [channel0 H]...
+#[no_mangle]
+pub unsafe extern "C" fn warp_stream_process_source_window(
+    ptr:*mut Stream,input:*const f32,probe:*const f32,output:*mut f32,
+    output_start:u32,frames:u32
+)->i32{
+    if ptr.is_null()||input.is_null()||probe.is_null()||output.is_null(){return -1;}
+    let stream=&mut *ptr;
+    let window=stream.n*stream.channels;
+    let count=frames as usize*stream.channels;
+    if frames==0||window>isize::MAX as usize/4||count>isize::MAX as usize/4{return -1;}
+    let input=std::slice::from_raw_parts(input,window);
+    let probe=std::slice::from_raw_parts(probe,window);
+    let output=std::slice::from_raw_parts_mut(output,count);
+    match stream.process_source_window(input,probe,output,output_start as usize,frames as usize){
+        Ok(())=>0,Err(_)=>-2
+    }
+}
+#[no_mangle]
+pub unsafe extern "C" fn warp_stream_window_frames(ptr:*const Stream)->u32{
+    if ptr.is_null(){0}else{(&*ptr).n as u32}
+}
+#[no_mangle]
+pub unsafe extern "C" fn warp_stream_hop_frames(ptr:*const Stream)->u32{
+    if ptr.is_null(){0}else{(&*ptr).hop as u32}
+}
+
 
 /* Extended native/WASM streaming ABI: old entry points remain binary compatible.
  * engine: 0=tracked STFT,1=FFT-bin relocation,2=Ring Mod,3=Pitch->Frequency Shift.
@@ -736,6 +908,20 @@ pub unsafe extern "C" fn warp_stream_set_ext(
     if ptr.is_null(){return -1;}
     match (&mut *ptr).configure_extended(params(low,high,p,amount,mode,quality_id),outside,
         engine,pitch_ratio,shift_hz,carrier_hz,zero_mode){Ok(_)=>0,Err(_)=>-2}
+}
+/// Pitch control for the source-time engine-3 adapter. This updates only the
+/// synthesis ratio and preserves the active partial/residual phase history.
+#[no_mangle]
+pub unsafe extern "C" fn warp_stream_set_source_pitch(ptr:*mut Stream,ratio:f64)->i32{
+    if ptr.is_null(){return -1;}
+    let stream=&mut *ptr;
+    if stream.engine!=3||!ratio.is_finite()||ratio<=0.0||ratio>4.0{return -2;}
+    stream.pitch_ratio=ratio;0
+}
+#[no_mangle]
+pub unsafe extern "C" fn warp_stream_set_source_rate(ptr:*mut Stream,rate:f64)->i32{
+    if ptr.is_null(){return -1;}
+    match (&mut *ptr).set_source_sample_rate(rate){Ok(())=>0,Err(_)=>-2}
 }
 
 // The same amplitude law is used by native synthesis and exported to the
@@ -1007,6 +1193,42 @@ pub unsafe extern "C" fn warp_stream_render_f32_ext(
 #[cfg(test)]
 mod tests{
     use super::*;
+    #[test]
+    fn source_time_window_estimates_in_source_rate_and_tracks_output_pitch(){
+        let fs=48000.0;let source_rate=44100.0;let n=2048;let hop=256;
+        let s=Settings{low:1.0,high:20000.0,curvature:1.0,invert:0.0,
+            mode:Progression::Blend,quality:1};
+        let mut st=Stream::new_extended(fs,1,s,1,3,1.5,0.0,350.0,0,8).unwrap();
+        st.set_source_sample_rate(source_rate).unwrap();
+        st.set_a_options(1.0,0.0).unwrap();st.set_a_quality(0).unwrap();
+        let mut input=vec![0.0f32;n];let mut probe=vec![0.0f32;n];
+        for i in 0..n{
+            let x=source_rate/2.0+i as f64-n as f64/2.0;
+            let y=x+n as f64/4.0;
+            input[i]=(0.4*(TAU*440.0*x/source_rate).sin()) as f32;
+            probe[i]=(0.4*(TAU*440.0*y/source_rate).sin()) as f32;
+        }
+        let mut rendered=Vec::new();
+        for block in 0..24{
+            let mut out=vec![0.0f32;hop];
+            st.process_source_window(&input,&probe,&mut out,block*hop,hop).unwrap();
+            rendered.extend(out);
+        }
+        assert!(st.tracks.iter().any(|t|(t.frequency-440.0).abs()<2.0&&
+            (t.difference-660.0).abs()<3.0));
+        let range=&rendered[2048..6144];
+        let magnitude=|hz:f64|{
+            let mut re=0.0;let mut im=0.0;
+            for (i,&x) in range.iter().enumerate(){
+                let phase=TAU*hz*i as f64/fs;
+                re+=x as f64*phase.cos();im-=x as f64*phase.sin();
+            }
+            (re*re+im*im).sqrt()
+        };
+        let best=(620i32..=700).max_by(|a,b|
+            magnitude(*a as f64).total_cmp(&magnitude(*b as f64))).unwrap();
+        assert!((best-660).abs()<=3);
+    }
     fn settings()->Settings{
         Settings{low:20.0,high:3000.0,curvature:1.0,invert:1.0,
             mode:Progression::FoldHigh,quality:0}

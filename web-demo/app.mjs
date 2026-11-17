@@ -1,5 +1,5 @@
 import {QUALITY,mixWet} from "./dsp.mjs";
-import {liveFactors,fullBandPartialOptions} from "./lab-contract.mjs";
+import {fullBandPartialOptions} from "./lab-contract.mjs";
 import {createModelStream} from "./lab-stream.mjs";
 import {createSourcePCMBridge} from "./source-pcm-bridge.mjs";
 import {returnToPlaySpeed,scrubSpeed,releaseScrubSpeed} from "./scrub-kinetics.mjs";
@@ -36,7 +36,7 @@ const PLAYER_GRANULAR_AVAILABLE=true;
 // regression/comparison path. Normal Audio Time uses real STFT instead.
 // PV is a real peak-locked streaming Worklet unless period-joint is enabled.
 const isPCMModel=(mode,individual=lab.individual)=>
-  mode==="spectral"||mode==="granular"||
+  mode==="spectral"||mode==="granular"||mode==="live"&&!individual||
   ((mode==="pv"||mode==="wsola"||mode==="dual"||mode==="am")&&!individual);
 const initialModel=GRANULAR_EXPERIMENT||
   new URLSearchParams(location.search).get("model")==="granular"?
@@ -534,13 +534,11 @@ function settings(){
     aBandBins:Number($("#a-band").value),
     aQuality:Number($("#a-quality").value)
   };
-  // A selected Rust model may be pending while a prior engine continues
-  // rendering at 0/reverse/out-of-range speed. Do not call liveFactors on an
-  // unapplied request: its validated range is still 0.5..2, and status/
-  // graph refresh must never throw or mutate the last-good audio session.
+  // The source-time Rust renderer reads the original sample clock directly;
+  // its pitch ratio is independent of signed transport speed.
   if(lab.mode==="live"&&primaryModelCapability("live",lab.speed).supported){
-    const ratio=liveFactors(lab.speed,lab.semitones);
-    Object.assign(value,{engine:3,rationalEnabled:true,pitchRatio:ratio.spectralRatio,shiftHz:0,
+    const ratio=2**(lab.semitones/12);
+    Object.assign(value,{engine:3,rationalEnabled:true,pitchRatio:ratio,shiftHz:0,
       ...fullBandPartialOptions(runtimeSampleRate),
       curvature:1,invert:0,mode:"blend",outside:"pass",axisShift:0,axisReference:350,
       axisPivot:350,axisSlope:1,ringEnabled:false,wet:1});
@@ -1465,11 +1463,17 @@ async function play(mode="wet",offset=null){
       const initialSpeed=granularActive?(temporaryScrubSpeed??granular.speed):1;
       const initialPitch=granularActive?granular.pitch:0;
       const initialLoop={...ab};
+      let wasmBytes=null,rustSettings=null;
+      if(granularActive&&activeSynthMode==="live"){
+        wasmBytes=await ensureSharedCore();
+        rustSettings=settings();
+      }
       bridge=await createSourcePCMBridge({
         ctx,sourceChannels:state.dry,sourceSampleRate:sourceRate,
         speed:initialSpeed,
         processingMode:granularActive?activeSynthMode:"raw",
         pitchSemitones:initialPitch,
+        wasmBytes,rustSettings,
         wsolaWindowFrames:lab.shortFftSize,
         dualShortFrames:lab.shortFftSize,
         dualLongFrames:lab.longFftSize,
@@ -1594,7 +1598,8 @@ async function play(mode="wet",offset=null){
       controls.main.disabled=false;
       const telemetry=$("#rt-telemetry");
       telemetry.dataset.pcmTransport=granularActive?
-        (activeSynthMode==="spectral"?"spectral-realtime":
+        (activeSynthMode==="live"?"rust-engine3-source-time":
+          activeSynthMode==="spectral"?"spectral-realtime":
           activeSynthMode==="pv"?"pv-phase-locked":
           activeSynthMode==="wsola"?"wsola-source-time":
           activeSynthMode==="dual"?"dual-transient-source-time":
@@ -1606,6 +1611,8 @@ async function play(mode="wet",offset=null){
       indicator(granularActive?
         (activeSynthMode==="spectral"?
           "STFT位相合成中 · ソース位置同期/±8/0倍（音響品質検証中）":
+          activeSynthMode==="live"?
+          "Rust engine 3部分音＋残差合成中 · 共通サンプル時計/±8/0倍":
           activeSynthMode==="pv"?
           "PVピーク位相ロック合成中 · 元音源同期/±8/0倍（音響品質検証中）":
           activeSynthMode==="wsola"?
@@ -1617,7 +1624,8 @@ async function play(mode="wet",offset=null){
           "粒状合成中 · 独立音程/±8/0倍（音質未受入）"):
         "原音再生中 · PCM実験経路（速度と音程は未連動）");
       message(granularActive?
-        "再生中。"+(activeSynthMode==="spectral"?"STFT位相合成":
+        "再生中。"+(activeSynthMode==="live"?"Rust部分音＋残差合成":
+          activeSynthMode==="spectral"?"STFT位相合成":
           activeSynthMode==="pv"?"PVピーク位相ロック":
           activeSynthMode==="wsola"?"WSOLA波形相関":
           activeSynthMode==="dual"?"Dual短窓/長窓合成":
@@ -2474,7 +2482,7 @@ function labRefresh(){
   labShort.disabled=!["wsola","dual"].includes(lab.mode);
   // Native Dual has TWO meaningful DSP windows, unlike native PV/WSOLA.
   labLong.disabled=lab.mode==="wsola"||
-    (isPCMModel(lab.mode)&&lab.mode!=="dual");
+    (isPCMModel(lab.mode)&&lab.mode!=="dual"&&lab.mode!=="live");
   labWindows.disabled=lab.mode==="live"||isPCMModel(lab.mode)||lab.individual;
   labLong.max=lab.mode==="live"?"12":"13";
   syncLabInput(labShortValue,lab.shortFftSize,labShort.disabled);
@@ -2498,12 +2506,12 @@ function labRefresh(){
     lab.mode==="dual"?
     "短窓＝打音・音の切替の時間精度、長窓＝持続音の周波数精度。それぞれ別々に処理へ反映します。":
     lab.mode==="wsola"?"WSOLAは短窓を使い、長窓は使用しません。":
-    lab.mode==="live"?"Rustの部分音方式は長窓設定のみ反映します。短窓・参照窓数は使いません。":
+    lab.mode==="live"?"Rust engine 3は元音源サンプル位置から部分音と残差を解析し、長窓設定を反映します。短窓・参照窓数は使いません。":
     "このモデルは長窓を使います。短窓は複合窓・WSOLAでのみ利用します。";
   const notes={
     spectral:"STFT Spectral：周波数成分の位相を連続進行させる再生方式。0倍は同じ波形片の反復ではなく、固定した音源位置のスペクトルから位相を発展させます。極短区間の可聴品質とiOS処理性能は検証中です。",
     granular:"Granular：波形片の重ね合わせ方式（比較用）。符号付き±8倍・0倍・サンプル単位A/Bに対応します。極低速時の周期感・comb感は既知の評価課題です。",
-    live:"部分音：周波数の山と、その間の細かな成分も補って再合成します。密度の高い音では変換誤差が残ることがあります。",
+    live:"Rust engine 3：部分音発振器と帯域内スペクトル残差を共通PCMの元音源位置から解析し、出力時間で合成します。±8倍・0倍・逆再生・独立音程・A/B・スクラブに接続しました。音質評価は継続中です。",
     pv:"位相ボコーダー：ピーク近傍の位相関係を保持するSTFT再合成です。通常は元音源位置と逆/0倍・スクラブに直接追従します。個別波長選択時は従来の先読み処理です。打音や極低速の音色は検証中です。",
     wsola:"WSOLA：ステレオ共通の正規化波形相関によって接続する実時間OLA。通常は元音源位置・正逆/0倍・スクラブに追従します。個別波長ONは従来の先読み方式です。極低速の周期性・打音品質は検証中です。",
     dual:"短窓WSOLA＋長窓PV：打音の短い波形と持続音の周波数成分を独立合成し、過渡音検出・ステレオ共通位相照合で切替える方式です。±8/0/逆とスクラブに対応しますが音響品質は未受入です。",
@@ -2519,9 +2527,9 @@ function labRefresh(){
     "このモデルは0/逆再生・サンプル単位A/B・スクラブ対応。再生/モデルの両タブが同じ設定値です。":
     (cap.reason||"研究モデルは0.5〜2倍のみ対応。A/B・0/逆再生・即時スクラブ非対応（元のA/B設定は保持）。");
   if(!state.player?.labStream)labStatusText(!cap.supported?
-    "未適用: "+cap.reason:isPCMModel(lab.mode)?
-    lab.mode.toUpperCase()+" · 主再生・選択モデル一致":lab.mode==="live"?
+    "未適用: "+cap.reason:lab.mode==="live"?
     "Rust/WASMの部分音処理 · 選択時に主再生へ適用":
+    isPCMModel(lab.mode)?lab.mode.toUpperCase()+" · 主再生・選択モデル一致":
     (lab.individual?"個別波長＋":"")+lab.mode.toUpperCase()+" · 自動先読み処理。実音切替はバッファ待ちあり");
 }
 function labInvalidate(){lab.job++;lab.worker?.terminate();lab.worker=null;lab.processed=null;}
@@ -2529,6 +2537,7 @@ let modelSelectionEpoch=0;
 async function labSettingsChanged(){
   const ticket=++modelSelectionEpoch;
   const previous=lab.mode,previousIndividual=lab.individual;
+  const previousSpeed=lab.speed,previousSemi=lab.semitones;
   const previousShort=lab.shortFftSize,previousLong=lab.longFftSize;
   const currentTime=playPosition();
   const nextIndividual=labIndividual.checked;
@@ -2553,7 +2562,6 @@ async function labSettingsChanged(){
      nextIndividual===lab.individual){labRefresh();return;}
   const capability=primaryModelCapability(nextMode,nextSpeed,
     {individual:nextIndividual});
-  if(nextMode==="live"&&capability.supported)liveFactors(nextSpeed,nextSemi);
   lab.mode=nextMode;lab.speed=nextSpeed;lab.semitones=nextSemi;
   lab.shortFftSize=nextShort;lab.longFftSize=nextLong;
   lab.fftSize=Math.min(4096,nextLong);
@@ -2591,12 +2599,19 @@ async function labSettingsChanged(){
        (nextMode==="wsola"&&!nextIndividual&&previousShort!==nextShort)||
        (nextMode==="dual"&&!nextIndividual&&
          (previousShort!==nextShort||previousLong!==nextLong))||
+       (nextMode==="live"&&!previousIndividual&&!lab.individual&&
+         previousLong!==nextLong)||
        (isPCMModel(nextMode,nextIndividual)&&!player.rawPCM)||
        (!isPCMModel(nextMode,nextIndividual)&&player.rawPCM)){
       await stop();
       if(ticket!==modelSelectionEpoch)return;
       state.seek=currentTime;
       void play(isPCMModel(nextMode,nextIndividual)?"player":"wet",currentTime);
+    }else if(nextMode==="live"&&previous==="live"&&!previousIndividual&&
+             !lab.individual&&player.rawPCM&&player.pcmBridge){
+      if(nextSpeed!==previousSpeed)await player.pcmBridge.setSpeed(nextSpeed);
+      if(ticket!==modelSelectionEpoch||state.player!==player)return;
+      if(nextSemi!==previousSemi)await player.pcmBridge.setPitch(nextSemi);
     }else if(nextMode==="live"&&previous==="live"&&!previousIndividual&&
              !lab.individual&&player.labRealtime){
       const p=player;p.offset=currentTime;p.at=state.ctx.currentTime;

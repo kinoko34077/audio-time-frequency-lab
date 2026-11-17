@@ -26,7 +26,7 @@ export async function createSourcePCMBridge({
   loopEndFrame=sourceChannels?.[0]?.length,loopEnabled=false,
   onEvent=()=>{},commandTimeoutMs=5000,
   processingMode="raw",pitchSemitones=0,wsolaWindowFrames=1024,
-  dualShortFrames=512,dualLongFrames=2048
+  dualShortFrames=512,dualLongFrames=2048,wasmBytes=null,rustSettings=null
 }={}){
   if(!ctx?.audioWorklet||!Number.isFinite(ctx.sampleRate)||
      !Array.isArray(sourceChannels)||sourceChannels.length<1||
@@ -40,8 +40,11 @@ export async function createSourcePCMBridge({
   if(!Number.isFinite(commandTimeoutMs)||commandTimeoutMs<1||commandTimeoutMs>60000)
     throw RangeError("invalid PCM command timeout");
   let currentSpeed=validatePlaybackSpeed(speed);
-  if(!["raw","granular","spectral","pv","wsola","dual","am"].includes(processingMode))
+  if(!["raw","granular","spectral","pv","wsola","dual","am","live"].includes(processingMode))
     throw RangeError("invalid PCM processing mode");
+  if(processingMode==="live"&&(!(wasmBytes instanceof ArrayBuffer)||
+     !rustSettings||rustSettings.engine!==3))
+    throw RangeError("Rust engine 3 requires the shared WASM module and settings");
   if(![256,512,1024,2048,4096].includes(wsolaWindowFrames))
     throw RangeError("invalid WSOLA synthesis window");
   if(![256,512,1024,2048,4096].includes(dualShortFrames)||
@@ -77,6 +80,7 @@ export async function createSourcePCMBridge({
   // Do not copy entire track to the worklet; these small snapshots are moved.
   let requestId=0,closed=false,latest=null,scratchCached=null;
   const pending=new Map();
+  let rustReadyResolve=null,rustReadyReject=null;
   const rejectPending=error=>{
     for(const ticket of pending.values()){
       clearTimeout(ticket.timer);
@@ -90,6 +94,7 @@ export async function createSourcePCMBridge({
     // Ask the processor to terminate before suppressing normal dispose().
     try{node.port.postMessage({type:"dispose"});}catch{}
     closed=true;
+    rustReadyReject?.(error);rustReadyResolve=null;rustReadyReject=null;
     node.port.onmessage=null;
     node.removeEventListener("processorerror",onProcessorError);
     try{node.disconnect();}catch{}
@@ -142,6 +147,10 @@ export async function createSourcePCMBridge({
     const data=event.data||{};
     if(data.type==="need-window"){
       sendWindow(data.frame,null,currentSpeed,data.refillId);
+    }else if(data.type==="rust-ready"){
+      rustReadyResolve?.();rustReadyResolve=null;rustReadyReject=null;
+    }else if(data.type==="rust-error"){
+      rustReadyReject?.(Error(data.message));rustReadyResolve=null;rustReadyReject=null;
     }else if(data.type==="command-accepted"||data.type==="error"){
       const ticket=pending.get(data.requestId);
       if(ticket){
@@ -153,6 +162,26 @@ export async function createSourcePCMBridge({
     }else if(data.type==="progress")latest=data;
     onEvent(data);
   };
+  if(processingMode==="live"){
+    try{
+      await new Promise((resolve,reject)=>{
+        const timer=setTimeout(()=>reject(
+          Error("Rust source-time engine initialization timed out")
+        ),commandTimeoutMs);
+        rustReadyResolve=()=>{clearTimeout(timer);resolve();};
+        rustReadyReject=error=>{clearTimeout(timer);reject(error);};
+        try{node.port.postMessage({type:"rust-init",wasmBytes,rustSettings});}
+        catch(error){clearTimeout(timer);reject(error);}
+      });
+    }catch(error){
+      closed=true;
+      try{node.port.postMessage({type:"dispose"});}catch{}
+      node.port.onmessage=null;
+      node.removeEventListener("processorerror",onProcessorError);
+      try{node.disconnect();}catch{}
+      throw error;
+    }
+  }
   // At initial start only, populate both loop endpoints before play.
   // Later user A/B changes use one atomic loop-config message.
   // The renderer bounds its cache to four windows by default.
@@ -222,7 +251,7 @@ export async function createSourcePCMBridge({
     },
     setPitch(next){
       if(processingMode==="raw")
-        return Promise.reject(Error("independent pitch requires spectral or granular mode"));
+        return Promise.reject(Error("independent pitch requires a synthesis model"));
       try{next=validatePitch(next);}
       catch(error){return Promise.reject(error);}
       // Preserve caller's full finite input precision, independent of any

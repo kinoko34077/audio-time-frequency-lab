@@ -5,10 +5,12 @@ import path from "node:path";
 import puppeteer from "puppeteer-core";
 
 const recording=path.resolve("web-demo/test-fixtures/meta-piano-a0-cc0-3s-48khz.wav");
+const python=process.env.PYTHON_BIN||
+  (process.platform==="win32"?"python":"python3");
 
 test("R4 default page: play recorded song, set precise A/B and speed/pitch, switch tabs without reset",async()=>{
   const port=18771;
-  const server=spawn("python3",["-m","http.server",String(port),"--bind","127.0.0.1"],{
+  const server=spawn(python,["-m","http.server",String(port),"--bind","127.0.0.1"],{
     cwd:path.resolve("_site"),stdio:"ignore"
   });
   let browser;
@@ -321,6 +323,14 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, swit
       touchPoints:[point(.37,21),point(.63,22)]});
     await touch.send("Input.dispatchTouchEvent",{type:"touchMove",
       touchPoints:[point(.22,21),point(.78,22)]});
+    // CDP can return before Chrome dispatches the resulting pointer events.
+    // Observe the actual zoom update before recording the no-jump baseline.
+    await page.waitForFunction(before=>{
+      const label=document.querySelector("#wave-zoom-label")?.textContent||"";
+      const span=label.startsWith("ms ")?Number(label.slice(3))/1000:
+        Number(label.replace("秒",""));
+      return span<before;
+    },{timeout:5000},beforePinchSpan);
     const frameAfterZoomMove=Number(await page.$eval("#wave-detail",
       el=>el.getAttribute("aria-valuenow")));
     // Snapshot emitted audible-seek commands after the intended pinch move.
@@ -467,7 +477,7 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, swit
 });
 test("U1/U5 primary Play routes to REAL selected live/PV/Granular engines and one speed/pitch state",async()=>{
   const port=18772;
-  const server=spawn("python3",["-m","http.server",String(port),"--bind","127.0.0.1"],{
+  const server=spawn(python,["-m","http.server",String(port),"--bind","127.0.0.1"],{
     cwd:path.resolve("_site"),stdio:"ignore"
   });
   let browser;
@@ -519,15 +529,72 @@ test("U1/U5 primary Play routes to REAL selected live/PV/Granular engines and on
     assert.equal(await page.$eval("#model-transport-host #play-main",el=>el.getClientRects().length>0),true);
     assert.equal(await page.$eval("#granular-speed-value",el=>el.value),"1.237");
     await set("lab-model","live");
-    await page.waitForFunction(()=>document.querySelector("#lab-status")?.textContent
-      .includes("Rust/WASM"),{timeout:10000});
+    try{
+      await page.waitForFunction(()=>document.querySelector("#lab-status")?.textContent
+        .includes("Rust/WASM"),{timeout:10000});
+    }catch(error){
+      const observed=await page.evaluate(()=>({
+        model:document.querySelector("#lab-model").value,
+        individual:document.querySelector("#lab-individual-periods").checked,
+        speed:document.querySelector("#granular-speed-value").value,
+        pitch:document.querySelector("#granular-pitch-value").value,
+        status:document.querySelector("#lab-status").textContent,
+        description:document.querySelector("#lab-model-description").textContent,
+        compatibility:document.querySelector("#lab-model-compatibility").textContent
+      }));
+      throw Error("Rust model selection status did not settle: "+
+        JSON.stringify({observed,errors})+" / "+error.message);
+    }
+    assert.equal(await page.$eval("#lab-long",el=>el.disabled),false,
+      "Rust long-window slider must remain available for its supported setting");
+    assert.equal(await page.$eval("#lab-long-value",el=>el.disabled),false,
+      "Rust long-window numeric input must remain available");
     await page.click("#main-tab-player");
     await page.click("#play-main");
     await page.waitForFunction(()=>window.__engineCreations?.some(e=>
-      e.kind==="worklet"&&e.name==="frequency-warp-rust"),{timeout:20000});
-    await page.waitForFunction(()=>document.querySelector("#play-main")
-      ?.textContent.includes("モデル停止"),{timeout:20000});
-    assert.match(await page.$eval("#lab-model-compatibility",el=>el.textContent),/非対応|未対応/);
+      e.kind==="worklet"&&e.name==="audio-lab-source-pcm"),{timeout:20000});
+    await page.waitForFunction(()=>document.querySelector("#rt-telemetry")
+      ?.dataset.pcmTransport==="rust-engine3-source-time"&&
+      document.querySelector("#granular-optin-status")?.dataset.renderRunning==="true",
+      {timeout:20000});
+    assert.match(await page.$eval("#rt-indicator",el=>el.textContent),/Rust engine 3部分音＋残差/);
+    assert.match(await page.$eval("#lab-model-compatibility",el=>el.textContent),/0\/逆再生・サンプル単位A\/B/);
+    const rustNodeStarts=await page.$eval("#rt-telemetry",el=>el.dataset.pcmNodeStarts);
+    assert.equal(await page.evaluate(()=>window.__engineCreations.filter(e=>
+      e.kind==="worklet"&&e.name==="audio-lab-source-pcm").length),1,
+      "Rust must render inside the shared PCM Worklet");
+    assert.equal(await page.evaluate(()=>window.__engineCreations.some(e=>
+      e.kind==="worklet"&&e.name==="frequency-warp-rust")),false,
+      "Rust primary playback must not launch its separate legacy Worklet");
+    // The Rust FFT size is fixed when its WASM renderer is constructed. A
+    // live long-window edit must rebuild the same shared PCM route so the new
+    // setting reaches the DSP instead of changing only the visible control.
+    await page.click("#main-tab-model");
+    const nodeStartsBeforeLongChange=Number(await page.$eval("#rt-telemetry",
+      el=>el.dataset.pcmNodeStarts));
+    const currentLong=await page.$eval("#lab-long",el=>el.value);
+    const nextLong=currentLong==="12"?"11":"12";
+    await set("lab-long",nextLong);
+    await page.waitForFunction(before=>{
+      const telemetry=document.querySelector("#rt-telemetry");
+      return Number(telemetry?.dataset.pcmNodeStarts)>before&&
+        telemetry?.dataset.pcmTransport==="rust-engine3-source-time"&&
+        document.querySelector("#granular-optin-status")?.dataset.renderRunning==="true";
+    },{timeout:20000},nodeStartsBeforeLongChange);
+    const afterLongChange=await page.evaluate(()=>({
+      starts:Number(document.querySelector("#rt-telemetry").dataset.pcmNodeStarts),
+      route:document.querySelector("#rt-telemetry").dataset.pcmTransport,
+      speed:document.querySelector("#granular-speed-value").value,
+      pitch:document.querySelector("#granular-optin-status").dataset.renderPitch,
+      long:document.querySelector("#lab-long").value
+    }));
+    assert.equal(afterLongChange.starts,nodeStartsBeforeLongChange+1,
+      "changing the Rust long window recreates one shared renderer");
+    assert.equal(afterLongChange.route,"rust-engine3-source-time");
+    assert.equal(afterLongChange.speed,"1.237");
+    assert.equal(afterLongChange.pitch,"0.125");
+    assert.equal(afterLongChange.long,nextLong);
+    await page.click("#main-tab-player");
     await page.click("#main-tab-model");
     await set("lab-model","pv");
     await page.waitForFunction(()=>document.querySelector("#rt-telemetry")
@@ -539,8 +606,8 @@ test("U1/U5 primary Play routes to REAL selected live/PV/Granular engines and on
     assert.match(await page.$eval("#rt-indicator",el=>el.textContent),
       /PVピーク位相ロック/);
     await set("lab-model","granular");
-    await page.waitForFunction(()=>window.__engineCreations?.some(e=>
-      e.kind==="worklet"&&e.name==="audio-lab-source-pcm"),{timeout:20000});
+    await page.waitForFunction(()=>document.querySelector("#rt-telemetry")
+      ?.dataset.pcmTransport==="granular-experimental",{timeout:20000});
     await page.waitForFunction(()=>document.querySelector("#granular-optin-status")
       ?.dataset.renderRunning==="true",{timeout:20000});
     assert.equal(await page.$eval("#granular-speed-value",e=>e.value),"1.237");
@@ -554,68 +621,47 @@ test("U1/U5 primary Play routes to REAL selected live/PV/Granular engines and on
     await page.click("#main-tab-model");
     assert.equal(await page.$eval("#granular-speed-value",e=>e.value),"1.5");
     assert.equal(await page.$eval("#granular-pitch-value",e=>e.value),"0.7");
-    // An unsupported pending model selection retains both canonical input
-    // and the existing real audio stream; no silent model substitution.
+    // Rust supports audible 0x on the shared source clock. Switching from
+    // Granular must activate Rust's partial+residual DSP in the same node.
     await page.click("#main-tab-player");
     await set("granular-speed-value","0");
     await page.click("#main-tab-model");
-    const workletsBefore=await page.evaluate(()=>window.__engineCreations.length);
+    const pcmRoutesBeforeRustZero=await page.$eval("#rt-telemetry",el=>el.dataset.pcmNodeStarts);
     await set("lab-model","live");
-    await page.waitForFunction(()=>document.querySelector("#lab-status")
-      ?.textContent.includes("適用待ち"),{timeout:10000});
-    await page.waitForFunction(()=>document.querySelector("#audio-state-summary")
-      ?.textContent.includes("適用待ち"),{timeout:4000});
+    await page.waitForFunction(()=>document.querySelector("#rt-telemetry")
+      ?.dataset.pcmTransport==="rust-engine3-source-time"&&
+      document.querySelector("#granular-optin-status")?.dataset.renderRunning==="true",
+      {timeout:20000});
     assert.equal(await page.$eval("#runtime-hud",e=>e.getClientRects().length),0,
-      "pending model must be shown in the one-line status, not a separate HUD");
-    // Granular's primary button means "Pause", not legacy "モデル停止".
-    // Verify actual render and the still-owned source PCM session instead of
-    // asserting a label belonging to a different engine.
-    const retained=await page.evaluate(()=>({
+      "transport status stays inline without a duplicate HUD");
+    assert.doesNotMatch(await page.$eval("#lab-status",el=>el.textContent),/適用待ち/);
+    const rustAtZero=await page.evaluate(()=>({
       mode:document.querySelector("#rt-telemetry").dataset.pcmTransport,
       running:document.querySelector("#granular-optin-status").dataset.renderRunning,
-      primary:document.querySelector("#play-main").textContent,
-      stopDisabled:document.querySelector("#stop").disabled
+      speed:document.querySelector("#granular-speed-value").value,
+      stopDisabled:document.querySelector("#stop").disabled,
+      nodeStarts:document.querySelector("#rt-telemetry").dataset.pcmNodeStarts
     }));
-    assert.equal(retained.mode,"granular-experimental",
-      "pending model must retain the actual playing Granular engine: "+JSON.stringify(retained));
-    assert.equal(retained.running,"true",
-      "pending model must not stop the source PCM audio render: "+JSON.stringify(retained));
-    assert.equal(retained.stopDisabled,false);
-    assert.equal(await page.$eval("#granular-speed-value",e=>e.value),"0");
-    assert.equal(await page.evaluate(()=>window.__engineCreations.length),workletsBefore,
-      "unsupported live 0x must not instantiate a substituted DSP");
-    // When the user restores a compatible speed, the already selected
-    // pending Rust model becomes the real processing path automatically.
+    assert.equal(rustAtZero.mode,"rust-engine3-source-time",JSON.stringify(rustAtZero));
+    assert.equal(rustAtZero.running,"true",JSON.stringify(rustAtZero));
+    assert.equal(rustAtZero.speed,"0",JSON.stringify(rustAtZero));
+    assert.equal(rustAtZero.stopDisabled,false);
+    assert.equal(Number(rustAtZero.nodeStarts),Number(pcmRoutesBeforeRustZero)+1,
+      "selecting Rust creates one instance of the shared PCM Worklet");
+    const rustRouteNodeCount=await page.evaluate(()=>window.__engineCreations.filter(e=>
+      e.kind==="worklet"&&e.name==="audio-lab-source-pcm").length);
+    const frozenAt=await page.$eval("#granular-optin-status",el=>el.dataset.renderFrame);
     await page.click("#main-tab-player");
-    await set("granular-speed-value","1.5");
-    await page.waitForFunction(()=>document.querySelector("#rt-indicator")
-      ?.textContent.includes("Rust/WASM AudioWorklet"),{timeout:20000});
-    assert.equal(await page.$eval("#granular-speed-value",e=>e.value),"1.5");
-
-    // Independent review #71 P2 regression: a requested 0x is pending for
-    // Rust, but ArrowRight seek must use its ACTUALLY APPLIED 1.5x source.
-    await page.evaluate(()=>{
-      window.__pendingRustSeekStarts=[];
-      const proto=AudioBufferSourceNode.prototype,original=proto.start;
-      proto.start=function(...args){
-        window.__pendingRustSeekStarts.push({
-          speed:this.playbackRate.value,offset:args[1]??0
-        });
-        return original.apply(this,args);
-      };
-    });
-    await set("granular-speed-value","0");
-    await page.waitForFunction(()=>document.querySelector("#lab-status")
-      ?.textContent.includes("適用待ち"),{timeout:10000});
     await page.focus("#wave");
     await page.keyboard.press("ArrowRight");
-    await page.waitForFunction(()=>window.__pendingRustSeekStarts.length>0,{timeout:8000});
-    const rustSeek=await page.evaluate(()=>window.__pendingRustSeekStarts.at(-1));
-    assert.equal(rustSeek.speed,1.5,
-      "pending 0x must not change the actual Rust source playback rate");
-    assert.equal(await page.$eval("#granular-speed-value",el=>el.value),"0");
-    assert.match(await page.$eval("#lab-status",el=>el.textContent),/適用待ち/);
-
+    await page.waitForFunction(before=>document.querySelector("#granular-optin-status")
+      ?.dataset.renderFrame!==before,{timeout:8000},frozenAt);
+    assert.equal(await page.$eval("#granular-speed-value",el=>el.value),"0",
+      "seek at audible 0x must preserve the selected speed");
+    assert.equal(await page.$eval("#rt-telemetry",el=>el.dataset.pcmTransport),"rust-engine3-source-time");
+    assert.equal(await page.evaluate(()=>window.__engineCreations.filter(e=>
+      e.kind==="worklet"&&e.name==="audio-lab-source-pcm").length),rustRouteNodeCount,
+      "zero-speed seek must not create another render path");
     // Preserve the old Worker-specific pending seek regression: it now
     // applies to PV+period-joint, which deliberately retains that backend.
     // The ordinary PV path above is a real signed-speed Worklet.
@@ -651,13 +697,14 @@ test("U1/U5 primary Play routes to REAL selected live/PV/Granular engines and on
     console.log("U1_U5_REAL_MODEL_ROUTE "+JSON.stringify({
       engines:await page.evaluate(()=>window.__engineCreations),
       speedPitch:"one canonical editable pair",ab:"preserved",
-      unsupportedZero:"pending without stopping last-good DSP"
+      rustZero:"audible frozen source cursor and shared-clock seek",
+      individualPeriodWorkerZero:"pending without stopping last-good DSP"
     }));
   }finally{await browser?.close();server.kill("SIGTERM");}
 });
 
 test("U7 touch tap seeks without autoplay; deliberate drag auditions PCM, paused remains paused",async()=>{
-  const port=18775,server=spawn("python3",["-m","http.server",String(port),"--bind","127.0.0.1"],{
+  const port=18775,server=spawn(python,["-m","http.server",String(port),"--bind","127.0.0.1"],{
     cwd:path.resolve("_site"),stdio:"ignore"
   });
   let browser;
@@ -763,7 +810,7 @@ test("U7 touch tap seeks without autoplay; deliberate drag auditions PCM, paused
 
 test("shared A/B updates every realtime model and compact numeric controls stay expanded",async()=>{
   const port=18809;
-  const server=spawn("python3",["-m","http.server",String(port),"--bind","127.0.0.1"],{
+  const server=spawn(python,["-m","http.server",String(port),"--bind","127.0.0.1"],{
     cwd:path.resolve("_site"),stdio:"ignore"
   });
   let browser;

@@ -32,6 +32,7 @@ jobs:
         run: |
           rustup target add wasm32-unknown-unknown
           cargo build --manifest-path upstream/frequency-warp-vst/core/Cargo.toml --release --target wasm32-unknown-unknown
+          cp upstream/frequency-warp-vst/core/target/wasm32-unknown-unknown/release/frequency_warp_core.wasm web-demo/dsp_core.wasm
       - name: Stage exact inherited entry graph with new model overlay
         run: |
           node web-demo/stage-pages.mjs upstream/frequency-warp-vst/core/target/wasm32-unknown-unknown/release/frequency_warp_core.wasm
@@ -45,6 +46,10 @@ jobs:
           test -s _site/period-joint-close.mjs
           test -s _site/lab-processor.worker.mjs
           test -s _site/lab-contract.mjs
+          test -s _site/source-rust.mjs
+      - name: Rust engine 3 source-time PCM and pitch measurements
+        run: |
+          WARP_WEB_ROOT=_site node --test web-demo/core-wasm.test.mjs web-demo/source-rust.test.mjs
       - name: Source-equivalent native Chrome AudioWorklet browser runtime
         run: |
           npm install --no-save --no-package-lock puppeteer-core@24

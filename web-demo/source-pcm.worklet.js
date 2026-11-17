@@ -9,6 +9,7 @@ import {createGranularTimePitch,createWsolaTimePitch} from "./source-granular.mj
 import {createSpectralTimePitch} from "./source-spectral.mjs";
 import {createDualTimePitch} from "./source-dual.mjs";
 import {createAmTimePitch} from "./source-am.mjs";
+import {createRustTimePitch} from "./source-rust.mjs";
 
 class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
   constructor(options){
@@ -16,15 +17,19 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
     const props=options.processorOptions||{};
     this.renderer=createSourcePCMRenderer({...props,outputSampleRate:sampleRate});
     this.sourceFrames=props.sourceFrames;
+    this.sourceSampleRate=props.sourceSampleRate;
+    this.channelCount=props.channelCount;
+    this.initialPitchSemitones=props.pitchSemitones??0;
     const mode=props.processingMode??"raw";
-    if(!["raw","granular","spectral","pv","wsola","dual","am"].includes(mode))
+    if(!["raw","granular","spectral","pv","wsola","dual","am","live"].includes(mode))
       throw RangeError("unknown PCM processing mode");
     this.processingMode=mode;
     const synthConfig={
       sourceSampleRate:props.sourceSampleRate,outputSampleRate:sampleRate,
       channelCount:props.channelCount,pitchSemitones:props.pitchSemitones??0
     };
-    this.synth=mode==="dual"?createDualTimePitch({
+    this.synth=mode==="live"?null:
+      mode==="dual"?createDualTimePitch({
         ...synthConfig,shortFrames:props.dualShortFrames??512,
         longFrames:props.dualLongFrames??2048
       }):
@@ -52,12 +57,31 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
         if(m.type==="dispose"){
           this.running=false;
           this.disposed=true;
+          this.synth?.dispose?.();
           this.pendingRequest=null;
           this.renderPending=null;
           this.port.close();
           return;
         }
         if(this.disposed)return;
+        if(m.type==="rust-init"){
+          try{
+            if(this.processingMode!=="live"||this.synth)
+              throw Error("unexpected Rust source-time initialization");
+            this.synth=createRustTimePitch({
+              wasmBytes:m.wasmBytes,rustSettings:m.rustSettings,
+              sourceSampleRate:this.sourceSampleRate,
+              outputSampleRate:sampleRate,
+              channelCount:this.channelCount,
+              pitchSemitones:this.initialPitchSemitones
+            });
+            this.port.postMessage({type:"rust-ready"});
+          }catch(error){
+            this.port.postMessage({type:"rust-error",
+              message:error?.message||String(error)});
+          }
+          return;
+        }
         if(m.type==="window"){
           // Ignore late source refills from an obsolete seek, loop or speed.
           if(m.refillId!=null&&m.refillId!==this.pendingRequest)return;
@@ -235,6 +259,8 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
     }
     const missing=this.processingMode==="spectral"||this.processingMode==="pv"?
       this.renderer.renderSpectral(out,this.synth):
+      this.processingMode==="live"?
+      this.renderer.renderRust(out,this.synth):
       this.synth?this.renderer.renderGranular(out,this.synth):
       this.renderer.render(out);
     this.emitRenderReceipt(sourceFrame,missing);
