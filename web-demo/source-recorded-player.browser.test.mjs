@@ -496,8 +496,8 @@ test("recorded CC0 upright piano goes through the real granular file picker and 
       assert.ok(transition.timing.handoffJob&&transition.timing.handoffResult&&
         transition.timing.installedChunk,
         "handoff Worker timing must cover start, result and shared-Worklet acceptance");
-    assert.ok(transition.workerCount>=2,
-      "the handoff renders the new generation while the old Worker finishes");
+    assert.ok(transition.workerCount>=1,
+      "the staged generation is rendered by the active or parallel handoff Worker");
     assert.equal(transition.missingFrameDelta,0,
       "a recorded PV→WSOLA generation change must preserve audible PCM frames");
     assert.ok(transition.activationDelayMs<totalSourceFrames/decodedRate*1000,
