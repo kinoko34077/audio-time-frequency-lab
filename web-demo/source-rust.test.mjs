@@ -126,6 +126,43 @@ test("Rust engine 3 uses the shared PCM cursor and sounds distinct from PV",asyn
   }
 });
 
+test("Rust source windows retain in-range PCM at both unlooped endpoints",async()=>{
+  const wasmBytes=await loadWasm();
+  const sourceRate=48000,sourceFrames=12000;
+  const source=Float32Array.from({length:sourceFrames},(_,i)=>
+    .4*Math.sin(2*Math.PI*440*i/sourceRate));
+  const silentEndpoints=[];
+  for(const {label,speed,startFrame} of [
+    {label:"forward near EOF",speed:1,startFrame:sourceFrames-1000},
+    {label:"reverse near start",speed:-1,startFrame:1000}
+  ]){
+    const renderer=createSourcePCMRenderer({
+      sourceFrames,sourceSampleRate:sourceRate,outputSampleRate:sourceRate,
+      channelCount:1,speed,startFrame
+    });
+    renderer.installWindow(0,[source]);
+    const rust=createRustTimePitch({
+      wasmBytes,rustSettings:rustSettings(sourceRate),
+      sourceSampleRate:sourceRate,outputSampleRate:sourceRate,channelCount:1,
+      pitchSemitones:5
+    });
+    const block=new Float32Array(128);
+    let energy=0,frames=0;
+    try{
+      for(let i=0;i<4;i++){
+        assert.equal(renderer.renderRust([block],rust),0);
+        for(const sample of block){energy+=sample*sample;frames++;}
+      }
+      const rms=Math.sqrt(energy/frames);
+      if(!(rms>.01))silentEndpoints.push(label+" RMS="+rms);
+      assert.equal(renderer.timeline.state.ended,false,
+        label+" reached the transport endpoint before the rendered PCM did");
+    }finally{rust.dispose();}
+  }
+  assert.deepEqual(silentEndpoints,[],
+    "Rust must keep rendering the valid part of unlooped endpoint analysis windows");
+});
+
 test("Rust analysis windows read across short A/B loops as one periodic source",async()=>{
   const wasmBytes=await loadWasm();
   const sourceRate=44100,outputRate=48000,sourceFrames=sourceRate;

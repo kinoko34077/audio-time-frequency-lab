@@ -129,7 +129,14 @@ export function createRustTimePitch({
       const missing={first:null,total:0};
       for(let i=0;i<frames;i++){
         if(pendingIndex>=hopFrames){
-          const sourceCenter=sourceFrameAt(nextStart+windowFrames/2-outputFrames);
+          let sourceCenter=sourceFrameAt(nextStart+windowFrames/2-outputFrames);
+          if(sourceCenter===null&&!state.loopEnabled){
+            // The render window can extend past a clip boundary while its
+            // output hop is still in range. Anchor at the nearest endpoint;
+            // sampleWindow zero-pads only the out-of-range part of each window.
+            sourceCenter=state.speed<0?0:state.speed>0?sourceFrames-1:
+              Math.max(0,Math.min(sourceFrames-1,state.sourceFrame));
+          }
           input.fill(0);probe.fill(0);
           if(sourceCenter!==null){
             for(let channel=0;channel<channelCount;channel++){

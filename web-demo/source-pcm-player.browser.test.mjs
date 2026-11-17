@@ -4,11 +4,13 @@ import {spawn} from "node:child_process";
 import path from "node:path";
 import puppeteer from "puppeteer-core";
 
-test("live Audio Lab opt-in original playback uses a persistent PCM node across waveform seek",async()=>{
-  // Verify the actual production entry point with a user-shaped native WAV file.
-  // This is opt-in/raw original audio only; it is NOT pitch-independent playback.
+test("live Audio Lab routes the selected Rust model through the shared PCM node",async()=>{
+  // Verify the production entry point with a user-shaped native WAV file,
+  // including the selected Rust DSP route through the shared PCM Worklet.
   const port=18745;
-  const server=spawn("python3",["-m","http.server",String(port),"--bind","127.0.0.1"],{
+  const python=process.env.PYTHON_BIN||
+    (process.platform==="win32"?"python":"python3");
+  const server=spawn(python,["-m","http.server",String(port),"--bind","127.0.0.1"],{
     cwd:path.resolve("_site"),stdio:"ignore"
   });
   let browser;
@@ -83,9 +85,8 @@ test("live Audio Lab opt-in original playback uses a persistent PCM node across 
     assert.match(after.telemetry,/cache不足 0/);
     assert.match(after.elapsed,/0:01/);
 
-    // The old app defaulted the research model to Rust; now it defaults
-    // explicitly to Granular. Select Rust before injecting the invalid
-    // preflight quality, since model selection legitimately updates #quality.
+    // Selecting Rust in the model tab now switches the active player to the
+    // real source-time Rust engine on the shared PCM Worklet.
     await page.click("#main-tab-model");
     await page.evaluate(()=>{
       const model=document.querySelector("#lab-model");
@@ -94,49 +95,42 @@ test("live Audio Lab opt-in original playback uses a persistent PCM node across 
     await page.waitForFunction(()=>document.querySelector("#lab-model").value==="live",{
       timeout:10000
     });
-    // Rejected wet parameters must not stop/recreate currently audible raw.
-    await page.evaluate(()=>{
-      const quality=document.querySelector("#quality");
-      window.__originalQuality=quality.value;
-      quality.add(new Option("Invalid test only","invalid-for-test"));
-      quality.value="invalid-for-test";
-    });
-    // Legacy status can be replaced by PCM telemetry in the following
-    // audio callback. Capture the command's actual notification transition,
-    // not an arbitrarily long-lived final HUD string.
-    await page.evaluate(()=>{
-      const status=document.querySelector("#status"),indicator=document.querySelector("#rt-indicator");
-      window.__wetPreflightTrace=[];
-      const snapshot=()=>window.__wetPreflightTrace.push({
-        status:status.textContent,indicator:indicator.textContent
-      });
-      new MutationObserver(snapshot).observe(status,{childList:true,subtree:true,characterData:true});
-      new MutationObserver(snapshot).observe(indicator,{childList:true,subtree:true,characterData:true});
-      snapshot();
-    });
+    // A model selection preserves currently playing original audio until the
+    // explicit transformed-play request applies that selected DSP.
     await page.click("#play-wet");
     try{
-      await page.waitForFunction(()=>window.__wetPreflightTrace.some(x=>
-        x.status.includes("変換設定は未反映")||x.indicator.includes("モデル設定未反映")
-      ),{timeout:3500});
+      await page.waitForFunction(()=>document.querySelector("#rt-telemetry")
+        ?.dataset.pcmTransport==="rust-engine3-source-time",{timeout:20000});
     }catch(error){
-      const observed=await page.evaluate(()=>({quality:document.querySelector("#quality").value,
+      const observed=await page.evaluate(()=>({
         selectedModel:document.querySelector("#lab-model").value,
-        trace:window.__wetPreflightTrace.slice(-14),
-        currentPlayer:document.querySelector("#rt-telemetry").dataset.pcmTransport}));
-      throw Error("Legacy invalid wet preflight message missing: "+JSON.stringify(observed)+" / "+error.message);
+        status:document.querySelector("#status").textContent,
+        labStatus:document.querySelector("#lab-status").textContent,
+        indicator:document.querySelector("#rt-indicator").textContent,
+        transport:document.querySelector("#rt-telemetry").dataset.pcmTransport,
+        starts:document.querySelector("#rt-telemetry").dataset.pcmNodeStarts
+      }));
+      throw Error("Selected Rust model did not start: "+
+        JSON.stringify({observed,errors})+" / "+error.message);
     }
+    const rust=await page.evaluate(()=>({
+      transport:document.querySelector("#rt-telemetry").dataset.pcmTransport,
+      starts:Number(document.querySelector("#rt-telemetry").dataset.pcmNodeStarts),
+      indicator:document.querySelector("#rt-indicator").textContent
+    }));
+    assert.equal(rust.transport,"rust-engine3-source-time");
+    assert.equal(rust.starts,initial.starts+1);
+    assert.match(rust.indicator,/Rust engine 3部分音＋残差合成中/);
+    // The legacy wet button resolves to this same selected live model. A
+    // duplicate request must keep the actual Rust renderer and node alive.
+    await page.click("#play-wet");
+    await new Promise(resolve=>setTimeout(resolve,300));
     const unchanged=await page.evaluate(()=>({
-      raw:document.querySelector("#rt-telemetry").dataset.pcmTransport,
+      transport:document.querySelector("#rt-telemetry").dataset.pcmTransport,
       nodes:Number(document.querySelector("#rt-telemetry").dataset.pcmNodeStarts)
     }));
-    assert.equal(unchanged.raw,"raw-experimental");
-    assert.equal(unchanged.nodes,initial.starts);
-    await page.evaluate(()=>{
-      const quality=document.querySelector("#quality");
-      quality.value=window.__originalQuality;
-      quality.querySelector('[value="invalid-for-test"]').remove();
-    });
+    assert.equal(unchanged.transport,"rust-engine3-source-time");
+    assert.equal(unchanged.nodes,rust.starts);
 
     const beforeStop=await page.evaluate(()=>{
       const el=document.querySelector("#stop"),rect=el.getBoundingClientRect();
