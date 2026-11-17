@@ -3,11 +3,13 @@
 // feeds the persistent source-time Worklet, which alone advances playback.
 import {createSourcePCMBridge} from "./source-pcm-bridge.mjs";
 export const CHUNK_SECONDS=1.5;
-export function planChunk({totalFrames,sampleRate,speed,startSeconds,model='dual',fftSize=2048,shortFftSize=512,longFftSize=fftSize,referenceWindows=8,jointBackend=null}){
+export function planChunk({totalFrames,sampleRate,speed,startSeconds,startFrame=null,model='dual',fftSize=2048,shortFftSize=512,longFftSize=fftSize,referenceWindows=8,jointBackend=null}){
   if(!(totalFrames>0&&sampleRate>0&&speed>0))throw RangeError('invalid source range');
+  if(startFrame!==null&&!Number.isSafeInteger(startFrame))throw RangeError('invalid source frame');
   if(![1024,2048,4096,8192].includes(longFftSize)||![256,512,1024,2048].includes(shortFftSize)||(model==='dual'&&shortFftSize>=longFftSize))throw RangeError('invalid short/long FFT windows');
   if(!Number.isInteger(referenceWindows)||referenceWindows<2||referenceWindows>16)throw RangeError('invalid context window count');
-  const start=Math.min(totalFrames-1,Math.max(0,Math.floor(startSeconds*sampleRate)));
+  const requestedStart=startFrame===null?Math.floor(startSeconds*sampleRate):startFrame;
+  const start=Math.min(totalFrames-1,Math.max(0,requestedStart));
   const core=Math.min(totalFrames-start,Math.ceil(CHUNK_SECONDS*sampleRate));
   const analysisWindow=(model==='wsola'||(model==='period-joint'&&jointBackend==='wsola'))?shortFftSize:longFftSize;
   // The experimental joint model disables long FFT and reference-window
@@ -57,6 +59,7 @@ export async function createModelStream({ctx,sourceChannels,sampleRate,speed,sem
     const activeConfig=config,activeGeneration=generation;
     const plan=planChunk({totalFrames,sampleRate,
       speed:activeConfig.speed,startSeconds:cursorFrame/sampleRate,
+      startFrame:cursorFrame,
       model:activeConfig.model,fftSize:activeConfig.fftSize,
       shortFftSize:activeConfig.shortFftSize,
       longFftSize:activeConfig.longFftSize,
@@ -155,7 +158,8 @@ export async function createModelStream({ctx,sourceChannels,sampleRate,speed,sem
       throw RangeError("legacy Worker supports positive 0.5..2x and -12..12 semitones");
     // Validate model/window constraints before invalidating audible output.
     planChunk({totalFrames,sampleRate,speed:next.speed,
-      startSeconds:frame/sampleRate,model:next.model,fftSize:next.fftSize,
+      startSeconds:frame/sampleRate,startFrame:frame,
+      model:next.model,fftSize:next.fftSize,
       shortFftSize:next.shortFftSize,longFftSize:next.longFftSize,
       referenceWindows:next.referenceWindows,jointBackend:next.jointBackend});
     config=next;generation++;cursorFrame=latestFrame=frame;

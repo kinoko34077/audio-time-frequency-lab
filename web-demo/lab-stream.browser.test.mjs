@@ -252,6 +252,12 @@ test("individual-period Worker plays through one shared PCM Worklet in Chrome",a
       window.__labAudit.maxRms=Math.max(window.__labAudit.maxRms||0,rms);
       return window.__labAudit.maxRms>.01;
     },{timeout:5000});
+    await page.waitForFunction(()=>{
+      const frames=window.__labAudit.messages.filter(message=>
+        message.type==="progress"&&message.processingMode==="worker")
+        .map(message=>message.sourceFrame);
+      return frames.length>=2&&frames.at(-1)>frames[0];
+    },{timeout:5000});
     let evidence=await page.evaluate(()=>{
       const probe=window.__labAudit.probe;
       const pcm=new Float32Array(probe?.fftSize||0);

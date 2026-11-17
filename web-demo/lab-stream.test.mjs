@@ -27,6 +27,13 @@ test('the final full-track Worker chunk includes bounded wrapped PCM for its int
  assert.equal(plan.outputFrames,plan.coreFrames+1);
  assert.ok(plan.wrapRight<sr*.7);
 });
+test('a Worker chunk starts at its exact integer source cursor after seconds round-trip',()=>{
+ const sr=48000,total=sr*10,startFrame=202064;
+ const plan=planChunk({totalFrames:total,sampleRate:sr,speed:1,
+  startSeconds:startFrame/sr,startFrame,model:'pv',fftSize:2048,
+  referenceWindows:8});
+ assert.equal(plan.start,startFrame);
+});
 test('all four DSP engines render bounded 48k stereo segments without memory errors',()=>{
  const sr=48000,total=sr*240,startSeconds=120;
  const plan=planChunk({totalFrames:total,sampleRate:sr,speed:.5,startSeconds,fftSize:1024,referenceWindows:2});
