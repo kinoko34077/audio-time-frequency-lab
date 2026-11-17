@@ -5,9 +5,11 @@ import path from "node:path";
 import puppeteer from "puppeteer-core";
 
 const WAV=path.resolve("web-demo/test-fixtures/meta-piano-a0-cc0-3s-48khz.wav");
+const pythonCommand=process.env.PYTHON||
+  (process.platform==="win32"?"python":"python3");
 test("recorded CC0 upright piano goes through the real granular file picker and live Worklet",async()=>{
   const port=18767;
-  const server=spawn("python3",["-m","http.server",String(port),"--bind","127.0.0.1"],{
+  const server=spawn(pythonCommand,["-m","http.server",String(port),"--bind","127.0.0.1"],{
     cwd:path.resolve("_site"),stdio:"ignore"
   });
   let browser;
@@ -19,6 +21,49 @@ test("recorded CC0 upright piano goes through the real granular file picker and 
         "--autoplay-policy=no-user-gesture-required"]
     });
     const page=await browser.newPage(),errors=[];
+    await page.evaluateOnNewDocument(()=>{
+      window.__labWorkerResults=[];
+      window.__labWorkerCounter=0;
+      window.__labLatestWorkerId=0;
+      const NativeWorker=window.Worker;
+      window.Worker=class extends NativeWorker{
+        constructor(url,options){
+          super(url,options);
+          if(!String(url).includes("lab-processor.worker.mjs"))return;
+          const id=++window.__labWorkerCounter;
+          window.__labLatestWorkerId=id;
+          this.addEventListener("message",({data})=>{
+            if(!Number.isSafeInteger(data?.job))return;
+            window.__labWorkerResults.push({id,job:data.job,
+              generation:data.generation,ok:data.ok===true,
+              startFrame:data.plan?.start,
+              outputFrames:data.channels?.[0]?.length||0,
+              channelCount:data.channels?.length||0});
+          });
+        }
+      };
+      window.__labWorkletProgress=[];
+      window.__labWorkletCounter=0;
+      window.__labLatestSourceWorkletId=0;
+      const NativeWorklet=window.AudioWorkletNode;
+      window.AudioWorkletNode=class extends NativeWorklet{
+        constructor(ctx,name,options){
+          super(ctx,name,options);
+          if(name!=="audio-lab-source-pcm")return;
+          const id=++window.__labWorkletCounter;
+          window.__labLatestSourceWorkletId=id;
+          this.port.addEventListener("message",({data})=>{
+            if(data?.type==="progress"&&data.processingMode==="worker")
+              window.__labWorkletProgress.push({id,
+                sourceFrame:data.sourceFrame,
+                renderedFrames:data.renderedFrames,
+                missingFrames:data.missingFrames,
+                workerGeneration:data.workerGeneration});
+          });
+          this.port.start();
+        }
+      };
+    });
     page.on("pageerror",e=>errors.push(e.message));
     await page.goto("http://127.0.0.1:"+port+"/?pcmTransport=granular",{
       waitUntil:"domcontentloaded",timeout:20000
@@ -106,6 +151,92 @@ test("recorded CC0 upright piano goes through the real granular file picker and 
       scrubTargetFrame:expected,stereo:false,channels:1,
       after:after.telemetry,nodeStarts:after.nodeStarts,
       proof:"REAL_NATIVE_FILE_INPUT_AND_RENDER_ACK_NOT_DAC_AUDIO_CAPTURE"
+    }));
+    await page.click("#stop");
+    await page.waitForFunction(()=>!document.querySelector("#rt-telemetry")
+      ?.dataset.pcmTransport,{timeout:10000});
+
+    // Exercise the same recorded file through the retained PV + individual-
+    // period Worker and its shared source-clock Worklet. This reports real
+    // generation-transition gaps without treating the diagnostic run as an
+    // audible-quality acceptance or loosening a threshold.
+    await page.$eval("#granular-speed-value",e=>{
+      e.value="1";e.dispatchEvent(new Event("change",{bubbles:true}));
+    });
+    await page.click("#main-tab-model");
+    await page.waitForSelector("#audio-lab",{timeout:10000});
+    await page.select("#lab-model","pv");
+    await page.$eval("#lab-individual-periods",e=>{
+      e.checked=true;e.dispatchEvent(new Event("change",{bubbles:true}));
+    });
+    await page.click("#play-main");
+    await page.waitForFunction(()=>document.querySelector("#rt-indicator")
+      ?.textContent.includes("モデル再生中"),{timeout:30000});
+    const workerId=await page.evaluate(()=>window.__labLatestWorkerId);
+    const workletId=await page.evaluate(()=>window.__labLatestSourceWorkletId);
+    await page.waitForFunction(({workerId,workletId})=>{
+      const completed=window.__labWorkerResults.filter(x=>
+        x.id===workerId&&x.ok&&x.channelCount===1&&x.outputFrames>0);
+      const generation=completed.at(-1)?.generation;
+      return Number.isSafeInteger(generation)&&window.__labWorkletProgress.some(x=>
+        x.id===workletId&&x.workerGeneration===generation);
+    },{timeout:30000},{workerId,workletId});
+    await new Promise(resolve=>setTimeout(resolve,1800));
+    const steady=await page.evaluate(({workerId,workletId})=>{
+      const chunks=window.__labWorkerResults.filter(x=>
+        x.id===workerId&&x.ok&&x.channelCount===1&&x.outputFrames>0);
+      const generation=chunks.at(-1)?.generation;
+      const progress=window.__labWorkletProgress.filter(x=>
+        x.id===workletId&&x.workerGeneration===generation);
+      return {generation,completedChunks:chunks.length,
+        distinctChunkStarts:new Set(chunks.map(x=>x.startFrame)).size,
+        outputFrames:chunks.reduce((n,x)=>n+x.outputFrames,0),
+        progressSamples:progress.length,
+        renderedFrames:progress.at(-1)?.renderedFrames||0,
+        missingFrames:progress.at(-1)?.missingFrames,
+        sourceStart:progress[0]?.sourceFrame,
+        sourceEnd:progress.at(-1)?.sourceFrame,
+        channels:chunks[0]?.channelCount||0};
+    },{workerId,workletId});
+    assert.ok(steady.completedChunks>0&&steady.outputFrames>0,steady);
+    assert.ok(steady.progressSamples>0&&steady.renderedFrames>0,steady);
+    const previousGeneration=steady.generation;
+    await page.select("#lab-model","wsola");
+    await page.waitForFunction(({workerId,previousGeneration})=>
+      window.__labWorkerResults.some(x=>x.id===workerId&&x.ok&&
+        x.generation>previousGeneration&&x.outputFrames>0),
+      {timeout:30000},{workerId,previousGeneration});
+    const nextGeneration=await page.evaluate(({workerId,previousGeneration})=>
+      window.__labWorkerResults.filter(x=>x.id===workerId&&x.ok&&
+        x.generation>previousGeneration).at(-1)?.generation,
+      {workerId,previousGeneration});
+    await page.waitForFunction(({workletId,nextGeneration})=>
+      window.__labWorkletProgress.some(x=>x.id===workletId&&
+        x.workerGeneration===nextGeneration),
+      {timeout:20000},{workletId,nextGeneration});
+    await new Promise(resolve=>setTimeout(resolve,1800));
+    const transition=await page.evaluate(({workerId,workletId,nextGeneration})=>{
+      const chunks=window.__labWorkerResults.filter(x=>x.id===workerId&&
+        x.generation===nextGeneration&&x.ok&&x.outputFrames>0);
+      const progress=window.__labWorkletProgress.filter(x=>
+        x.id===workletId&&x.workerGeneration===nextGeneration);
+      return {fromModel:"pv",toModel:document.querySelector("#lab-model").value,
+        fromGeneration:nextGeneration-1,toGeneration:nextGeneration,
+        completedChunks:chunks.length,
+        distinctChunkStarts:new Set(chunks.map(x=>x.startFrame)).size,
+        outputFrames:chunks.reduce((n,x)=>n+x.outputFrames,0),
+        progressSamples:progress.length,
+        renderedFrames:progress.at(-1)?.renderedFrames||0,
+        missingFrames:progress.at(-1)?.missingFrames,
+        sourceStart:progress[0]?.sourceFrame,
+        sourceEnd:progress.at(-1)?.sourceFrame,
+        channels:chunks[0]?.channelCount||0};
+    },{workerId,workletId,nextGeneration});
+    assert.ok(transition.completedChunks>0&&transition.outputFrames>0,transition);
+    assert.ok(transition.progressSamples>0&&transition.renderedFrames>0,transition);
+    console.log("RECORDED_PERIOD_WORKER_CHROME "+JSON.stringify({
+      input:meta,decodedRate,steady,transition,
+      proof:"REAL_CC0_FILE_TO_WORKER_PCM_AND_SHARED_WORKLET_PROGRESS_NOT_DAC_CAPTURE"
     }));
     await page.click("#stop");
     await page.waitForFunction(()=>!document.querySelector("#rt-telemetry")
