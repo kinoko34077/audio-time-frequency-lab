@@ -738,6 +738,8 @@ test("U1/U5 primary Play routes to REAL selected live/PV/Granular engines and on
     },{timeout:20000});
     assert.equal(await page.$eval("#granular-speed-value",el=>el.value),"0");
     assert.match(await page.$eval("#lab-status",el=>el.textContent),/適用待ち/);
+    assert.match(await page.$eval("#rt-telemetry",el=>el.textContent),/Worker/,
+      "active Worker status remains visible beside the unapplied speed request");
     assert.equal(await page.$eval("#stop",el=>el.disabled),false);
     assert.deepEqual(errors,[]);
     console.log("U1_U5_REAL_MODEL_ROUTE "+JSON.stringify({

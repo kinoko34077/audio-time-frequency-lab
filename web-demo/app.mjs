@@ -2746,8 +2746,10 @@ async function startModelPlayback(offset=null,appliedOverride=null){
       longFftSize:applied.longFftSize,referenceWindows:applied.referenceWindows,
       periodCycles:applied.periodCycles,startSeconds:where,
       onStatus:text=>{
-        if(state.player===player&&!labSettingsPending(player.appliedConfig))
-          labStatusText(text);
+        if(state.player!==player)return;
+        if(labSettingsPending(player.appliedConfig))
+          $("#rt-telemetry").textContent=text;
+        else labStatusText(text);
       },
       onStarted:at=>{
         if(state.player!==player)return;
