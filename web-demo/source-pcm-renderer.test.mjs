@@ -78,6 +78,81 @@ test("stereo + output clock conversion and fractional interpolation",()=>{
   assert.deepEqual(Array.from(a.output[1]),[-1,-1.5,-2,-2.5,-3,-3.5]);
 });
 
+test("Worker-rendered PCM follows the shared source clock and output-rate conversion",()=>{
+  const p=createSourcePCMRenderer({
+    sourceFrames:100,sourceSampleRate:48000,outputSampleRate:96000,
+    channelCount:1,speed:1,startFrame:10
+  });
+  p.installRenderedChunk({generation:0,startFrame:10,endFrame:14,
+    speed:1,coreFrames:4,channels:[Float32Array.from([0,2,4,6,8,10])]});
+  const output=[new Float32Array(8)];
+  assert.equal(p.renderBuffered(output),0);
+  assert.deepEqual(Array.from(output[0]),[0,1,2,3,4,5,6,7]);
+  assert.equal(p.timeline.state.sourceFrame,14,
+    "the existing timeline advances once at the AudioWorklet output rate");
+  assert.equal(p.statistics.renderedFrames,8);
+  assert.equal(p.statistics.missingFrames,0);
+});
+
+test("Worker PCM interpolates across the full-track loop boundary without freezing before wrap",()=>{
+  const p=createSourcePCMRenderer({sourceFrames:4,sourceSampleRate:4,
+    outputSampleRate:3,channelCount:1,speed:1,startFrame:2,
+    loopStartFrame:0,loopEndFrame:4,loopEnabled:true});
+  p.installRenderedChunk({generation:0,startFrame:2,endFrame:4,
+    speed:1,coreFrames:2,channels:[Float32Array.from([10,20])]});
+  p.installRenderedChunk({generation:0,startFrame:0,endFrame:2,
+    speed:1,coreFrames:2,channels:[Float32Array.from([1,2])]});
+  const boundary=[new Float32Array(2)];
+  assert.equal(p.renderBuffered(boundary),0);
+  assert.ok(Math.abs(boundary[0][0]-10)<1e-6);
+  assert.ok(Math.abs(boundary[0][1]-(20+(1-20)/3))<1e-6);
+  assert.ok(p.timeline.state.sourceFrame<1,
+    "the shared source clock wraps to the start of the full-track loop");
+  const resumed=[new Float32Array(1)];
+  assert.equal(p.renderBuffered(resumed),0);
+  assert.ok(Math.abs(resumed[0][0]-(1+2/3))<1e-6);
+});
+
+test("late Worker PCM holds the shared source clock and resumes at the missing frame",()=>{
+  const p=createSourcePCMRenderer({
+    sourceFrames:1000,sourceSampleRate:48000,outputSampleRate:48000,
+    channelCount:1,speed:1,startFrame:10
+  });
+  let output=[new Float32Array(4)];
+  assert.equal(p.renderBuffered(output),4);
+  assert.deepEqual(Array.from(output[0]),[0,0,0,0]);
+  assert.equal(p.timeline.state.sourceFrame,10,
+    "an empty Worker queue must not advance source time");
+  p.installRenderedChunk({generation:0,startFrame:10,endFrame:500,
+    speed:1,coreFrames:490,channels:[Float32Array.from({length:494},(_,i)=>i+1)]});
+  output=[new Float32Array(128)];
+  assert.equal(p.renderBuffered(output),0);
+  assert.ok(output[0][0]<1,"new audio fades in after the counted underrun");
+  assert.equal(output[0][1],2/128,
+    "the resumed segment starts from the held source frame");
+  assert.equal(output[0][127],128*127/128,
+    "the held source interval is rendered once after PCM arrives");
+  assert.equal(p.timeline.state.sourceFrame,138);
+  assert.equal(p.statistics.missingFrames,4);
+});
+
+test("Worker PCM queue is generation-scoped and bounded",()=>{
+  const p=createSourcePCMRenderer({sourceFrames:1000,sourceSampleRate:48000,
+    outputSampleRate:48000,channelCount:1,speed:1,startFrame:0});
+  const chunk=(generation,start)=>({generation,startFrame:start,
+    endFrame:start+10,speed:1,coreFrames:10,
+    channels:[new Float32Array(12)]});
+  p.installRenderedChunk(chunk(0,0));
+  p.resetRenderedChunks(1);
+  assert.equal(p.installRenderedChunk(chunk(0,10)),false,
+    "a stale Worker generation is ignored");
+  assert.equal(p.installRenderedChunk(chunk(1,0)),1);
+  assert.equal(p.installRenderedChunk(chunk(1,10)),2);
+  assert.equal(p.installRenderedChunk(chunk(1,20)),3);
+  assert.throws(()=>p.installRenderedChunk(chunk(1,30)),/queue full/);
+  assert.equal(p.statistics.renderedChunkCount,3);
+});
+
 test("negative fractional speed wraps 1 frame loop instead of inventing dropped samples",()=>{
   const p=mk([[1,2,3]],{
     speed:-.001,startFrame:1,loopStartFrame:1,loopEndFrame:2,loopEnabled:true

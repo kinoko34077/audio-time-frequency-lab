@@ -21,9 +21,11 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
     this.channelCount=props.channelCount;
     this.initialPitchSemitones=props.pitchSemitones??0;
     const mode=props.processingMode??"raw";
-    if(!["raw","granular","spectral","pv","wsola","dual","am","live"].includes(mode))
+    if(!["raw","granular","spectral","pv","wsola","dual","am","live","worker"].includes(mode))
       throw RangeError("unknown PCM processing mode");
     this.processingMode=mode;
+    this.workerGeneration=0;
+    this.workerPitchSemitones=props.pitchSemitones??0;
     const synthConfig={
       sourceSampleRate:props.sourceSampleRate,outputSampleRate:sampleRate,
       channelCount:props.channelCount,pitchSemitones:props.pitchSemitones??0
@@ -64,6 +66,41 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
           return;
         }
         if(this.disposed)return;
+        if(m.type==="rendered-chunk"){
+          if(this.processingMode!=="worker")
+            throw Error("rendered Worker chunk sent to another processing mode");
+          const bufferedSegments=this.renderer.installRenderedChunk(m);
+          this.port.postMessage({type:"rendered-chunk-accepted",
+            requestId:m.requestId,generation:m.generation,
+            startFrame:m.startFrame,endFrame:m.endFrame,speed:m.speed,
+            coreFrames:m.coreFrames,outputFrames:m.channels?.[0]?.length,
+            stale:bufferedSegments===false,
+            bufferedSegments:this.renderer.statistics.renderedChunkCount});
+          return;
+        }
+        if(m.type==="worker-state"){
+          if(this.processingMode!=="worker"||
+             !Number.isSafeInteger(m.frame)||m.frame<0||m.frame>=this.sourceFrames||
+             !Number.isFinite(m.speed)||m.speed<.5||m.speed>2||
+             !Number.isFinite(m.pitchSemitones)||
+             m.pitchSemitones<-12||m.pitchSemitones>12||
+             !Number.isSafeInteger(m.generation)||
+             m.generation<=this.workerGeneration)
+            throw RangeError("invalid legacy Worker playback state");
+          this.renderer.resetRenderedChunks(m.generation);
+          const st=this.renderer.timeline.scrub(m.frame,m.speed);
+          this.workerGeneration=m.generation;
+          this.workerPitchSemitones=m.pitchSemitones;
+          this.pendingRequest=null;
+          this.queueRenderReceipt(m.requestId,st);
+          this.port.postMessage({type:"worker-state-accepted",
+            requestId:m.requestId,generation:m.generation,
+            sourceFrame:st.sourceFrame,speed:st.speed,
+            pitchSemitones:this.workerPitchSemitones,
+            revision:st.revision,
+            bufferedSegments:this.renderer.statistics.renderedChunkCount});
+          return;
+        }
         if(m.type==="rust-init"){
           try{
             if(this.processingMode!=="live"||this.synth)
@@ -91,6 +128,8 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
           return;
         }
         if(m.type==="seek-window"){
+          if(this.processingMode==="worker")
+            throw Error("legacy Worker seeks must reset the Worker generation");
           // One atomic handler: install the requested destination PCM before
           // changing source time, without a render quantum between commands.
           this.renderer.installWindow(m.start,m.channels,null,"seek");
@@ -108,6 +147,8 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
           return;
         }
         if(m.type==="scrub"){
+          if(this.processingMode==="worker")
+            throw Error("legacy Worker scrubbing is unavailable");
           const t=this.renderer.timeline;
           // A gesture's exact sample position and instantaneous signed speed
           // must become one audio-thread transaction. The old pair of
@@ -142,6 +183,8 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
           return;
         }
         if(m.type==="loop-config"){
+          if(this.processingMode==="worker")
+            throw Error("A/B playback is unavailable for the legacy Worker");
           // No process() callback can run between endpoint-cache installation
           // and transport bounds/enable update in this synchronous handler.
           this.renderer.beginOutputTransition();
@@ -166,9 +209,13 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
           case "play":this.running=true;break;
           case "pause":this.running=false;break;
           case "seek":
+            if(this.processingMode==="worker")
+              throw Error("legacy Worker seeks must reset the Worker generation");
             this.renderer.beginOutputTransition();
             t.seek(m.frame);this.synth?.reset();break;
           case "speed":
+            if(this.processingMode==="worker")
+              throw Error("legacy Worker speed changes must reset the Worker generation");
             t.setSpeed(m.speed);
             // Keep the existing overlap grains and output-time epoch: a
             // scrub wheel changes signed speed many times per second.
@@ -177,15 +224,21 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
             this.synth?.beginTransition();
             break;
           case "pitch":
+            if(this.processingMode==="worker")
+              throw Error("legacy Worker pitch changes must reset the Worker generation");
             if(!this.synth)
               throw RangeError("independent pitch requires spectral or granular mode");
             this.synth.setPitch(m.semitones);
             break;
           case "bounds":
+            if(this.processingMode==="worker")
+              throw Error("A/B playback is unavailable for the legacy Worker");
             this.renderer.beginOutputTransition();
             t.setLoopBounds(m.a,m.b);
             this.synth?.reset();break;
           case "loop":
+            if(this.processingMode==="worker")
+              throw Error("A/B playback is unavailable for the legacy Worker");
             this.renderer.beginOutputTransition();
             t.setLoopEnabled(m.enabled);
             this.synth?.reset();break;
@@ -232,7 +285,8 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
     this.port.postMessage({type:"render-applied",
       requestId:pending.requestId,revision:pending.revision,
       pitchRevision:pending.pitchRevision,
-      pitchSemitones:this.synth?.state.pitchSemitones??null,
+      pitchSemitones:this.processingMode==="worker"?
+        this.workerPitchSemitones:this.synth?.state.pitchSemitones??null,
       processingMode:this.processingMode,
       outputFrame:typeof currentFrame==="number"?currentFrame:null,
       outputTime:typeof currentTime==="number"?currentTime:null,
@@ -257,7 +311,9 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
       this.emitRenderReceipt(sourceFrame,0);
       return true;
     }
-    const missing=this.processingMode==="spectral"||this.processingMode==="pv"?
+    const missing=this.processingMode==="worker"?
+      this.renderer.renderBuffered(out):
+      this.processingMode==="spectral"||this.processingMode==="pv"?
       this.renderer.renderSpectral(out,this.synth):
       this.processingMode==="live"?
       this.renderer.renderRust(out,this.synth):
@@ -267,14 +323,15 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
     this.blocks++;
     // Host window cache refill is outside the audio callback and never
     // blocks or starts/stops the AudioWorklet on every loop wrap.
-    if(missing){
+    if(missing&&this.processingMode!=="worker"){
       // Request the actual first missing source frame, not the block's
       // still-cached starting frame (which may never trigger a refill).
       this.request(this.renderer.firstMissingFrame);
       this.lastMissing=missing;
     }
     if(this.blocks%8===0){
-      this.request(this.renderer.needsSourceWindow(4096));
+      if(this.processingMode!=="worker")
+        this.request(this.renderer.needsSourceWindow(4096));
       const state=this.renderer.timeline.state;
       const stats=this.renderer.statistics;
       this.port.postMessage({
@@ -290,10 +347,17 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
         loopEndFrame:state.loopEndFrame,
         renderedFrames:stats.renderedFrames,
         missingFrames:stats.missingFrames,
+        firstMissingFrame:this.renderer.firstMissingFrame,
         processingMode:this.processingMode,
-        pitchSemitones:this.synth?.state.pitchSemitones??null,
+        pitchSemitones:this.processingMode==="worker"?
+          this.workerPitchSemitones:this.synth?.state.pitchSemitones??null,
         pitchRevision:this.synth?.state.pitchRevision??null,
-        rawPCM:this.processingMode==="raw"
+        rawPCM:this.processingMode==="raw",
+        bufferedSegments:stats.renderedChunkCount,
+        workerGeneration:this.processingMode==="worker"?
+          this.workerGeneration:null,
+        workerPitchSemitones:this.processingMode==="worker"?
+          this.workerPitchSemitones:null
       });
     }
     return true;

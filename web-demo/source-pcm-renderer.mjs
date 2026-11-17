@@ -2,10 +2,11 @@
  * Owns only source sample reads/interpolation and underrun measurement.
  * Transport decisions live in source-timeline.mjs.
  */
-import {createSourceTimeline,nextSourceSampleIndex} from "./source-timeline.mjs";
+import {createSourceTimeline,loopSourcePosition,nextSourceSampleIndex} from "./source-timeline.mjs";
 
 export const SOURCE_WINDOW_FRAMES=65536;
 export const SOURCE_WINDOW_SLOTS=4;
+export const RENDERED_CHUNK_SLOTS=3;
 
 export function chooseSourceWindowStart(frame,sourceFrames,windowFrames=SOURCE_WINDOW_FRAMES,speed=1){
   if(!Number.isSafeInteger(sourceFrames)||sourceFrames<1 ||
@@ -35,7 +36,10 @@ export function createSourcePCMRenderer({
     loopStartFrame,loopEndFrame,loopEnabled
   });
   const windows=[];
+  const renderedChunks=[];
   let missingFrames=0,renderedFrames=0,firstMissingFrame=null;
+  let renderedGeneration=0,previousRendered=null,workerMode=false;
+  let workerTransitionLeft=0;
   const find=(index)=>{
     for(let i=windows.length-1;i>=0;i--){
       const w=windows[i];
@@ -65,9 +69,15 @@ export function createSourcePCMRenderer({
     // The synth has its own smoothing, but the neutral PCM identity path
     // bypasses that synth. Keep transport discontinuities click-free without
     // adding a parallel audio node or resetting the source clock.
-    if(renderedFrames===0||!(neutralBlend>0))return;
-    transitionOrigin.set(lastAudible);
-    transitionLeft=TRANSITION_FRAMES;
+    if(renderedFrames===0)return;
+    if(neutralBlend>0){
+      transitionOrigin.set(lastAudible);
+      transitionLeft=TRANSITION_FRAMES;
+    }
+    if(workerMode){
+      transitionOrigin.set(lastAudible);
+      workerTransitionLeft=TRANSITION_FRAMES;
+    }
   }
   function blendNeutralPCM(output,state,pitch){
     // Tiny A/B intervals deliberately retain a synthesis context: directly
@@ -117,7 +127,8 @@ export function createSourcePCMRenderer({
     timeline,beginOutputTransition,
     get firstMissingFrame(){return firstMissingFrame;},
     get statistics(){return Object.freeze({
-      missingFrames,renderedFrames,windowCount:windows.length
+      missingFrames,renderedFrames,windowCount:windows.length,
+      renderedChunkCount:renderedChunks.length
     });},
     hasFrame(index){return Number.isInteger(index)&&!!find(index);},
     installWindow(start,channels,pin=null,intent="prefetch"){
@@ -220,6 +231,154 @@ export function createSourcePCMRenderer({
         for(const w of windows)w.pin=null;
       }
       return timeline.state;
+    },
+    /**
+     * Install one bounded Worker-rendered model segment. The Worker owns the
+     * selected legacy DSP; this renderer owns the only audible source clock.
+     * A stale generation is ignored, never replayed after emitted output.
+     */
+    installRenderedChunk({generation,startFrame,endFrame,speed,coreFrames,channels}={}){
+      if(!Number.isSafeInteger(generation)||generation<0||
+         !Number.isSafeInteger(startFrame)||!Number.isSafeInteger(endFrame)||
+         startFrame<0||startFrame>=endFrame||endFrame>sourceFrames||
+         !Number.isFinite(speed)||speed<.5||speed>2||
+         !Number.isSafeInteger(coreFrames)||coreFrames<1||
+         !Array.isArray(channels)||channels.length!==channelCount||
+         channels.some(ch=>!(ch instanceof Float32Array)||
+           ch.length<coreFrames||ch.length>14_000_000/channelCount))
+        throw RangeError("invalid rendered PCM chunk");
+      if(generation!==renderedGeneration)return false;
+      if(speed!==timeline.state.speed)
+        throw RangeError("rendered PCM speed does not match source clock");
+      if(renderedChunks.length>=RENDERED_CHUNK_SLOTS)
+        throw RangeError("rendered PCM chunk queue full");
+      const previous=renderedChunks.at(-1)||previousRendered;
+      if(previous){
+        const expected=previous.endFrame>=sourceFrames?0:previous.endFrame;
+        if(startFrame!==expected)
+          throw RangeError("rendered PCM chunks are not source-contiguous");
+      }
+      workerMode=true;
+      if(renderedFrames>0&&renderedChunks.length===0)
+        workerTransitionLeft=TRANSITION_FRAMES;
+      renderedChunks.push({generation,startFrame,endFrame,speed,coreFrames,channels});
+      return renderedChunks.length;
+    },
+    /** Invalidate queued output after a seek or model-setting change. */
+    resetRenderedChunks(generation){
+      if(!Number.isSafeInteger(generation)||generation<=renderedGeneration)
+        throw RangeError("rendered PCM generation must advance");
+      renderedGeneration=generation;
+      renderedChunks.length=0;
+      previousRendered=null;
+      workerMode=true;
+      workerTransitionLeft=0;
+      return renderedGeneration;
+    },
+    /** Render Worker output through the existing source timeline exactly once. */
+    renderBuffered(output){
+      if(!Array.isArray(output)||output.length!==channelCount||
+         output.some(ch=>!(ch instanceof Float32Array)||
+           ch.length!==output[0].length))
+        throw RangeError("invalid output PCM block");
+      const len=output[0].length,state=timeline.state;
+      let missing=0,framesToAdvance=0;firstMissingFrame=null;
+      const read=(channel,segment,index,wrapDepth=0)=>{
+        const samples=segment.channels[channel];
+        if(!Number.isFinite(index)||index<0||index>=samples.length)return NaN;
+        const at=Math.floor(index),fraction=index-at,a=samples[at];
+        if(!Number.isFinite(a))return NaN;
+        if(fraction===0)return a;
+        let b=samples[at+1];
+        if(!Number.isFinite(b)&&wrapDepth===0&&state.loopEnabled&&
+           segment.endFrame===sourceFrames){
+          // A fractional source position just before the full-track loop end
+          // needs the next rendered output sample, which belongs to the chunk
+          // queued at the loop start. Without this bridge the shared clock
+          // freezes on the final fractional frame forever.
+          const nextOutputSourceFrame=segment.startFrame+
+            (at+1)*segment.speed;
+          const wrappedFrame=loopSourcePosition(nextOutputSourceFrame,state);
+          const nextSegment=renderedChunks.find(candidate=>
+            candidate.generation===renderedGeneration&&
+            candidate.speed===state.speed&&
+            wrappedFrame>=candidate.startFrame&&
+            wrappedFrame<candidate.endFrame);
+          if(nextSegment)
+            b=read(channel,nextSegment,
+              (wrappedFrame-nextSegment.startFrame)/nextSegment.speed,1);
+        }
+        return Number.isFinite(b)?a+(b-a)*fraction:NaN;
+      };
+      const fadeFrames=Math.max(1,Math.round(.018*outputSampleRate));
+      for(let i=0;i<len;i++){
+        const position=timeline.sourceFrameAt(i);
+        if(position===null){for(const ch of output)ch[i]=0;continue;}
+        while(renderedChunks.length){
+          const head=renderedChunks[0];
+          const wrapped=state.loopEnabled&&head.endFrame===sourceFrames&&
+            position<head.startFrame;
+          if(position>=head.endFrame||wrapped){
+            previousRendered=renderedChunks.shift();
+            continue;
+          }
+          break;
+        }
+        const segment=renderedChunks[0];
+        let invalid=!segment||position<segment.startFrame||
+          position>=segment.endFrame||segment.generation!==renderedGeneration||
+          segment.speed!==state.speed;
+        const segmentIndex=segment?
+          (position-segment.startFrame)/segment.speed:NaN;
+        let value0=NaN,value1=NaN;
+        if(!invalid){
+          value0=read(0,segment,segmentIndex);
+          if(!Number.isFinite(value0))invalid=true;
+          if(channelCount===2){
+            value1=read(1,segment,segmentIndex);
+            if(!Number.isFinite(value1))invalid=true;
+          }
+        }
+        if(invalid){
+          if(firstMissingFrame===null)firstMissingFrame=Math.floor(position);
+          missing++;
+          for(const ch of output)ch[i]=0;
+          continue;
+        }
+        framesToAdvance++;
+        const prior=previousRendered;
+        const adjacent=prior&&prior.endFrame===segment.startFrame&&
+          segment.startFrame>0;
+        const elapsedOutput=adjacent?
+          (position-segment.startFrame)*outputSampleRate/
+            (segment.speed*sourceSampleRate):Infinity;
+        const mix=adjacent?Math.max(0,Math.min(1,elapsedOutput/fadeFrames)):1;
+        const priorIndex=adjacent?
+          prior.coreFrames+(position-segment.startFrame)/segment.speed:NaN;
+        const transition=workerTransitionLeft>0?
+          1-workerTransitionLeft/TRANSITION_FRAMES:1;
+        if(adjacent&&mix<1){
+          const tail0=read(0,prior,priorIndex);
+          if(Number.isFinite(tail0))value0=tail0*(1-mix)+value0*mix;
+          if(channelCount===2){
+            const tail1=read(1,prior,priorIndex);
+            if(Number.isFinite(tail1))value1=tail1*(1-mix)+value1*mix;
+          }
+        }
+        output[0][i]=transitionOrigin[0]*(1-transition)+value0*transition;
+        if(channelCount===2)
+          output[1][i]=transitionOrigin[1]*(1-transition)+value1*transition;
+        if(workerTransitionLeft>0)workerTransitionLeft--;
+        if(adjacent&&mix>=1)previousRendered=null;
+      }
+      missingFrames+=missing;
+      renderedFrames+=len;
+      // Worker PCM can arrive later than one output quantum. Hold the shared
+      // source clock at the first missing frame so late PCM resumes in order
+      // instead of silently skipping source material while the output is 0.
+      timeline.advance(framesToAdvance);
+      rememberLastAudible(output);
+      return missing;
     },
     /**
      * Render exactly one output block, no new worklet/node per loop.

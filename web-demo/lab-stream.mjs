@@ -1,6 +1,7 @@
 // Bounded, seek-aware model audition. All source PCM stays in this tab.
-// A small context-bearing chunk is rendered in a module Worker while previous
-// chunks play. This is buffered live audition, NOT sample-by-sample DSP.
+// The existing model DSP renders bounded chunks in a module Worker. Its PCM
+// feeds the persistent source-time Worklet, which alone advances playback.
+import {createSourcePCMBridge} from "./source-pcm-bridge.mjs";
 export const CHUNK_SECONDS=1.5;
 export function planChunk({totalFrames,sampleRate,speed,startSeconds,model='dual',fftSize=2048,shortFftSize=512,longFftSize=fftSize,referenceWindows=8,jointBackend=null}){
   if(!(totalFrames>0&&sampleRate>0&&speed>0))throw RangeError('invalid source range');
@@ -16,92 +17,165 @@ export function planChunk({totalFrames,sampleRate,speed,startSeconds,model='dual
       Math.max(Math.ceil(sampleRate*.120),analysisWindow*2)):Math.ceil(sampleRate*.120)):
     Math.min(Math.ceil(sampleRate*.7),Math.max(Math.ceil(sampleRate*.040),referenceWindows*analysisWindow/4,analysisWindow));
   const left=Math.min(start,context),right=Math.min(totalFrames-start-core,context);
+  const wrapRight=start+core>=totalFrames?Math.min(totalFrames,context):0;
   const from=start-left,to=start+core+right;
-  const crop=Math.round(left/speed),central=Math.round(core/speed);
+  const crop=Math.round(left/speed),central=Math.ceil(core/speed);
   const tail=Math.min(Math.round(.025*sampleRate),Math.round(right/speed));
-  return {from,to,left,right,core,start,shortFftSize,longFftSize,outputStart:crop,outputFrames:central+tail,coreFrames:central,nextSeconds:(start+core)/sampleRate};
+  return {from,to,left,right,wrapRight,core,start,shortFftSize,longFftSize,
+    outputStart:crop,outputFrames:central+tail+(wrapRight>0?1:0),
+    coreFrames:central,nextSeconds:(start+core)/sampleRate};
 }
-// The host audio clock can advance while the Worker has produced NO audio.
-// Position is derived from SCHEDULED audible chunks, not elapsed wall time.
-export function scheduledSourcePosition(segments,now,initialSource,duration){
-  if(!(Number.isFinite(now)&&duration>0))throw RangeError('invalid playback clock');
-  let last=initialSource;
-  for(const segment of segments){
-    if(now<segment.at)return last;
-    if(now<segment.until){
-      const t=Math.min(segment.sourceEnd,segment.sourceFrom+(now-segment.at)*segment.speed);
-      return t>=duration?0:t;
-    }
-    last=segment.sourceTo;
-  }
-  return last;
-}
-export function createModelStream({ctx,sourceChannels,sampleRate,speed,semitones,model,fftSize,shortFftSize=512,longFftSize=fftSize,referenceWindows,periodCycles=8,jointBackend=null,startSeconds=0,onStatus=()=>{},onStarted=()=>{},onFailure=()=>{}}){
-  let stopped=false,active=false,pending=false,timer=0;
-  const nodes=[],scheduled=[],totalFrames=sourceChannels[0].length,duration=totalFrames/sampleRate;
+export async function createModelStream({ctx,sourceChannels,sampleRate,speed,semitones,model,fftSize,shortFftSize=512,longFftSize=fftSize,referenceWindows,periodCycles=8,jointBackend=null,startSeconds=0,onStatus=()=>{},onStarted=()=>{},onFailure=()=>{}}){
+  const totalFrames=sourceChannels[0].length,duration=totalFrames/sampleRate;
+  if(!Number.isSafeInteger(totalFrames)||totalFrames<1||
+     !Number.isFinite(sampleRate)||sampleRate<=0||
+     !Number.isFinite(speed)||speed<.5||speed>2||
+     !Number.isFinite(semitones)||semitones<-12||semitones>12)
+    throw RangeError("legacy Worker supports positive 0.5..2x and -12..12 semitones");
+  let stopped=false,started=false,pending=false,job=0,generation=0;
+  let bufferedSegments=0,lastMissingFrames=0,latestFrame=0,appliedRevision=0;
+  let cursorFrame=0,activeJob=0,activeJobGeneration=0;
+  let config={speed,semitones,model,fftSize,shortFftSize,longFftSize,
+    referenceWindows,periodCycles,jointBackend};
+  const initial=Math.min(totalFrames-1,Math.max(0,
+    Math.floor((((startSeconds%duration)+duration)%duration)*sampleRate)));
+  cursorFrame=latestFrame=initial;
   const worker=new Worker('./lab-processor.worker.mjs',{type:'module'});
-  const master=ctx.createGain(); master.gain.value=1;master.connect(ctx.destination);
-  let cursor=((startSeconds%duration)+duration)%duration;
-  let pastSource=cursor;
-  let nextWhen=ctx.currentTime+.12,started=false,job=0;
-  function cleanup(){
-    if(stopped)return;stopped=true;clearTimeout(timer);worker.terminate();
-    for(const src of nodes){try{src.stop();src.disconnect();}catch{}}
-    nodes.length=0;try{master.disconnect();}catch{}
-  }
-  function schedule(data,plan){
+  let bridge=null,master=null;
+  const cleanup=()=>{
     if(stopped)return;
-    const channels=data.channels;
-    if(!channels?.length||!channels[0]?.length)throw Error('処理データが空です');
-    const buffer=ctx.createBuffer(channels.length,channels[0].length,sampleRate);
-    channels.forEach((ch,i)=>buffer.copyToChannel(ch,i));
-    // Chunks meet at an exact source-time boundary. Short extra tails are
-    // crossfaded against the next segment without shortening timeline.
-    const startAt=Math.max(nextWhen,ctx.currentTime+.040);
-    const gain=ctx.createGain(),src=ctx.createBufferSource();
-    src.buffer=buffer;src.connect(gain);gain.connect(master);
-    const fade=.018,coreDuration=plan.coreFrames/sampleRate,end=startAt+coreDuration;
-    gain.gain.setValueAtTime(.0001,startAt);
-    gain.gain.linearRampToValueAtTime(1,startAt+Math.min(fade,coreDuration/3));
-    gain.gain.setValueAtTime(1,Math.max(startAt+fade,end));
-    gain.gain.linearRampToValueAtTime(.0001,Math.min(end+fade,startAt+buffer.duration));
-    src.start(startAt);
-    src.onended=()=>{try{src.disconnect();gain.disconnect();}catch{}const idx=nodes.indexOf(src);if(idx>=0)nodes.splice(idx,1);};
-    nodes.push(src);
-    const sourceFrom=plan.start/sampleRate,sourceEnd=(plan.start+plan.core)/sampleRate;
-    scheduled.push({at:startAt,until:end,sourceFrom,sourceEnd,
-      sourceTo:sourceEnd>=duration-.5/sampleRate?0:sourceEnd,speed});
-    // Bound the scheduling ledger independently from track length.
-    // Retain pastSource so pruning does not reset the playhead.
-    while(scheduled.length>1&&scheduled[1].until<ctx.currentTime-1){
-      pastSource=scheduled.shift().sourceTo;
-    }
-    if(!started){started=true;onStarted(startAt);onStatus('モデル音声を再生中 · 順次処理');}
-    if(startAt>nextWhen+.040&&started)onStatus('処理が追いつかず短い音切れが発生した可能性があります');
-    nextWhen=end;
-  }
-  worker.onmessage=({data})=>{
-    if(stopped||!pending||data.job!==job)return;
-    pending=false;
-    if(!data.ok){onFailure(data.message||'DSP処理失敗');cleanup();return;}
-    try{schedule(data,data.plan);}catch(err){onFailure(err.message);cleanup();return;}
-    cursor=data.plan.nextSeconds>=duration-.5/sampleRate?0:data.plan.nextSeconds;
-    refill();
+    stopped=true;worker.terminate();
+    try{bridge?.dispose();}catch{}
+    try{master?.disconnect();}catch{}
   };
-  worker.onerror=e=>{if(!stopped){onFailure(e.message||'Worker起動失敗');cleanup();}};
-  function refill(){
-    if(stopped||pending)return;
-    const ahead=nextWhen-ctx.currentTime;
-    // At most about 5s of decoded preview buffers in addition to the source.
-    if(ahead>5.0){timer=setTimeout(refill,350);return;}
-    const plan=planChunk({totalFrames,sampleRate,speed,startSeconds:cursor,model,fftSize,shortFftSize,longFftSize,referenceWindows,jointBackend});
-    const channels=sourceChannels.map(ch=>ch.slice(plan.from,plan.to));
-    pending=true;job++;
-    onStatus(started?'次の区間を先読み中':'モデルの先頭区間を準備中…');
-    try{worker.postMessage({job,channels,sampleRate,speed,semitones,model,fftSize,shortFftSize,longFftSize,periodCycles,jointBackend,plan},channels.map(ch=>ch.buffer));}
-    catch(error){pending=false;onFailure(error.message);cleanup();}
-  }
-  return {master,start(){refill();},stop:cleanup,
-    sourcePositionAt(now=ctx.currentTime){return scheduledSourcePosition(scheduled,now,pastSource,duration);},
-    get active(){return !stopped},get firstScheduled(){return started}};
+  const fail=message=>{
+    if(stopped)return;
+    onFailure(message||"Worker処理失敗");cleanup();
+  };
+  const pump=()=>{
+    if(stopped||pending||bufferedSegments>=2)return;
+    const activeConfig=config,activeGeneration=generation;
+    const plan=planChunk({totalFrames,sampleRate,
+      speed:activeConfig.speed,startSeconds:cursorFrame/sampleRate,
+      model:activeConfig.model,fftSize:activeConfig.fftSize,
+      shortFftSize:activeConfig.shortFftSize,
+      longFftSize:activeConfig.longFftSize,
+      referenceWindows:activeConfig.referenceWindows,
+      jointBackend:activeConfig.jointBackend});
+    const channels=sourceChannels.map(ch=>{
+      const core=ch.slice(plan.from,plan.to);
+      if(!plan.wrapRight)return core;
+      const wrapped=ch.slice(0,plan.wrapRight);
+      const input=new Float32Array(core.length+wrapped.length);
+      input.set(core);input.set(wrapped,core.length);return input;
+    });
+    pending=true;activeJob=++job;activeJobGeneration=activeGeneration;
+    onStatus(lastMissingFrames>0?
+      'Worker処理が再生時計に遅れ、実際の欠落PCMを記録しました':
+      started?'次の区間をWorkerで処理中':'モデルの先頭区間を準備中…');
+    try{worker.postMessage({job:activeJob,generation:activeGeneration,
+      channels,sampleRate,speed:activeConfig.speed,
+      semitones:activeConfig.semitones,model:activeConfig.model,
+      fftSize:activeConfig.fftSize,shortFftSize:activeConfig.shortFftSize,
+      longFftSize:activeConfig.longFftSize,
+      referenceWindows:activeConfig.referenceWindows,
+      periodCycles:activeConfig.periodCycles,
+      jointBackend:activeConfig.jointBackend,plan},channels.map(ch=>ch.buffer));}
+    catch(error){pending=false;fail(error.message);}
+  };
+  const onBridgeEvent=data=>{
+    if(data.type==="progress"){
+      if(data.workerGeneration===generation&&
+         Number.isFinite(data.sourceFrame)&&data.sourceFrame>=0&&
+         data.sourceFrame<totalFrames&&data.revision>=appliedRevision)
+        latestFrame=data.sourceFrame;
+      if(Number.isSafeInteger(data.bufferedSegments))
+        bufferedSegments=data.bufferedSegments;
+      if(Number.isFinite(data.missingFrames)&&
+         data.missingFrames>lastMissingFrames){
+        lastMissingFrames=data.missingFrames;
+        onStatus("Worker処理が再生時計に遅れ、実際の欠落PCMを記録しました");
+      }
+      pump();
+    }else if(data.type==="worker-state-accepted"&&
+             data.generation===generation){
+      latestFrame=data.sourceFrame;appliedRevision=data.revision;
+      bufferedSegments=data.bufferedSegments??0;
+      pump();
+    }else if(data.type==="rendered-chunk-accepted"&&
+             data.generation===generation){
+      bufferedSegments=data.bufferedSegments??bufferedSegments;
+    }else if(data.type==="fatal-error")fail(data.message);
+  };
+  try{
+    bridge=await createSourcePCMBridge({ctx,sourceChannels,
+      sourceSampleRate:sampleRate,speed,startFrame:initial,
+      loopStartFrame:0,loopEndFrame:totalFrames,loopEnabled:true,
+      processingMode:"worker",pitchSemitones:semitones,onEvent:onBridgeEvent});
+    master=ctx.createGain();master.gain.value=1;
+    bridge.connect(master);master.connect(ctx.destination);
+  }catch(error){worker.terminate();try{master?.disconnect();}catch{}throw error;}
+  worker.onmessage=async({data})=>{
+    if(stopped||data.job!==activeJob)return;
+    if(data.generation!==generation||
+       activeJobGeneration!==generation){pending=false;pump();return;}
+    if(!data.ok){pending=false;fail(data.message||'DSP処理失敗');return;}
+    const plan=data.plan;
+    try{
+      const accepted=await bridge.pushRenderedChunk({
+        generation:data.generation,startFrame:plan.start,
+        endFrame:plan.start+plan.core,speed:config.speed,
+        coreFrames:plan.coreFrames,channels:data.channels});
+      if(stopped)return;
+      if(data.generation!==generation){pending=false;pump();return;}
+      if(accepted.stale){pending=false;pump();return;}
+      bufferedSegments=accepted.bufferedSegments;
+      cursorFrame=plan.start+plan.core>=totalFrames?0:plan.start+plan.core;
+      pending=false;
+      if(!started){
+        // Give the first 1.5-second render enough lookahead to cover one
+        // Worker round trip before exposing the stream to the audio clock.
+        if(bufferedSegments<2){pump();return;}
+        await bridge.play();
+        if(stopped)return;
+        started=true;onStarted(ctx.currentTime);
+        onStatus('モデル音声を再生中 · 共通PCM音源時計');
+      }
+      pump();
+    }catch(error){pending=false;fail(error.message);}
+  };
+  worker.onerror=event=>{if(!stopped)fail(event.message||'Worker起動失敗');};
+  const reset=async(frame,nextConfig)=>{
+    if(stopped)throw Error("model stream stopped");
+    if(!Number.isSafeInteger(frame)||frame<0||frame>=totalFrames)
+      throw RangeError("invalid Worker source frame");
+    const next={...config,...nextConfig};
+    if(!Number.isFinite(next.speed)||next.speed<.5||next.speed>2||
+       !Number.isFinite(next.semitones)||next.semitones<-12||next.semitones>12)
+      throw RangeError("legacy Worker supports positive 0.5..2x and -12..12 semitones");
+    // Validate model/window constraints before invalidating audible output.
+    planChunk({totalFrames,sampleRate,speed:next.speed,
+      startSeconds:frame/sampleRate,model:next.model,fftSize:next.fftSize,
+      shortFftSize:next.shortFftSize,longFftSize:next.longFftSize,
+      referenceWindows:next.referenceWindows,jointBackend:next.jointBackend});
+    config=next;generation++;cursorFrame=latestFrame=frame;
+    bufferedSegments=0;lastMissingFrames=0;
+    const requestedGeneration=generation;
+    const accepted=await bridge.resetWorkerPlayback({frame,speed:next.speed,
+      pitchSemitones:next.semitones,generation:requestedGeneration});
+    if(!stopped&&requestedGeneration===generation){
+      latestFrame=accepted.sourceFrame;appliedRevision=accepted.revision;
+      bufferedSegments=accepted.bufferedSegments??0;pump();
+    }
+    return accepted;
+  };
+  return {master,start(){pump();},stop:cleanup,
+    sourcePositionAt(){return latestFrame/sampleRate;},
+    seek(frame){return reset(frame,{});},
+    updateSettings({frame,speed,semitones,...settings}={}){
+      return reset(frame,{...settings,
+        speed:speed??config.speed,semitones:semitones??config.semitones});
+    },
+    get active(){return !stopped},get firstScheduled(){return started},
+    get bufferedSegments(){return bufferedSegments}};
 }

@@ -66,14 +66,23 @@ export function detectSharedCandidates(channels,sr,{maxCandidates=14}={}){
 function observationFit(signal,sr,f,centers,K){
  let cc=0,cs=0,ss=0,yc=0,ys=0,energy=0;
  const half=theoreticalWindow(f,K)/2;
+ const phaseStep=TAU*f/sr,stepCos=Math.cos(phaseStep),stepSin=Math.sin(phaseStep);
  for(const center of centers){
   const {firstSample,endSample}=sampleInterval(center,f,sr,K);
+  const loopStart=Math.max(0,firstSample);
+  let x=Math.cos(phaseStep*loopStart),y=Math.sin(phaseStep*loopStart);
   for(let i=Math.max(0,firstSample);i<Math.min(signal.length,endSample);i++){
    const t=i/sr,position=(t-center)/half;
-   if(Math.abs(position)>=1)continue;
-   const w=.5+.5*Math.cos(Math.PI*position),p=TAU*f*t;
-   const a=Math.cos(p),b=Math.sin(p),y=signal[i];
-   cc+=w*a*a;cs+=w*a*b;ss+=w*b*b;yc+=w*y*a;ys+=w*y*b;energy+=w*y*y;
+   if(Math.abs(position)<1){
+    const w=.5+.5*Math.cos(Math.PI*position),sample=signal[i];
+    cc+=w*x*x;cs+=w*x*y;ss+=w*y*y;yc+=w*sample*x;ys+=w*sample*y;
+    energy+=w*sample*sample;
+   }
+   const nextX=x*stepCos-y*stepSin;
+   y=y*stepCos+x*stepSin;x=nextX;
+   if((i&4095)===4095){
+    x=Math.cos(phaseStep*(i+1));y=Math.sin(phaseStep*(i+1));
+   }
   }
  }
  const det=cc*ss-cs*cs;
@@ -87,10 +96,17 @@ function scoreSource(signal,sr,f,params){
  // independent physical measurements.
  let projection=0,energy=0,error=0;
  const stride=Math.max(1,Math.floor(sr/12000));
+ const phaseStep=TAU*f*stride/sr,stepCos=Math.cos(phaseStep),stepSin=Math.sin(phaseStep);
+ let x=1,y=0,count=0;
  for(let i=0;i<signal.length;i+=stride){
-  const y=signal[i],p=TAU*f*i/sr;
-  const predicted=params.a*Math.cos(p)+params.b*Math.sin(p);
-  projection+=predicted*predicted;energy+=y*y;error+=(y-predicted)**2;
+  const sample=signal[i],predicted=params.a*x+params.b*y;
+  projection+=predicted*predicted;energy+=sample*sample;error+=(sample-predicted)**2;
+  const nextX=x*stepCos-y*stepSin;
+  y=y*stepCos+x*stepSin;x=nextX;
+  if((++count&1023)===0){
+   const nextIndex=i+stride,phase=TAU*f*nextIndex/sr;
+   x=Math.cos(phase);y=Math.sin(phase);
+  }
  }
  return {explained:energy>1e-12?Math.max(-1,1-error/energy):1,projection,energy};
 }

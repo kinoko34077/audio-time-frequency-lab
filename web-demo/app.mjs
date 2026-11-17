@@ -339,6 +339,13 @@ function refreshAB(){
     if(document.activeElement!==input)input.value=String(value);
   }
   $("#player-loop-enabled").checked=ab.enabled;
+  const workerPlayback=Boolean(state.player?.labStream);
+  for(const id of ["player-loop-a","player-loop-b","player-loop-enabled",
+    "player-loop-a-now","player-loop-b-now"])
+    $("#"+id).disabled=workerPlayback;
+  if(workerPlayback)
+    $("#player-loop-hint").textContent=
+      "Worker研究モデルは全曲ループで再生中です。A/B区間の編集・適用は未対応です。";
   detailWaveEditor?.refresh(true);
 }
 function syncLoopToPlayer(player=state.player){
@@ -800,7 +807,7 @@ function playPosition(){
   // of truth; callback progress/command ACK can lag behind the dragged point.
   if(activeWavePointer!==null||detailWaveScrubbing||hoverWave!==null)return state.seek;
   if(!state.player||!state.ctx||!duration())return state.seek;
-  if(state.player.labStream)return state.player.stream.sourcePositionAt(state.ctx.currentTime);
+  if(state.player.labStream)return state.player.stream.sourcePositionAt();
   if(state.player.rawPCM){
     // The command-acknowledged paused source position is canonical. A stale
     // asynchronous progress event must not drag the fixed playhead backward.
@@ -1207,9 +1214,9 @@ function seek(seconds){
   state.seek=where;mediaStatus(Boolean(p&&!p.paused));
   if(!p)return;
   if(p.labStream){
-    // Restart the existing, applied renderer. Requested model settings can
-    // still be pending; play("wet") would reject AFTER stopping this stream.
-    void startModelPlayback(where,p.appliedConfig);
+    p.offset=where;
+    scheduleModelSeek(p,Math.min(state.dry[0].length-1,
+      Math.max(0,Math.round(where*state.decoded.sampleRate))));
     return;
   }
   if(p.rawPCM){
@@ -1225,6 +1232,26 @@ function seek(seconds){
   startSource(p,where);
   p.master.gain.setTargetAtTime(1,now+.040,.02);
   message("波形位置 "+fmtTime(where)+" から再生します。","info");
+}
+function scheduleModelSeek(player,frame){
+  player.queuedSeekFrame=frame;
+  if(player.seekInFlight)return;
+  player.seekInFlight=true;
+  void (async()=>{
+    while(state.player===player&&player.queuedSeekFrame!==null){
+      const target=player.queuedSeekFrame;
+      player.queuedSeekFrame=null;
+      await player.stream.seek(target);
+    }
+  })().catch(error=>{
+    player.queuedSeekFrame=null;
+    if(state.player===player)
+      message("Workerモデルのシーク後に再バッファできません: "+error.message,"error");
+  }).finally(()=>{
+    player.seekInFlight=false;
+    if(state.player===player&&player.queuedSeekFrame!==null)
+      scheduleModelSeek(player,player.queuedSeekFrame);
+  });
 }
 // Reuse the existing persistent PCM Worklet rather than stopping/rebuilding
 // the main player on every play/pause. This is user-facing transport, not an
@@ -1349,7 +1376,7 @@ async function stop(){
   state.seek=playPosition();
   state.player=null;
   if(p.labStream){
-    p.stream.stop();mediaStatus(false);controls.stop.disabled=true;
+    p.stream.stop();mediaStatus(false);controls.stop.disabled=true;refreshAB();
     $("#rt-telemetry").textContent="";indicator("停止中");refreshStatusSeek();return;
   }
   if(p.rawPCM){
@@ -2525,7 +2552,7 @@ function labRefresh(){
     {individual:lab.individual});
   $("#lab-model-compatibility").textContent=cap.sampleAB?
     "このモデルは0/逆再生・サンプル単位A/B・スクラブ対応。再生/モデルの両タブが同じ設定値です。":
-    (cap.reason||"研究モデルは0.5〜2倍のみ対応。A/B・0/逆再生・即時スクラブ非対応（元のA/B設定は保持）。");
+    (cap.reason||"Worker研究モデルは正方向0.5〜2倍のみ対応。A/B・0倍・逆方向・±2倍超は未対応です。1.5秒区間の再計算中は一時無音になる場合があります。シークは区間再計算を待ち、即時スクラブは未対応です。");
   if(!state.player?.labStream)labStatusText(!cap.supported?
     "未適用: "+cap.reason:lab.mode==="live"?
     "Rust/WASMの部分音処理 · 選択時に主再生へ適用":
@@ -2595,7 +2622,25 @@ async function labSettingsChanged(){
       "0/逆再生とサンプル単位A/B・即時スクラブは未対応。設定値は保持。"):
     "未適用: "+capability.reason;
   if(player&&player.mode!=="dry"){
-    if(previous!==nextMode||
+    if(player.labStream&&!isPCMModel(nextMode,nextIndividual)){
+      const nextConfig=Object.freeze({mode:nextMode,speed:nextSpeed,
+        semitones:nextSemi,individual:nextIndividual,fftSize:lab.fftSize,
+        shortFftSize:nextShort,longFftSize:nextLong,
+        referenceWindows:nextWindows,periodCycles:nextCycles});
+      await player.stream.updateSettings({
+        frame:Math.max(0,Math.min(state.dry[0].length-1,
+          Math.round(currentTime*state.decoded.sampleRate))),
+        speed:nextSpeed,semitones:nextSemi,
+        model:nextIndividual?"period-joint":nextMode,
+        jointBackend:nextIndividual?nextMode:null,
+        fftSize:nextConfig.fftSize,shortFftSize:nextShort,
+        longFftSize:nextLong,referenceWindows:nextWindows,
+        periodCycles:nextCycles
+      });
+      if(ticket!==modelSelectionEpoch||state.player!==player)return;
+      player.appliedConfig=nextConfig;player.appliedLabMode=nextMode;
+      player.sourceTimeRate=nextSpeed;player.offset=currentTime;
+    }else if(previous!==nextMode||
        (nextMode==="wsola"&&!nextIndividual&&previousShort!==nextShort)||
        (nextMode==="dual"&&!nextIndividual&&
          (previousShort!==nextShort||previousLong!==nextLong))||
@@ -2685,7 +2730,7 @@ async function startModelPlayback(offset=null,appliedOverride=null){
     applied.mode.toUpperCase()+" · 再生位置から先読み処理を開始…");
   let player;
   try{
-    const stream=createModelStream({
+    const stream=await createModelStream({
       ctx,sourceChannels:state.dry,sampleRate:state.decoded.sampleRate,
       speed:applied.speed,semitones:applied.semitones,
       model:applied.individual?"period-joint":applied.mode,
@@ -2717,10 +2762,12 @@ async function startModelPlayback(offset=null,appliedOverride=null){
         })();
       }
     });
+    if(epoch!==state.transportEpoch){stream.stop();return;}
     player={labStream:true,stream,mode:"wet",appliedLabMode:applied.mode,
       appliedConfig:applied,offset:where,at:ctx.currentTime,
       sourceTimeRate:applied.speed,master:stream.master};
     state.player=player;controls.stop.disabled=false;
+    refreshAB();
     controls.main.textContent="■ モデル停止";
     controls.main.setAttribute("aria-label","選択した処理モデルの再生を停止");
     mediaStatus(true);stream.start();refreshPlayhead();
