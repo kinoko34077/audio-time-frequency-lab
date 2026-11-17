@@ -2482,7 +2482,7 @@ function labRefresh(){
   labShort.disabled=!["wsola","dual"].includes(lab.mode);
   // Native Dual has TWO meaningful DSP windows, unlike native PV/WSOLA.
   labLong.disabled=lab.mode==="wsola"||
-    (isPCMModel(lab.mode)&&lab.mode!=="dual");
+    (isPCMModel(lab.mode)&&lab.mode!=="dual"&&lab.mode!=="live");
   labWindows.disabled=lab.mode==="live"||isPCMModel(lab.mode)||lab.individual;
   labLong.max=lab.mode==="live"?"12":"13";
   syncLabInput(labShortValue,lab.shortFftSize,labShort.disabled);

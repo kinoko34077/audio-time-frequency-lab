@@ -545,6 +545,10 @@ test("U1/U5 primary Play routes to REAL selected live/PV/Granular engines and on
       throw Error("Rust model selection status did not settle: "+
         JSON.stringify({observed,errors})+" / "+error.message);
     }
+    assert.equal(await page.$eval("#lab-long",el=>el.disabled),false,
+      "Rust long-window slider must remain available for its supported setting");
+    assert.equal(await page.$eval("#lab-long-value",el=>el.disabled),false,
+      "Rust long-window numeric input must remain available");
     await page.click("#main-tab-player");
     await page.click("#play-main");
     await page.waitForFunction(()=>window.__engineCreations?.some(e=>
