@@ -109,6 +109,24 @@ async function waitForWorkerPCM(page,{backend=null,generation=null,
   return evidence;
 }
 
+async function closeBrowserTree(browser){
+  if(!browser)return;
+  const child=browser.process();
+  if(process.platform==="win32"&&Number.isInteger(child?.pid)){
+    // Puppeteer's Windows child kill can leave Chromium renderer/audio
+    // processes behind. This PID is the isolated browser launched by this
+    // test, so terminate only its process tree after assertions complete.
+    await new Promise(resolve=>{
+      const killer=spawn("taskkill",["/PID",String(child.pid),"/T","/F"],{
+        stdio:"ignore",windowsHide:true
+      });
+      killer.once("error",resolve);
+      killer.once("close",resolve);
+    });
+  }
+  await browser.close().catch(()=>{});
+}
+
 test("individual-period Worker plays through one shared PCM Worklet in Chrome",async()=>{
   const port=18749;
   const server=spawn(process.env.PYTHON||"python3",
@@ -120,6 +138,7 @@ test("individual-period Worker plays through one shared PCM Worklet in Chrome",a
     browser=await puppeteer.launch({
       executablePath:process.env.CHROME_BIN||"/usr/bin/google-chrome",
       headless:true,args:["--no-sandbox","--disable-dev-shm-usage",
+        "--mute-audio",
         "--autoplay-policy=no-user-gesture-required"]
     });
     const page=await browser.newPage();
@@ -572,7 +591,7 @@ test("individual-period Worker plays through one shared PCM Worklet in Chrome",a
     }));
     await page.evaluate(()=>document.querySelector("#stop").click());
   }finally{
-    if(browser)await browser.close();
+    await closeBrowserTree(browser);
     server.kill();
   }
 });
