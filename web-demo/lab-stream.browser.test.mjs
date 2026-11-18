@@ -199,8 +199,22 @@ test("individual-period Worker plays through one shared PCM Worklet in Chrome",a
     await page.goto(`http://127.0.0.1:${port}/index.html`,{
       waitUntil:"domcontentloaded",timeout:20000
     });
-    await page.waitForFunction(()=>
-      document.documentElement.dataset.fwBoot==="ready",{timeout:20000});
+    try{
+      await page.waitForFunction(()=>
+        document.documentElement.dataset.fwBoot==="ready",{timeout:20000});
+    }catch(error){
+      const bootDiagnostic=await page.evaluate(()=>({
+        boot:document.documentElement.dataset.fwBoot,
+        title:document.title,
+        status:document.querySelector("#status")?.textContent,
+        scripts:[...document.scripts].map(script=>script.src),
+        resources:performance.getEntriesByType("resource").slice(-12)
+          .map(entry=>({name:entry.name,duration:entry.duration,
+            transferSize:entry.transferSize}))
+      }));
+      throw Error("Audio Lab boot did not become ready: "+
+        JSON.stringify({bootDiagnostic,pageErrors}),{cause:error});
+    }
     await page.evaluate(async()=>{
       const select=document.querySelector("#lab-model");
       select.value="pv";select.dispatchEvent(new Event("change",{bubbles:true}));
@@ -498,10 +512,11 @@ test("individual-period Worker plays through one shared PCM Worklet in Chrome",a
       return {x:rect.x,y:rect.y,width:rect.width,height:rect.height};
     });
     const seekPoint={x:wave.x+wave.width*.75,y:wave.y+wave.height/2};
+    const seekStartedAt=await page.evaluate(()=>performance.now());
     await page.mouse.click(seekPoint.x,seekPoint.y);
     try{
       await page.waitForFunction(target=>window.__labAudit.messages.some(message=>
-        message.type==="worker-state-accepted"&&
+        message.type==="worker-state-activated"&&
         Math.abs(message.sourceFrame-target)<=100),{timeout:10000},targetFrames.seek);
     }catch(error){
       const diagnostic=await page.evaluate(({point,targets})=>{
@@ -516,7 +531,7 @@ test("individual-period Worker plays through one shared PCM Worklet in Chrome",a
           pointerEvents:audit.pointerEvents.slice(-8),
           targets,
           workerStates:audit.messages.filter(message=>
-            message.type==="worker-state-accepted").slice(-8),
+            message.type==="worker-state-activated").slice(-8),
           workerProgress:audit.messages.filter(message=>
             message.type==="progress"&&message.processingMode==="worker").slice(-8),
           jobs:audit.jobs.slice(-8),results:audit.workerResults.slice(-8)};
@@ -524,22 +539,52 @@ test("individual-period Worker plays through one shared PCM Worklet in Chrome",a
       console.log("Chrome seek acceptance diagnostic",JSON.stringify({diagnostic,pageErrors}));
       throw error;
     }
-    const seekGeneration=await page.evaluate(target=>window.__labAudit.messages
-      .filter(message=>message.type==="worker-state-accepted"&&
-        Math.abs(message.sourceFrame-target)<=100).at(-1)?.generation,targetFrames.seek);
+    const seekResult=await page.evaluate(({target,startedAt})=>{
+      const activated=window.__labAudit.messages
+        .filter(message=>message.type==="worker-state-activated"&&
+          Math.abs(message.sourceFrame-target)<=100).at(-1);
+      const staged=window.__labAudit.messages.findLast(message=>
+        message.type==="worker-state-staged"&&
+        message.generation===activated?.generation);
+      return {generation:activated?.generation,
+        activationLatencyMs:activated?.receivedAt-startedAt,
+        missingFramesAtActivation:activated?.missingFrames,
+        bufferedSegmentsAtStage:staged?.bufferedSegments,
+        bufferedSegmentsAtActivation:activated?.bufferedSegments};
+    },{target:targetFrames.seek,startedAt:seekStartedAt});
+    const seekGeneration=seekResult.generation;
     const seekPcmEvidence=await waitForWorkerPCM(page,{generation:seekGeneration,
       missingBeforeFrames:missingBeforeSeek});
+    const seekTransitionMissingFrames=Math.max(0,
+      (seekResult.missingFramesAtActivation||0)-missingBeforeSeek);
+    assert.equal(seekPcmEvidence.missingFrames,0,
+      "seek and its first audible buffer must not insert missing PCM: "+
+        JSON.stringify({seekResult,seekPcmEvidence,missingBeforeSeek}));
+    const seekPostActivationMissingFrames=
+      seekPcmEvidence.missingFrames-seekTransitionMissingFrames;
     const missingBeforeLoop=await page.evaluate(()=>window.__labAudit.messages
       .filter(message=>message.type==="progress"&&
         message.processingMode==="worker").at(-1)?.missingFrames||0);
+    const loopSeekStartedAt=await page.evaluate(()=>performance.now());
     await page.mouse.click(wave.x+wave.width*.98,wave.y+wave.height/2);
     await page.waitForFunction(({generation,target})=>window.__labAudit.messages.some(message=>
-      message.type==="worker-state-accepted"&&message.generation>generation&&
+      message.type==="worker-state-activated"&&message.generation>generation&&
       Math.abs(message.sourceFrame-target)<=100),
       {timeout:10000},{generation:seekGeneration,target:targetFrames.nearEnd});
-    const loopGeneration=await page.evaluate(target=>window.__labAudit.messages
-      .filter(message=>message.type==="worker-state-accepted"&&
-        Math.abs(message.sourceFrame-target)<=100).at(-1).generation,targetFrames.nearEnd);
+    const loopSeekResult=await page.evaluate(({target,startedAt})=>{
+      const activated=window.__labAudit.messages
+        .filter(message=>message.type==="worker-state-activated"&&
+          Math.abs(message.sourceFrame-target)<=100).at(-1);
+      const staged=window.__labAudit.messages.findLast(message=>
+        message.type==="worker-state-staged"&&
+        message.generation===activated?.generation);
+      return {generation:activated?.generation,
+        activationLatencyMs:activated?.receivedAt-startedAt,
+        missingFramesAtActivation:activated?.missingFrames,
+        bufferedSegmentsAtStage:staged?.bufferedSegments,
+        bufferedSegmentsAtActivation:activated?.bufferedSegments};
+    },{target:targetFrames.nearEnd,startedAt:loopSeekStartedAt});
+    const loopGeneration=loopSeekResult.generation;
     await page.waitForFunction(({generation,totalFrames})=>{
       const progress=window.__labAudit.messages.filter(message=>
         message.type==="progress"&&message.workerGeneration===generation);
@@ -619,6 +664,11 @@ test("individual-period Worker plays through one shared PCM Worklet in Chrome",a
         worker:pitchWorkerTiming},
       generationUpdates:evidence.workletStates.length,
       maxObservedUnderrunFrames:evidence.maxMissingFrames,
+      seekActivationLatencyMs:seekResult.activationLatencyMs,
+      seekTransitionMissingFrames,seekPostActivationMissingFrames,
+      loopSeekActivationLatencyMs:loopSeekResult.activationLatencyMs,
+      loopSeekMissingAtActivation:Math.max(0,
+        (loopSeekResult.missingFramesAtActivation||0)-missingBeforeLoop),
       seekFrame:recovery.sourceFrames.at(-1),
       failedReplacementRetainedSource:recovery.file,
       workletCountAfterRecovery:recovery.worklets.length

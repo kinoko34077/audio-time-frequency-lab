@@ -6,7 +6,7 @@ import {createSourceTimeline,loopSourcePosition,nextSourceSampleIndex} from "./s
 
 export const SOURCE_WINDOW_FRAMES=65536;
 export const SOURCE_WINDOW_SLOTS=4;
-export const RENDERED_CHUNK_SLOTS=3;
+export const RENDERED_CHUNK_SLOTS=4;
 
 export function chooseSourceWindowStart(frame,sourceFrames,windowFrames=SOURCE_WINDOW_FRAMES,speed=1){
   if(!Number.isSafeInteger(sourceFrames)||sourceFrames<1 ||
@@ -138,7 +138,9 @@ export function createSourcePCMRenderer({
     },
     get statistics(){return Object.freeze({
       missingFrames,renderedFrames,windowCount:windows.length,
-      renderedChunkCount:renderedChunks.length
+      renderedChunkCount:renderedChunks.length+
+        (stagedWorkerState?.kind==="seek"?
+          stagedWorkerState.preparedChunks.length:0)
     });},
     hasFrame(index){return Number.isInteger(index)&&!!find(index);},
     installWindow(start,channels,pin=null,intent="prefetch"){
@@ -265,13 +267,29 @@ export function createSourcePCMRenderer({
         staged.sequence:nextRenderedSequence);
       if(!Number.isSafeInteger(queueSequence)||queueSequence<0)
         throw RangeError("invalid rendered PCM queue sequence");
-      if(active&&stagedWorkerState?.firstChunkAccepted&&
+      const seeking=stagedWorkerState?.kind==="seek"?stagedWorkerState:null;
+      if(active&&seeking&&renderedChunks.length>=seeking.retainedLimit)return false;
+      if(active&&!seeking&&stagedWorkerState?.firstChunkAccepted&&
          queueSequence>stagedWorkerState.sequence)return false;
       const expectedSpeed=active?timeline.state.speed:staged.speed;
       if(speed!==expectedSpeed)
         throw RangeError("rendered PCM speed does not match source clock");
       if(staged&&!staged.firstChunkAccepted&&startFrame!==staged.frame)
         throw RangeError("staged PCM must begin at the staged source boundary");
+      if(staged?.kind==="seek"){
+        const previous=staged.preparedChunks.at(-1)||null;
+        const expectedSequence=previous?previous.sequence+1:staged.sequence;
+        const expectedStart=previous?
+          (previous.endFrame>=sourceFrames?0:previous.endFrame):staged.frame;
+        if(staged.preparedChunks.length>=staged.requiredChunks)return false;
+        if(queueSequence!==expectedSequence||startFrame!==expectedStart)
+          throw RangeError("prepared seek PCM queue is not source-contiguous");
+        staged.preparedChunks.push({generation,sequence:queueSequence,startFrame,
+          endFrame,speed,coreFrames,channels});
+        staged.firstChunkAccepted=true;
+        workerMode=true;
+        return renderedChunks.length+staged.preparedChunks.length;
+      }
       const replacementIndex=staged&&!staged.firstChunkAccepted?
         renderedChunks.findIndex(segment=>
           segment.generation===renderedGeneration&&
@@ -343,6 +361,35 @@ export function createSourcePCMRenderer({
       return {sourceFrame:frame,sequence,
         bufferedSegments:renderedChunks.length};
     },
+    /** Prepare a seek while the active source clock keeps consuming old PCM. */
+    stageRenderedSeekState({generation,frame,speed,pitchSemitones,
+      requiredChunks=1}={}){
+      if(!Number.isSafeInteger(generation)||generation<=renderedGeneration||
+         !Number.isSafeInteger(frame)||frame<0||frame>=sourceFrames||
+         !Number.isFinite(speed)||speed<.5||speed>2||
+         !Number.isFinite(pitchSemitones)||pitchSemitones<-12||pitchSemitones>12||
+         !Number.isSafeInteger(requiredChunks)||requiredChunks<1||
+         requiredChunks>RENDERED_CHUNK_SLOTS)
+        throw RangeError("invalid staged Worker seek state");
+      const state=timeline.state,position=state.sourceFrame;
+      const activeChunks=renderedChunks.filter(segment=>
+        segment.generation===renderedGeneration);
+      const current=activeChunks.find(segment=>
+        (position>=segment.startFrame&&position<segment.endFrame)||
+        (state.loopEnabled&&segment.endFrame===sourceFrames&&
+          position<segment.startFrame))||activeChunks[0]||null;
+      const currentIndex=current?activeChunks.indexOf(current):0;
+      const retainedLimit=RENDERED_CHUNK_SLOTS-requiredChunks;
+      const retained=current?
+        activeChunks.slice(currentIndex,currentIndex+retainedLimit):
+        activeChunks.slice(0,retainedLimit);
+      renderedChunks.splice(0,renderedChunks.length,...retained);
+      stagedWorkerState={generation,frame,sequence:0,speed,pitchSemitones,
+        kind:"seek",requiredChunks,retainedLimit,preparedChunks:[],
+        firstChunkAccepted:false};
+      workerMode=true;
+      return {sourceFrame:frame,sequence:0,bufferedSegments:renderedChunks.length};
+    },
     /** Invalidate queued output after a seek or model-setting change. */
     resetRenderedChunks(generation,state={}){
       if(!Number.isSafeInteger(generation)||generation<=renderedGeneration)
@@ -399,6 +446,25 @@ export function createSourcePCMRenderer({
         state=timeline.state;
         let position=timeline.sourceFrameAt(0);
         if(position===null){for(const ch of output)ch[i]=0;continue;}
+        const seek=stagedWorkerState?.kind==="seek"&&
+          stagedWorkerState.preparedChunks.length>=
+            stagedWorkerState.requiredChunks?stagedWorkerState:null;
+        if(seek){
+          beginOutputTransition(output,i);
+          const activated=timeline.scrub(seek.frame,seek.speed);
+          const prepared=seek.preparedChunks;
+          renderedChunks.splice(0,renderedChunks.length,...prepared);
+          previousRendered=null;
+          renderedGeneration=seek.generation;
+          workerState={generation:seek.generation,speed:seek.speed,
+            pitchSemitones:seek.pitchSemitones};
+          nextRenderedSequence=seek.sequence+prepared.length;
+          stagedWorkerState=null;
+          workerActivation={...workerState,sourceFrame:activated.sourceFrame,
+            revision:activated.revision};
+          state=timeline.state;
+          position=timeline.sourceFrameAt(0);
+        }
         while(renderedChunks.length){
           const head=renderedChunks[0];
           const wrapped=state.loopEnabled&&head.endFrame===sourceFrames&&

@@ -35,11 +35,12 @@ export async function createModelStream({ctx,sourceChannels,sampleRate,speed,sem
      !Number.isFinite(speed)||speed<.5||speed>2||
      !Number.isFinite(semitones)||semitones<-12||semitones>12)
     throw RangeError("legacy Worker supports positive 0.5..2x and -12..12 semitones");
-  let stopped=false,started=false,pending=false,staging=false,job=0;
+  let stopped=false,started=false,pending=false,stagingOperations=0,job=0;
   let handoffWorker=null,handoffPending=false,handoffInstalling=false;
   let handoffJobId=0,handoffGeneration=null,handoffResult=null;
   let handoffUnavailableGeneration=null;
   let generation=0,activeGeneration=0,stagedGeneration=null;
+  let seekTransitionGeneration=null;
   let bufferedSegments=0,lastMissingFrames=0,latestFrame=0,appliedRevision=0;
   let cursorFrame=0,sequenceCursor=0,activeJob=0,activeJobGeneration=0;
   let activeJobConfig=null,activeJobSequence=0;
@@ -115,11 +116,19 @@ export async function createModelStream({ctx,sourceChannels,sampleRate,speed,sem
     sequenceCursor=result.sequence+1;
     cursorFrame=plan.start+plan.core>=totalFrames?0:plan.start+plan.core;
   };
-  const startHandoffJob=(targetGeneration,targetConfig,startFrame,sequence)=>{
+  const startHandoffJob=(targetGeneration,targetConfig,startFrame,sequence,
+    {seek=false}={})=>{
     const taskJob=++job;
     let nextWorker;
     try{nextWorker=new Worker('./lab-processor.worker.mjs',{type:'module'});}
     catch{
+      if(seek){
+        const waiter=transitionWaiters.get(targetGeneration);
+        if(waiter){transitionWaiters.delete(targetGeneration);
+          waiter.reject(Error('seek PCM preparation failed: parallel Worker could not start'));}
+        fail('seek PCM preparation failed: parallel Worker could not start');
+        return;
+      }
       handoffUnavailableGeneration=targetGeneration;
       stagedGeneration=null;
       onStatus('並行Workerを準備できず、旧PCM境界で切替を続行');
@@ -128,25 +137,36 @@ export async function createModelStream({ctx,sourceChannels,sampleRate,speed,sem
     const {plan,channels}=prepareChunk(targetConfig,startFrame,sequence);
     handoffWorker=nextWorker;handoffPending=true;
     handoffJobId=taskJob;handoffGeneration=targetGeneration;
-    const fallback=()=>{
+    const fallback=reason=>{
       if(stopped||handoffJobId!==taskJob)return;
       handoffPending=false;handoffWorker=null;handoffJobId=0;
       handoffGeneration=null;handoffUnavailableGeneration=targetGeneration;
       stagedGeneration=null;
       try{nextWorker.terminate();}catch{}
+      if(seek){
+        const waiter=transitionWaiters.get(targetGeneration);
+        const error=Error('seek PCM preparation failed: '+
+          (reason||'parallel Worker failed'));
+        if(waiter){transitionWaiters.delete(targetGeneration);waiter.reject(error);}
+        fail(error.message);
+        return;
+      }
       onStatus('並行Workerを準備できず、旧PCM境界で切替を続行');
       if(!pending)pump();
     };
-    nextWorker.onerror=fallback;
+    nextWorker.onerror=event=>fallback(event?.message||'parallel Worker error');
     nextWorker.onmessage=({data})=>{
       if(stopped||data.job!==taskJob||handoffJobId!==taskJob)return;
+      if(data.generation!==targetGeneration||targetGeneration!==generation){
+        handoffPending=false;handoffWorker=null;handoffJobId=0;
+        handoffGeneration=null;
+        try{nextWorker.terminate();}catch{}
+        resolveTransition(targetGeneration,{stale:true});pump();return;
+      }
+      if(!data.ok){fallback(data.message||'parallel Worker DSP failed');return;}
       handoffPending=false;handoffWorker=null;handoffJobId=0;
       handoffGeneration=null;
       try{nextWorker.terminate();}catch{}
-      if(data.generation!==targetGeneration||targetGeneration!==generation){
-        resolveTransition(targetGeneration,{stale:true});pump();return;
-      }
-      if(!data.ok){fallback();return;}
       handoffUnavailableGeneration=null;
       handoffResult={generation:targetGeneration,config:targetConfig,
         plan,sequence,channels:data.channels};
@@ -163,8 +183,8 @@ export async function createModelStream({ctx,sourceChannels,sampleRate,speed,sem
     catch{fallback();}
   };
   const pump=()=>{
-    if(stopped||staging||handoffInstalling)return;
-    if(handoffResult&&!pending){
+    if(stopped||stagingOperations>0||handoffInstalling)return;
+    if(handoffResult&&!handoffInstalling){
       handoffInstalling=true;
       void installHandoffResult().catch(error=>fail(error.message))
         .finally(()=>{handoffInstalling=false;pump();});
@@ -173,7 +193,7 @@ export async function createModelStream({ctx,sourceChannels,sampleRate,speed,sem
     const requestedGeneration=generation,requestedConfig=config;
     const transitioning=requestedGeneration!==activeGeneration;
     if(transitioning&&stagedGeneration!==requestedGeneration){
-      staging=true;
+      stagingOperations++;
       onStatus('設定を切替中 · 現在のPCMを再生しながら次の世代を準備中');
       void bridge.stageWorkerPlayback({speed:requestedConfig.speed,
         pitchSemitones:requestedConfig.semitones,
@@ -195,7 +215,7 @@ export async function createModelStream({ctx,sourceChannels,sampleRate,speed,sem
           if(waiter){transitionWaiters.delete(requestedGeneration);waiter.reject(error);}
           fail(error.message);
         }else resolveTransition(requestedGeneration,{stale:true});
-      }).finally(()=>{staging=false;pump();});
+      }).finally(()=>{stagingOperations--;pump();});
       return;
     }
     if(pending||handoffPending)return;
@@ -223,8 +243,11 @@ export async function createModelStream({ctx,sourceChannels,sampleRate,speed,sem
     if(data.type==="worker-state-activated"){
       if(data.generation>=activeGeneration){
         activeGeneration=data.generation;stagedGeneration=null;
+        if(seekTransitionGeneration===data.generation)
+          seekTransitionGeneration=null;
         activeConfig=configs.get(activeGeneration)||activeConfig;
         latestFrame=data.sourceFrame;appliedRevision=data.revision;
+        bufferedSegments=data.bufferedSegments??bufferedSegments;
         for(const key of configs.keys())
           if(key!==activeGeneration&&key!==generation)configs.delete(key);
         onStatus(activeGeneration===generation?
@@ -286,7 +309,9 @@ export async function createModelStream({ctx,sourceChannels,sampleRate,speed,sem
       bufferedSegments=accepted.bufferedSegments;
       if(resultGeneration===generation)
         sequenceCursor=Math.max(sequenceCursor,activeJobSequence+1);
-      cursorFrame=plan.start+plan.core>=totalFrames?0:plan.start+plan.core;
+      if(resultGeneration===generation||
+         seekTransitionGeneration!==generation)
+        cursorFrame=plan.start+plan.core>=totalFrames?0:plan.start+plan.core;
       pending=false;
       if(!started){
         // Give the first 1.5-second render enough lookahead to cover one
@@ -326,11 +351,48 @@ export async function createModelStream({ctx,sourceChannels,sampleRate,speed,sem
     const next=validateNext(frame,nextConfig);
     for(const id of [...transitionWaiters.keys()])
       resolveTransition(id,{stale:true});
-    config=activeConfig=next;generation++;activeGeneration=generation;
-    configs.clear();configs.set(generation,next);
-    stagedGeneration=null;cursorFrame=latestFrame=frame;sequenceCursor=0;
-    bufferedSegments=0;lastMissingFrames=0;
+    cancelHandoff();
+    config=next;generation++;
     const requestedGeneration=generation;
+    stagedGeneration=null;lastMissingFrames=0;
+    if(started){
+      seekTransitionGeneration=requestedGeneration;
+      configs.clear();configs.set(activeGeneration,activeConfig);
+      configs.set(requestedGeneration,next);
+      const seekPlan=planChunk({totalFrames,sampleRate,speed:next.speed,
+        startSeconds:frame/sampleRate,startFrame:frame,model:next.model,
+        fftSize:next.fftSize,shortFftSize:next.shortFftSize,
+        longFftSize:next.longFftSize,referenceWindows:next.referenceWindows,
+        jointBackend:next.jointBackend});
+      const requiredChunks=seekPlan.core<Math.ceil(CHUNK_SECONDS*sampleRate)||
+        next.speed>1.5?2:1;
+      stagingOperations++;
+      try{
+        const staged=await bridge.stageWorkerSeekPlayback({frame,
+          speed:next.speed,pitchSemitones:next.semitones,
+          generation:requestedGeneration,requiredChunks});
+        if(stopped||requestedGeneration!==generation)
+          return {stale:true};
+        stagedGeneration=requestedGeneration;
+        cursorFrame=staged.sourceFrame;sequenceCursor=staged.sequence;
+        bufferedSegments=staged.bufferedSegments??bufferedSegments;
+        const promise=new Promise((resolve,reject)=>
+          transitionWaiters.set(requestedGeneration,{resolve,reject}));
+        startHandoffJob(requestedGeneration,next,staged.sourceFrame,
+          staged.sequence,{seek:true});
+        return promise;
+      }catch(error){
+        if(!stopped&&requestedGeneration===generation)
+          fail('seek PCM staging failed: '+error.message);
+        throw error;
+      }finally{
+        stagingOperations--;pump();
+      }
+    }
+    activeConfig=next;activeGeneration=requestedGeneration;
+    seekTransitionGeneration=null;
+    configs.clear();configs.set(requestedGeneration,next);
+    cursorFrame=latestFrame=frame;sequenceCursor=0;bufferedSegments=0;
     const accepted=await bridge.resetWorkerPlayback({frame,speed:next.speed,
       pitchSemitones:next.semitones,generation:requestedGeneration});
     if(!stopped&&requestedGeneration===generation){
@@ -347,6 +409,7 @@ export async function createModelStream({ctx,sourceChannels,sampleRate,speed,sem
       speed:speed??config.speed,semitones:semitones??config.semitones});
     for(const id of [...transitionWaiters.keys()])
       resolveTransition(id,{stale:true});
+    seekTransitionGeneration=null;
     config=next;generation++;
     configs.set(generation,next);
     for(const key of configs.keys())

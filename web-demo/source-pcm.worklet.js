@@ -4,7 +4,7 @@
  * including a non-DC phase-evolving 0× freeze. Granular remains a comparison
  * mode. Neither guarantees perfect short-loop musical timbre or iPhone CPU.
  */
-import {createSourcePCMRenderer} from "./source-pcm-renderer.mjs";
+import {createSourcePCMRenderer,RENDERED_CHUNK_SLOTS} from "./source-pcm-renderer.mjs";
 import {createGranularTimePitch,createWsolaTimePitch} from "./source-granular.mjs";
 import {createSpectralTimePitch} from "./source-spectral.mjs";
 import {createDualTimePitch} from "./source-dual.mjs";
@@ -84,6 +84,7 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
              !Number.isSafeInteger(m.generation)||
              m.generation<=this.workerGeneration)
             throw RangeError("invalid staged legacy Worker playback state");
+          this.workerSeekRequestId=null;
           const staged=this.renderer.stageRenderedState({
             generation:m.generation,speed:m.speed,
             pitchSemitones:m.pitchSemitones
@@ -96,6 +97,31 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
             bufferedSegments:staged.bufferedSegments});
           return;
         }
+        if(m.type==="worker-seek-stage"){
+          if(this.processingMode!=="worker"||
+             !Number.isSafeInteger(m.frame)||m.frame<0||
+             m.frame>=this.sourceFrames||!Number.isFinite(m.speed)||
+             m.speed<.5||m.speed>2||
+             !Number.isFinite(m.pitchSemitones)||
+             m.pitchSemitones<-12||m.pitchSemitones>12||
+             !Number.isSafeInteger(m.generation)||
+             m.generation<=this.workerGeneration||
+             !Number.isSafeInteger(m.requiredChunks)||
+             m.requiredChunks<1||m.requiredChunks>RENDERED_CHUNK_SLOTS)
+            throw RangeError("invalid staged legacy Worker seek");
+          const staged=this.renderer.stageRenderedSeekState({
+            generation:m.generation,frame:m.frame,speed:m.speed,
+            pitchSemitones:m.pitchSemitones,
+            requiredChunks:m.requiredChunks
+          });
+          this.workerSeekRequestId=m.requestId;
+          this.port.postMessage({type:"worker-state-staged",
+            requestId:m.requestId,generation:m.generation,
+            sourceFrame:staged.sourceFrame,sequence:staged.sequence,
+            speed:m.speed,pitchSemitones:m.pitchSemitones,
+            bufferedSegments:staged.bufferedSegments});
+          return;
+        }
         if(m.type==="worker-state"){
           if(this.processingMode!=="worker"||
              !Number.isSafeInteger(m.frame)||m.frame<0||m.frame>=this.sourceFrames||
@@ -105,6 +131,7 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
              !Number.isSafeInteger(m.generation)||
              m.generation<=this.workerGeneration)
             throw RangeError("invalid legacy Worker playback state");
+          this.workerSeekRequestId=null;
           this.renderer.resetRenderedChunks(m.generation,{
             speed:m.speed,pitchSemitones:m.pitchSemitones
           });
@@ -344,10 +371,17 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
     if(workerActivation){
       this.workerGeneration=workerActivation.generation;
       this.workerPitchSemitones=workerActivation.pitchSemitones;
+      const requestId=this.workerSeekRequestId??null;
+      if(requestId!==null){
+        this.workerSeekRequestId=null;
+        this.queueRenderReceipt(requestId,workerActivation);
+      }
       this.port.postMessage({type:"worker-state-activated",
-        ...workerActivation});
+        ...workerActivation,requestId,
+        bufferedSegments:this.renderer.statistics.renderedChunkCount,
+        missingFrames:this.renderer.statistics.missingFrames});
     }
-    this.emitRenderReceipt(sourceFrame,missing);
+    this.emitRenderReceipt(workerActivation?.sourceFrame??sourceFrame,missing);
     this.blocks++;
     // Host window cache refill is outside the audio callback and never
     // blocks or starts/stops the AudioWorklet on every loop wrap.

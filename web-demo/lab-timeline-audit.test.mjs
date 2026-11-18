@@ -23,9 +23,21 @@ test('legacy Worker PCM is rendered by one shared Worklet source clock',async()=
    this.messages.push(message);
    const respond=data=>queueMicrotask(()=>this.onmessage?.({data}));
    if(message.type==="rendered-chunk"){
-    this.node.segments.push(message);
+    if(this.node.stagedState?.generation===message.generation)
+      this.node.stagedChunks.push(message);
+    else this.node.segments.push(message);
     respond({type:"rendered-chunk-accepted",requestId:message.requestId,
-      generation:message.generation,bufferedSegments:this.node.segments.length});
+      generation:message.generation,bufferedSegments:this.node.segments.length+
+        this.node.stagedChunks.length});
+   }else if(message.type==="worker-seek-stage"){
+    this.node.stagedState={frame:message.frame,speed:message.speed,
+      pitchSemitones:message.pitchSemitones,generation:message.generation,
+      requiredChunks:message.requiredChunks};
+    this.node.stagedChunks=[];
+    respond({type:"worker-state-staged",requestId:message.requestId,
+      generation:message.generation,sourceFrame:message.frame,sequence:0,
+      speed:message.speed,pitchSemitones:message.pitchSemitones,
+      bufferedSegments:this.node.segments.length});
    }else if(message.type==="worker-state"){
     this.node.frame=message.frame;this.node.speed=message.speed;
     this.node.generation=message.generation;this.node.segments.length=0;
@@ -47,21 +59,37 @@ test('legacy Worker PCM is rendered by one shared Worklet source clock',async()=
    this.options=options;this.port=new StubPort(this);this.listeners={};
    this.frame=options.processorOptions.startFrame;
    this.speed=options.processorOptions.speed;this.generation=0;
-   this.revision=0;this.running=false;this.segments=[];worklets.push(this);
+   this.revision=0;this.running=false;this.segments=[];this.stagedChunks=[];
+   worklets.push(this);
   }
   connect(){return this;}disconnect(){}
   addEventListener(name,fn){this.listeners[name]=fn;}
   removeEventListener(name){delete this.listeners[name];}
   advance(outputFrames){
    if(!this.running)return;
+   if(this.stagedState&&
+      this.stagedChunks.length>=this.stagedState.requiredChunks){
+    const staged=this.stagedState;
+    this.frame=staged.frame;this.speed=staged.speed;
+    this.generation=staged.generation;this.segments=[...this.stagedChunks];
+    this.stagedState=null;this.stagedChunks=[];this.revision++;
+    const activated={type:"worker-state-activated",
+      generation:this.generation,sourceFrame:this.frame,speed:this.speed,
+      pitchSemitones:staged.pitchSemitones,revision:this.revision,
+      bufferedSegments:this.segments.length};
+    this.port.messages.push(activated);
+    this.port.onmessage?.({data:activated});
+   }
    this.frame+=outputFrames*this.speed*this.options.processorOptions.sourceSampleRate/
      this.options.processorOptions.sourceSampleRate;
    const length=this.options.processorOptions.sourceFrames;
    if(this.frame>=length)this.frame%=length;
-   this.port.onmessage?.({data:{type:"progress",sourceFrame:this.frame,
+   const progress={type:"progress",sourceFrame:this.frame,
      speed:this.speed,running:true,revision:this.revision,
      workerGeneration:this.generation,bufferedSegments:this.segments.length,
-     missingFrames:0}});
+     missingFrames:0};
+   this.port.messages.push(progress);
+   this.port.onmessage?.({data:progress});
   }
  }
  globalThis.Worker=StubWorker;globalThis.AudioWorkletNode=StubWorklet;
@@ -97,23 +125,38 @@ test('legacy Worker PCM is rendered by one shared Worklet source clock',async()=
   worklets[0].advance(16000);await settle();
   assert.ok(Math.abs(stream.sourcePositionAt()-4.75)<1e-6,
     "playhead follows Worklet source frames rather than wall time");
-  await stream.seek(88000);
+  const seek=stream.seek(88000);
+  await settle();await settle();
+  assert.equal(stream.sourcePositionAt(),4.75,
+    "the old shared-clock PCM remains audible while the seek chunk renders");
+  assert.ok(worklets[0].port.messages.some(m=>m.type==="worker-seek-stage"&&
+    m.frame===88000&&m.generation===1));
+  assert.equal(workers.length,2,"seek rendering uses a bounded handoff Worker");
+  assert.equal(workers[1].requests[0].plan.start,88000,
+    "the handoff PCM starts at the exact requested source frame");
+  workers[1].flush();await settle();await settle();await settle();
+  assert.equal(stream.sourcePositionAt(),4.75,
+    "the source clock changes only after the target PCM is prepared");
+  assert.equal(worklets[0].stagedChunks.length,1,
+    "seek PCM is installed without waiting for an obsolete main Worker job");
+  worklets[0].advance(0);
+  await seek;
   assert.ok(Math.abs(stream.sourcePositionAt()-5.5)<1e-6);
   assert.equal(worklets.length,1,"seek reuses the same Worklet");
-  assert.ok(worklets[0].port.messages.some(m=>m.type==="worker-state"&&
-    m.frame===88000&&m.generation===1));
-  let newestRequest=workers[0].requests.at(-1);
-  if(newestRequest.generation!==1){
-    assert.equal(newestRequest.generation,0,
-      "a seek may finish an already-running old-generation DSP job first");
-    workers[0].flush();await settle();await settle();
-    newestRequest=workers[0].requests.at(-1);
-  }
-  assert.equal(newestRequest.generation,1);
-  assert.equal(newestRequest.plan.start,88000);
+  assert.equal(worklets[0].port.messages.some(m=>m.type==="worker-state"&&
+    m.frame===88000&&m.generation===1),false,
+    "a started seek does not reset the active queue before target PCM is ready");
+  assert.ok(worklets[0].port.messages.some(m=>m.type==="worker-state-activated"&&
+    m.sourceFrame===88000&&m.generation===1));
+  assert.deepEqual(worklets[0].segments.map(segment=>segment.sequence),[0],
+    "the activated seek starts a fresh ordered PCM queue");
   workers[0].flush();await settle();await settle();
-  assert.equal(worklets[0].segments.at(-1).sequence,0,
-    "an immediate seek starts a fresh ordered PCM queue generation");
+  const newestRequest=workers[0].requests.at(-1);
+  assert.equal(newestRequest.generation,1);
+  assert.equal(newestRequest.plan.start,112000);
+  workers[0].flush();await settle();await settle();
+  assert.deepEqual(worklets[0].segments.map(segment=>segment.sequence),[0,1],
+    "the next main Worker chunk continues the seek generation in queue order");
   const transition=stream.updateSettings({frame:88000,speed:1.25});
   stream.stop();
   const stopped=await transition;

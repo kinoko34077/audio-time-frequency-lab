@@ -2,7 +2,8 @@
  * Uses decoded local PCM; no whole-song transfer or per-loop Worker startup.
  * Experimental transport ONLY; not pitch-preserving DSP or user-facing player.
  */
-import {chooseSourceWindowStart,SOURCE_WINDOW_FRAMES} from "./source-pcm-renderer.mjs";
+import {chooseSourceWindowStart,SOURCE_WINDOW_FRAMES,
+  RENDERED_CHUNK_SLOTS} from "./source-pcm-renderer.mjs";
 import {validatePlaybackSpeed} from "./source-timeline.mjs";
 
 const installations=new WeakMap();
@@ -307,6 +308,20 @@ export async function createSourcePCMBridge({
       currentSpeed=nextSpeed;
       return submit({type:"worker-state",frame,speed:nextSpeed,
         pitchSemitones:nextPitch,generation});
+    },
+    stageWorkerSeekPlayback({frame,speed:nextSpeed,
+      pitchSemitones:nextPitch,generation,requiredChunks=1}={}){
+      if(processingMode!=="worker")
+        return Promise.reject(Error("Worker seek requires Worker processing mode"));
+      if(!Number.isSafeInteger(frame)||frame<0||frame>=frames||
+         !Number.isFinite(nextSpeed)||nextSpeed<.5||nextSpeed>2||
+         !Number.isFinite(nextPitch)||nextPitch<-12||nextPitch>12||
+         !Number.isSafeInteger(generation)||generation<1||
+         !Number.isSafeInteger(requiredChunks)||requiredChunks<1||
+         requiredChunks>RENDERED_CHUNK_SLOTS)
+        return Promise.reject(RangeError("invalid staged legacy Worker seek"));
+      return submit({type:"worker-seek-stage",frame,speed:nextSpeed,
+        pitchSemitones:nextPitch,generation,requiredChunks});
     },
     stageWorkerPlayback({speed:nextSpeed,pitchSemitones:nextPitch,
       generation}={}){

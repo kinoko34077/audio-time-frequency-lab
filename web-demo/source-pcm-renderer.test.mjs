@@ -149,8 +149,9 @@ test("Worker PCM queue is generation-scoped and bounded",()=>{
   assert.equal(p.installRenderedChunk(chunk(1,0)),1);
   assert.equal(p.installRenderedChunk(chunk(1,10)),2);
   assert.equal(p.installRenderedChunk(chunk(1,20)),3);
-  assert.throws(()=>p.installRenderedChunk(chunk(1,30)),/queue full/);
-  assert.equal(p.statistics.renderedChunkCount,3);
+  assert.equal(p.installRenderedChunk(chunk(1,30)),4);
+  assert.throws(()=>p.installRenderedChunk(chunk(1,40)),/queue full/);
+  assert.equal(p.statistics.renderedChunkCount,4);
 });
 
 test("staged Worker settings keep queued PCM and switch the shared clock at the boundary",()=>{
@@ -267,6 +268,52 @@ test("staged Worker replacement follows queue order when a full-track source ran
   assert.equal(p.workerState.generation,1);
   assert.equal(p.timeline.state.sourceFrame,0);
   assert.equal(p.takeWorkerActivation().sourceFrame,4);
+});
+
+test("prepared Worker seek keeps old PCM playing until target PCM is ready",()=>{
+  const p=createSourcePCMRenderer({sourceFrames:32,sourceSampleRate:4,
+    outputSampleRate:4,channelCount:1,speed:1,startFrame:0});
+  const chunk=(generation,sequence,startFrame,endFrame,value)=>({generation,
+    sequence,startFrame,endFrame,speed:1,coreFrames:endFrame-startFrame,
+    channels:[new Float32Array(endFrame-startFrame).fill(value)]});
+  p.installRenderedChunk(chunk(0,0,0,4,1));
+  p.installRenderedChunk(chunk(0,1,4,8,1));
+  const before=[new Float32Array(2)];
+  assert.equal(p.renderBuffered(before),0);
+  assert.deepEqual(Array.from(before[0]),[1,1]);
+  assert.deepEqual(p.stageRenderedSeekState({generation:1,frame:20,speed:1,
+    pitchSemitones:3,requiredChunks:2}),{sourceFrame:20,sequence:0,
+    bufferedSegments:2});
+  const waiting=[new Float32Array(2)];
+  assert.equal(p.renderBuffered(waiting),0,
+    "preparing a seek must not clear the currently audible PCM queue");
+  assert.deepEqual(Array.from(waiting[0]),[1,1]);
+  assert.equal(p.timeline.state.sourceFrame,4,
+    "the shared clock keeps advancing on old PCM while the target renders");
+
+  assert.equal(p.installRenderedChunk(chunk(1,0,20,24,9)),3,
+    "target PCM is retained beside the old queue until atomic activation");
+  const oldStillPlaying=[new Float32Array(2)];
+  assert.equal(p.renderBuffered(oldStillPlaying),0,
+    "a short loop-edge seek waits for its wrapped PCM before activation");
+  assert.deepEqual(Array.from(oldStillPlaying[0]),[1,1]);
+  assert.equal(p.timeline.state.sourceFrame,6);
+  assert.equal(p.installRenderedChunk(chunk(0,2,8,12,1)),2,
+    "an in-flight old generation can refill retained PCM during the seek");
+  assert.equal(p.installRenderedChunk(chunk(1,1,24,28,11)),4,
+    "the contiguous loop-start chunk is staged with the seek chunk");
+  const after=[new Float32Array(8)];
+  assert.equal(p.renderBuffered(after),0,
+    "atomic seek activation must not insert missing output frames");
+  assert.equal(p.workerState.generation,1);
+  assert.equal(p.workerState.pitchSemitones,3);
+  assert.equal(p.timeline.state.sourceFrame,28,
+    "the shared clock advances across both prepared chunks");
+  assert.equal(p.takeWorkerActivation().sourceFrame,20);
+  assert.equal(after[0][0],1,
+    "the target model transitions from the last audible old-model sample");
+  assert.ok(after[0][3]>after[0][0]&&after[0][3]<9);
+  assert.equal(p.statistics.missingFrames,0);
 });
 
 test("negative fractional speed wraps 1 frame loop instead of inventing dropped samples",()=>{
