@@ -4,6 +4,7 @@ import {spawn} from "node:child_process";
 import path from "node:path";
 import puppeteer from "puppeteer-core";
 import {closeBrowserTree,stopChildProcess} from "./test-process-cleanup.mjs";
+import {installTestAudioSilenceGuard} from "./test-audio-silence-guard.mjs";
 
 async function waitForWorkerPCM(page,{backend=null,generation=null,
   minimumGeneration=0,missingBeforeFrames=null}={}){
@@ -132,9 +133,13 @@ test("individual-period Worker plays through one shared PCM Worklet in Chrome",a
          !message.text().startsWith("Failed to load resource: the server responded with a status of 404"))
         pageErrors.push(message.text());
     });
-    await page.evaluateOnNewDocument(()=>{
-      const audit={worklets:[],workers:[],jobs:[],workerResults:[],messages:[],pointerEvents:[],bufferSources:0,probe:null,audioContext:null};
+    await page.evaluateOnNewDocument(guardSource=>{
+      const audit={worklets:[],workers:[],jobs:[],workerResults:[],messages:[],
+        pointerEvents:[],bufferSources:0,probe:null,mutedOutputRoutes:0,
+        audioOutputMuteGain:null,
+        audioContext:null};
       Object.defineProperty(window,"__labAudit",{value:audit});
+      (0,eval)(`(${guardSource})`)(window,audit);
       for(const type of ["pointerdown","pointerup","click"])
         document.addEventListener(type,event=>{
           if(event.target?.id==="wave")audit.pointerEvents.push({type,
@@ -174,6 +179,7 @@ test("individual-period Worker plays through one shared PCM Worklet in Chrome",a
           audit.workers.push(this.__labUrl);
           this.addEventListener("message",event=>audit.workerResults.push({
             receivedAt:performance.now(),job:event.data?.job,
+            audioTime:audit.audioContext?.currentTime,
             generation:event.data?.generation,ok:event.data?.ok,
             workerElapsedMs:event.data?.workerElapsedMs
           }));
@@ -183,7 +189,9 @@ test("individual-period Worker plays through one shared PCM Worklet in Chrome",a
             audit.jobs.push({job:payload.job,generation:payload.generation,
               model:payload.model,jointBackend:payload.jointBackend,
               speed:payload.speed,semitones:payload.semitones,
-            sentAt:performance.now(),coreFrames:payload.plan?.core,
+            sentAt:performance.now(),
+              sentAudioTime:audit.audioContext?.currentTime,
+              coreFrames:payload.plan?.core,
               planStart:payload.plan?.start,
               planEnd:payload.plan?.start+payload.plan?.core,
               outputFrames:payload.plan?.outputFrames,
@@ -197,7 +205,7 @@ test("individual-period Worker plays through one shared PCM Worklet in Chrome",a
         audit.bufferSources++;
         return nativeBufferSource.apply(this,args);
       };
-    });
+    },installTestAudioSilenceGuard.toString());
     await page.goto(`http://127.0.0.1:${port}/index.html`,{
       waitUntil:"domcontentloaded",timeout:20000
     });
@@ -271,10 +279,11 @@ test("individual-period Worker plays through one shared PCM Worklet in Chrome",a
         status:document.querySelector("#lab-status")?.textContent,
         file:document.querySelector("#file-meta")?.textContent,
         worklets:window.__labAudit.worklets,workers:window.__labAudit.workers,
+        mutedOutputRoutes:window.__labAudit.mutedOutputRoutes,
         jobs:window.__labAudit.jobs.slice(-5),
         results:window.__labAudit.workerResults.slice(-5)
       }));
-      console.log("Chrome playback-start diagnostic",JSON.stringify(diagnostic));
+      console.log("Chrome playback-start diagnostic",JSON.stringify({diagnostic,pageErrors}));
       throw error;
     }
     await page.waitForFunction(()=>window.__labAudit.messages.some(message=>
@@ -380,10 +389,12 @@ test("individual-period Worker plays through one shared PCM Worklet in Chrome",a
       const progress=audit.messages.filter(message=>message.type==="progress"&&
         message.processingMode==="worker").at(-1);
       const requestAudioTime=audit.audioContext.currentTime;
+      const requestPerformanceTime=performance.now();
       node.value="2";node.dispatchEvent(new Event("change",{bubbles:true}));
       return {sourceFrame:progress?.sourceFrame,
         progressAudioTime:progress?.outputTime,speed:progress?.speed,
-        requestAudioTime,sampleRate:audit.audioContext.sampleRate};
+        requestAudioTime,requestPerformanceTime,
+        sampleRate:audit.audioContext.sampleRate};
     });
     try{
       await page.waitForFunction(generation=>window.__labAudit.messages.some(message=>
@@ -424,6 +435,7 @@ test("individual-period Worker plays through one shared PCM Worklet in Chrome",a
       Number.isFinite(pitchRequest.progressAudioTime)&&
       Number.isFinite(pitchRequest.speed)&&
       Number.isFinite(pitchRequest.requestAudioTime)&&
+      Number.isFinite(pitchRequest.requestPerformanceTime)&&
       Number.isFinite(pitchRequest.sampleRate)&&pitchRequest.sampleRate>0,
       pitchRequest);
     const requestFrame=((pitchRequest.sourceFrame+
@@ -434,6 +446,10 @@ test("individual-period Worker plays through one shared PCM Worklet in Chrome",a
     assert.ok(Number.isFinite(pitchAccepted.activationAudioTime),
       JSON.stringify({pitchAccepted,
         reason:"activation must include the AudioWorklet sample time"}));
+    assert.ok(Number.isFinite(pitchStage.stageAudioTime),
+      JSON.stringify({pitchStage,
+        reason:"Worker staging must include the AudioWorklet sample time"}));
+    assert.ok(Number.isFinite(pitchStage.stageRequestAudioTime),pitchStage);
     const expectedActivationFrame=((requestFrame+pitchRequest.speed*
       pitchRequest.sampleRate*
       (pitchAccepted.activationAudioTime-pitchRequest.requestAudioTime))%loopEnd+loopEnd)%loopEnd;
@@ -446,12 +462,35 @@ test("individual-period Worker plays through one shared PCM Worklet in Chrome",a
       const result=job&&window.__labAudit.workerResults.findLast(item=>
         item.job===job.job);
       return {jobSentAt:job?.sentAt,resultReceivedAt:result?.receivedAt,
+        jobSentAudioTime:job?.sentAudioTime,
+        resultAudioTime:result?.audioTime,
         workerElapsedMs:result?.workerElapsedMs,
         browserRoundTripMs:job&&result?result.receivedAt-job.sentAt:null,
         model:job?.model,jointBackend:job?.jointBackend,
         planStart:job?.planStart,coreFrames:job?.coreFrames,
         sourceFrames:job?.sourceFrames};
     },{generation:speedGeneration,stagedFrame:pitchStage.sourceFrame});
+    const boundaryDistance=((pitchStage.sourceFrame-requestFrame)%loopEnd+
+      loopEnd)%loopEnd;
+    const latencyBreakdown={
+      requestToActivationMs:transitionLatencyMs,
+      requestToWorkletStageMs:(pitchStage.stageAudioTime-
+        pitchRequest.requestAudioTime)*1000,
+      requestToStageMessageMs:pitchStage.receivedAt-
+        pitchRequest.requestPerformanceTime,
+      requestToStageCommandMs:(pitchStage.stageRequestAudioTime-
+        pitchRequest.requestAudioTime)*1000,
+      stageCommandToWorkletMs:(pitchStage.stageAudioTime-
+        pitchStage.stageRequestAudioTime)*1000,
+      stageMessageToWorkerStartMs:pitchWorkerTiming.jobSentAt-
+        pitchStage.receivedAt,
+      workerRoundTripMs:pitchWorkerTiming.browserRoundTripMs,
+      workerElapsedMs:pitchWorkerTiming.workerElapsedMs,
+      resultMessageToActivationMs:pitchAccepted.receivedAt-
+        pitchWorkerTiming.resultReceivedAt,
+      nextChunkBoundaryWaitEstimateMs:boundaryDistance/
+        (pitchRequest.speed*pitchRequest.sampleRate)*1000
+    };
     assert.equal(pitchWorkerTiming.model,"period-joint",
       JSON.stringify(pitchWorkerTiming));
     assert.equal(pitchWorkerTiming.jointBackend,"pv",
@@ -698,7 +737,7 @@ test("individual-period Worker plays through one shared PCM Worklet in Chrome",a
         expectedActivationFrame,sourcePositionErrorFrames,
         transitionLatencyMs,
         missingBefore:missingBeforePitch,missingAfter:missingAfterPitch,
-        worker:pitchWorkerTiming},
+        worker:pitchWorkerTiming,latencyBreakdown},
       generationUpdates:evidence.workletStates.length,
       maxObservedUnderrunFrames:evidence.maxMissingFrames,
       seekActivationLatencyMs:seekResult.activationLatencyMs,
@@ -711,6 +750,12 @@ test("individual-period Worker plays through one shared PCM Worklet in Chrome",a
       workletCountAfterRecovery:recovery.worklets.length
     }));
     await page.evaluate(()=>document.querySelector("#stop").click());
+    const audioSilence=await page.evaluate(()=>({
+      mutedOutputRoutes:window.__labAudit.mutedOutputRoutes,
+      muteGain:window.__labAudit.audioOutputMuteGain
+    }));
+    assert.ok(audioSilence.mutedOutputRoutes>0,audioSilence);
+    assert.equal(audioSilence.muteGain,0,audioSilence);
   }finally{
     const cleanupResults=await Promise.allSettled([
       closeBrowserTree(browser),

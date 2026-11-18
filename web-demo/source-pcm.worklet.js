@@ -94,7 +94,9 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
             sourceFrame:staged.sourceFrame,sequence:staged.sequence,
             speed:m.speed,
             pitchSemitones:m.pitchSemitones,
-            bufferedSegments:staged.bufferedSegments});
+            bufferedSegments:staged.bufferedSegments,
+            stageRequestAudioTime:m.requestAudioTime,
+            stageAudioTime:currentTime});
           return;
         }
         if(m.type==="worker-seek-stage"){
@@ -119,7 +121,9 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
             requestId:m.requestId,generation:m.generation,
             sourceFrame:staged.sourceFrame,sequence:staged.sequence,
             speed:m.speed,pitchSemitones:m.pitchSemitones,
-            bufferedSegments:staged.bufferedSegments});
+            bufferedSegments:staged.bufferedSegments,
+            stageRequestAudioTime:m.requestAudioTime,
+            stageAudioTime:currentTime});
           return;
         }
         if(m.type==="worker-state"){

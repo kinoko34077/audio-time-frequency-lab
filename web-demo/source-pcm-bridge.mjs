@@ -321,7 +321,8 @@ export async function createSourcePCMBridge({
          requiredChunks>RENDERED_CHUNK_SLOTS)
         return Promise.reject(RangeError("invalid staged legacy Worker seek"));
       return submit({type:"worker-seek-stage",frame,speed:nextSpeed,
-        pitchSemitones:nextPitch,generation,requiredChunks});
+        pitchSemitones:nextPitch,generation,requiredChunks,
+        requestAudioTime:ctx.currentTime});
     },
     stageWorkerPlayback({speed:nextSpeed,pitchSemitones:nextPitch,
       generation}={}){
@@ -332,7 +333,8 @@ export async function createSourcePCMBridge({
          !Number.isSafeInteger(generation)||generation<1)
         return Promise.reject(RangeError("invalid staged legacy Worker playback state"));
       return submit({type:"worker-stage",speed:nextSpeed,
-        pitchSemitones:nextPitch,generation});
+        pitchSemitones:nextPitch,generation,
+        requestAudioTime:ctx.currentTime});
     },
     get latest(){return latest;},
     get processingMode(){return processingMode;},
