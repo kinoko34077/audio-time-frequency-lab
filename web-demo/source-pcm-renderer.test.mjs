@@ -270,6 +270,51 @@ test("staged Worker replacement follows queue order when a full-track source ran
   assert.equal(p.takeWorkerActivation().sourceFrame,4);
 });
 
+test("late old Worker PCM beyond the retained staged boundary is ignored",()=>{
+  const p=createSourcePCMRenderer({sourceFrames:32,sourceSampleRate:4,
+    outputSampleRate:4,channelCount:1,speed:1,startFrame:0});
+  const chunk=(generation,sequence,startFrame,endFrame,value)=>({generation,
+    sequence,startFrame,endFrame,speed:1,coreFrames:endFrame-startFrame,
+    channels:[new Float32Array(endFrame-startFrame).fill(value)]});
+  p.installRenderedChunk(chunk(0,0,0,4,1));
+  p.installRenderedChunk(chunk(0,1,4,8,1));
+  assert.deepEqual(p.stageRenderedState({generation:1,speed:1,
+    pitchSemitones:0}),{sourceFrame:4,sequence:1,bufferedSegments:2});
+
+  assert.equal(p.installRenderedChunk(chunk(0,3,12,16,1)),false,
+    "a late in-flight chunk cannot jump over the fallback slots removed at staging");
+  assert.equal(p.statistics.renderedChunkCount,2);
+  assert.equal(p.installRenderedChunk(chunk(1,1,4,8,2)),2,
+    "the selected generation can still replace the retained fallback");
+});
+
+test("late staged Worker PCM is rejected and can be re-staged at the live cursor",()=>{
+  const p=createSourcePCMRenderer({sourceFrames:32,sourceSampleRate:4,
+    outputSampleRate:4,channelCount:1,speed:1,startFrame:0});
+  const chunk=(generation,sequence,startFrame,endFrame,value)=>({generation,
+    sequence,startFrame,endFrame,speed:1,coreFrames:endFrame-startFrame,
+    channels:[new Float32Array(endFrame-startFrame).fill(value)]});
+  p.installRenderedChunk(chunk(0,0,0,4,1));
+  p.installRenderedChunk(chunk(0,1,4,8,1));
+  p.installRenderedChunk(chunk(0,2,8,12,1));
+  p.stageRenderedState({generation:1,speed:1,pitchSemitones:0});
+  const playing=[new Float32Array(8)];
+  assert.equal(p.renderBuffered(playing),0);
+  assert.equal(p.timeline.state.sourceFrame,8);
+  assert.equal(p.installRenderedChunk(chunk(1,1,4,8,2)),false,
+    "a staged chunk whose retained fallback has already played is stale, not fatal");
+
+  assert.deepEqual(p.stageRenderedState({generation:1,speed:1,
+    pitchSemitones:0}),{sourceFrame:8,sequence:2,bufferedSegments:1});
+  assert.equal(p.installRenderedChunk(chunk(1,2,8,12,2)),2);
+  const resumed=[new Float32Array(2)];
+  assert.equal(p.renderBuffered(resumed),0);
+  assert.equal(p.workerState.generation,1);
+  assert.equal(p.timeline.state.sourceFrame,10,
+    "the re-staged model activates without rewinding the shared clock");
+  assert.equal(p.statistics.missingFrames,0);
+});
+
 test("prepared Worker seek keeps old PCM playing until target PCM is ready",()=>{
   const p=createSourcePCMRenderer({sourceFrames:32,sourceSampleRate:4,
     outputSampleRate:4,channelCount:1,speed:1,startFrame:0});

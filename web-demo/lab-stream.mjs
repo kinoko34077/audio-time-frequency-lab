@@ -302,7 +302,10 @@ export async function createModelStream({ctx,sourceChannels,sampleRate,speed,sem
         endFrame:plan.start+plan.core,speed:resultConfig.speed,
         coreFrames:plan.coreFrames,channels:data.channels});
       if(stopped)return;
-      if(accepted.stale){pending=false;pump();return;}
+      if(accepted.stale){
+        if(resultGeneration===generation)stagedGeneration=null;
+        pending=false;pump();return;
+      }
       if(resultGeneration!==activeGeneration&&resultGeneration!==generation){
         pending=false;pump();return;
       }

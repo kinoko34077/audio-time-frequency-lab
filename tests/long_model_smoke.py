@@ -18,7 +18,7 @@ try:
         f.setnchannels(2);f.setsampwidth(2);f.setframerate(rate)
         f.writeframes(bytes(a)*181)
     with sync_playwright() as p:
-        browser=p.chromium.launch(channel='chromium',headless=True,args=['--no-sandbox','--autoplay-policy=no-user-gesture-required','--disable-dev-shm-usage'])
+        browser=p.chromium.launch(channel='chromium',headless=True,args=['--no-sandbox','--autoplay-policy=no-user-gesture-required','--disable-dev-shm-usage', "--mute-audio"])
         page=browser.new_page()
         page.add_init_script("""(() => {
           window.__labWorkerResults=[];

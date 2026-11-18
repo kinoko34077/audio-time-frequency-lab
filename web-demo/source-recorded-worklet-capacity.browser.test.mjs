@@ -22,7 +22,7 @@ test("recorded ultrashort loops: real Chrome Worklet PCM, source oracle and WebA
     browser=await puppeteer.launch({
       executablePath:process.env.CHROME_BIN||"/usr/bin/google-chrome",
       headless:true,args:["--no-sandbox","--disable-dev-shm-usage",
-        "--autoplay-policy=no-user-gesture-required"]
+        "--autoplay-policy=no-user-gesture-required", "--mute-audio"]
     });
     const page=await browser.newPage(),errors=[],contexts=[];
     page.on("pageerror",error=>errors.push(error.message));

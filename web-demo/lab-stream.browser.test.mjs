@@ -133,7 +133,7 @@ test("individual-period Worker plays through one shared PCM Worklet in Chrome",a
         pageErrors.push(message.text());
     });
     await page.evaluateOnNewDocument(()=>{
-      const audit={worklets:[],workers:[],jobs:[],workerResults:[],messages:[],pointerEvents:[],bufferSources:0,probe:null};
+      const audit={worklets:[],workers:[],jobs:[],workerResults:[],messages:[],pointerEvents:[],bufferSources:0,probe:null,audioContext:null};
       Object.defineProperty(window,"__labAudit",{value:audit});
       for(const type of ["pointerdown","pointerup","click"])
         document.addEventListener(type,event=>{
@@ -156,11 +156,13 @@ test("individual-period Worker plays through one shared PCM Worklet in Chrome",a
       window.AudioWorkletNode=class extends NativeWorklet{
         constructor(ctx,name,options){
           super(ctx,name,options);
+          audit.audioContext=ctx;
           const mode=options?.processorOptions?.processingMode||"raw";
           this.__labWorkerMode=mode==="worker";
           audit.worklets.push({name,mode});
           this.port.addEventListener("message",event=>audit.messages.push({
-            ...(event.data||{}),receivedAt:performance.now()
+            ...(event.data||{}),receivedAt:performance.now(),
+            audioTime:ctx.currentTime
           }));
           this.port.start();
         }
@@ -367,14 +369,21 @@ test("individual-period Worker plays through one shared PCM Worklet in Chrome",a
       const messages=window.__labAudit.messages.filter(message=>
         message.type==="progress"&&message.workerGeneration===generation&&
         !Number.isInteger(message.sourceFrame));
-      return messages.at(-1)?.sourceFrame;
+      return messages.at(-1);
     },speedGeneration);
-    assert.ok(Number.isFinite(fractionalProgress),fractionalProgress);
+    assert.ok(Number.isFinite(fractionalProgress?.sourceFrame),fractionalProgress);
     const missingBeforePitch=await page.evaluate(()=>window.__labAudit.messages
       .filter(message=>message.type==="progress"&&
         message.processingMode==="worker").at(-1)?.missingFrames||0);
-    await page.$eval("#granular-pitch-value",node=>{
+    const pitchRequest=await page.$eval("#granular-pitch-value",node=>{
+      const audit=window.__labAudit;
+      const progress=audit.messages.filter(message=>message.type==="progress"&&
+        message.processingMode==="worker").at(-1);
+      const requestAudioTime=audit.audioContext.currentTime;
       node.value="2";node.dispatchEvent(new Event("change",{bubbles:true}));
+      return {sourceFrame:progress?.sourceFrame,
+        progressAudioTime:progress?.outputTime,speed:progress?.speed,
+        requestAudioTime};
     });
     try{
       await page.waitForFunction(generation=>window.__labAudit.messages.some(message=>
@@ -411,6 +420,19 @@ test("individual-period Worker plays through one shared PCM Worklet in Chrome",a
         message.generation>generation).at(-1),speedGeneration);
     const loopEnd=await page.evaluate(()=>window.__labAudit.messages
       .filter(message=>message.type==="progress").at(-1)?.loopEndFrame);
+    assert.ok(Number.isFinite(pitchRequest.sourceFrame)&&
+      Number.isFinite(pitchRequest.progressAudioTime)&&
+      Number.isFinite(pitchRequest.speed)&&
+      Number.isFinite(pitchRequest.requestAudioTime),pitchRequest);
+    const requestFrame=((pitchRequest.sourceFrame+
+      pitchRequest.speed*48000*(pitchRequest.requestAudioTime-
+        pitchRequest.progressAudioTime))%loopEnd+loopEnd)%loopEnd;
+    const transitionLatencyMs=(pitchAccepted.audioTime-
+      pitchRequest.requestAudioTime)*1000;
+    const expectedActivationFrame=((requestFrame+pitchRequest.speed*48000*
+      (pitchAccepted.audioTime-pitchRequest.requestAudioTime))%loopEnd+loopEnd)%loopEnd;
+    const sourcePositionErrorFrames=((pitchAccepted.sourceFrame-
+      expectedActivationFrame+loopEnd/2)%loopEnd+loopEnd)%loopEnd-loopEnd/2;
     const pitchWorkerTiming=await page.evaluate(({generation,stagedFrame})=>{
       const job=window.__labAudit.jobs.filter(item=>
         item.generation>generation&&item.semitones===2&&
@@ -428,13 +450,13 @@ test("individual-period Worker plays through one shared PCM Worklet in Chrome",a
       JSON.stringify(pitchWorkerTiming));
     assert.equal(pitchWorkerTiming.jointBackend,"pv",
       JSON.stringify(pitchWorkerTiming));
-    const expectedDistance=((pitchStage.sourceFrame-fractionalProgress)%loopEnd+
-      loopEnd)%loopEnd;
-    const actualDistance=((pitchAccepted.sourceFrame-fractionalProgress)%loopEnd+
-      loopEnd)%loopEnd;
-    assert.ok(Math.abs(actualDistance-expectedDistance)<8192,
-      JSON.stringify({fractionalProgress,pitchStage,pitchAccepted,
-        expectedDistance,actualDistance,loopEnd,pitchWorkerTiming}));
+    assert.ok(transitionLatencyMs>=0&&transitionLatencyMs<1500,
+      JSON.stringify({transitionLatencyMs,pitchRequest,pitchStage,
+        pitchAccepted,pitchWorkerTiming}));
+    assert.ok(Math.abs(sourcePositionErrorFrames)<8192,
+      JSON.stringify({fractionalProgress,pitchRequest,pitchStage,
+        pitchAccepted,expectedActivationFrame,sourcePositionErrorFrames,
+        loopEnd,pitchWorkerTiming}));
     assert.equal(missingAfterPitch,missingBeforePitch,
       "pitch handoff must not add missing PCM frames");
     const backendPcmEvidence=[];
@@ -657,9 +679,10 @@ test("individual-period Worker plays through one shared PCM Worklet in Chrome",a
           maxMs:samples.at(-1)};
       }),
       pitchHandoff:{stagedFrame:pitchStage.sourceFrame,
-        activatedFrame:pitchAccepted.sourceFrame,fractionalProgress,loopEnd,
-        expectedDistance,actualDistance,
-        sourcePositionErrorFrames:actualDistance-expectedDistance,
+        activatedFrame:pitchAccepted.sourceFrame,requestFrame,
+        fractionalProgress: fractionalProgress.sourceFrame,loopEnd,
+        expectedActivationFrame,sourcePositionErrorFrames,
+        transitionLatencyMs,
         missingBefore:missingBeforePitch,missingAfter:missingAfterPitch,
         worker:pitchWorkerTiming},
       generationUpdates:evidence.workletStates.length,

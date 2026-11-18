@@ -32,7 +32,7 @@ test("recorded CC0 upright piano goes through the real granular file picker and 
       executablePath:process.env.CHROME_BIN||"/usr/bin/google-chrome",
       headless:true,
       args:["--no-sandbox","--disable-dev-shm-usage",
-        "--autoplay-policy=no-user-gesture-required"]
+        "--autoplay-policy=no-user-gesture-required", "--mute-audio"]
     });
     const page=await browser.newPage(),errors=[];
     const consoleErrors=[],failedRequests=[];

@@ -23,12 +23,47 @@ test('legacy Worker PCM is rendered by one shared Worklet source clock',async()=
    this.messages.push(message);
    const respond=data=>queueMicrotask(()=>this.onmessage?.({data}));
    if(message.type==="rendered-chunk"){
+    if(this.node.rejectStagedChunk&&
+       this.node.stagedState?.generation===message.generation&&
+       this.node.stagedState.sequence===message.sequence){
+     this.node.rejectStagedChunk=false;
+     respond({type:"rendered-chunk-accepted",requestId:message.requestId,
+       generation:message.generation,stale:true,
+       bufferedSegments:this.node.segments.length+
+         this.node.stagedChunks.length});
+     return;
+    }
     if(this.node.stagedState?.generation===message.generation)
       this.node.stagedChunks.push(message);
     else this.node.segments.push(message);
     respond({type:"rendered-chunk-accepted",requestId:message.requestId,
       generation:message.generation,bufferedSegments:this.node.segments.length+
         this.node.stagedChunks.length});
+   }else if(message.type==="worker-stage"){
+    const active=this.node.segments.filter(segment=>
+      segment.generation===this.node.generation);
+    const current=active.find(segment=>
+      this.node.frame>=segment.startFrame&&
+      this.node.frame<segment.endFrame)||
+      active.find(segment=>this.node.frame===segment.endFrame)||
+      active.find(segment=>this.node.frame<segment.startFrame)||null;
+    let frame,sequence;
+    if(current){
+     const index=active.indexOf(current);
+     this.node.segments=active.slice(index,index+2);
+     frame=current.endFrame;sequence=current.sequence+1;
+    }else{
+     this.node.segments=[];frame=Math.floor(this.node.frame);
+     sequence=(active.at(-1)?.sequence??-1)+1;
+    }
+    this.node.stagedState={frame,speed:message.speed,
+      pitchSemitones:message.pitchSemitones,generation:message.generation,
+      sequence};
+    this.node.stagedChunks=[];
+    respond({type:"worker-state-staged",requestId:message.requestId,
+      generation:message.generation,sourceFrame:frame,sequence,
+      speed:message.speed,pitchSemitones:message.pitchSemitones,
+      bufferedSegments:this.node.segments.length});
    }else if(message.type==="worker-seek-stage"){
     this.node.stagedState={frame:message.frame,speed:message.speed,
       pitchSemitones:message.pitchSemitones,generation:message.generation,
@@ -60,6 +95,7 @@ test('legacy Worker PCM is rendered by one shared Worklet source clock',async()=
    this.frame=options.processorOptions.startFrame;
    this.speed=options.processorOptions.speed;this.generation=0;
    this.revision=0;this.running=false;this.segments=[];this.stagedChunks=[];
+   this.rejectStagedChunk=false;
    worklets.push(this);
   }
   connect(){return this;}disconnect(){}
@@ -67,8 +103,8 @@ test('legacy Worker PCM is rendered by one shared Worklet source clock',async()=
   removeEventListener(name){delete this.listeners[name];}
   advance(outputFrames){
    if(!this.running)return;
-   if(this.stagedState&&
-      this.stagedChunks.length>=this.stagedState.requiredChunks){
+   if(this.stagedState&&this.stagedChunks.length>=
+      (this.stagedState.requiredChunks??1)){
     const staged=this.stagedState;
     this.frame=staged.frame;this.speed=staged.speed;
     this.generation=staged.generation;this.segments=[...this.stagedChunks];
@@ -157,7 +193,28 @@ test('legacy Worker PCM is rendered by one shared Worklet source clock',async()=
   workers[0].flush();await settle();await settle();
   assert.deepEqual(worklets[0].segments.map(segment=>segment.sequence),[0,1],
     "the next main Worker chunk continues the seek generation in queue order");
-  const transition=stream.updateSettings({frame:88000,speed:1.25});
+  while(worklets[0].segments.length<4){
+   assert.ok(workers[0].requests.length,"fill the active queue before staging");
+   workers[0].flush();await settle();await settle();
+  }
+  worklets[0].frame=88000;
+  const transition=stream.updateSettings({speed:1.25});
+  await settle();await settle();await settle();
+  assert.equal(worklets[0].port.messages.filter(m=>m.type==="worker-stage").length,1);
+  assert.equal(workers[0].requests[0].plan.start,112000,
+    "the first staged generation starts at the next retained PCM boundary");
+  worklets[0].frame=120000;
+  const delayedProgress={type:"progress",sourceFrame:120000,speed:1,
+    running:true,revision:worklets[0].revision,workerGeneration:1,
+    bufferedSegments:2,missingFrames:0};
+  worklets[0].port.onmessage?.({data:delayedProgress});
+  worklets[0].rejectStagedChunk=true;
+  workers[0].flush();await settle();await settle();await settle();
+  assert.equal(worklets[0].port.messages.filter(m=>m.type==="worker-stage").length,2,
+    "a late staged result is re-planned at the live old-generation cursor");
+  assert.equal(worklets[0].stagedState.frame,136000);
+  assert.equal(workers[0].requests[0].plan.start,136000,
+    "the replacement Worker job starts at the updated safe boundary");
   stream.stop();
   const stopped=await transition;
   assert.equal(stopped.cancelled,true,

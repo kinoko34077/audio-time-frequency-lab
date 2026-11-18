@@ -40,7 +40,7 @@ test('full Chrome: inherited Rust AudioWorklet live independent speed/pitch UI',
  let browser;
  try{
   const audioFile=path.join(temp,'tone.wav');await writeFile(audioFile,wav());
-  browser=await puppeteer.launch({executablePath:process.env.CHROME_BIN||'/usr/bin/google-chrome',headless:true,args:['--no-sandbox','--disable-dev-shm-usage','--autoplay-policy=no-user-gesture-required']});
+  browser=await puppeteer.launch({executablePath:process.env.CHROME_BIN||'/usr/bin/google-chrome',headless:true,args:['--no-sandbox','--disable-dev-shm-usage','--autoplay-policy=no-user-gesture-required', "--mute-audio"]});
   const page=await browser.newPage();const errors=[];
   page.on('pageerror',error=>errors.push(error.message));
   await page.evaluateOnNewDocument(()=>{

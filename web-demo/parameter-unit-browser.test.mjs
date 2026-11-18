@@ -17,7 +17,7 @@ test("low Hz / note+cents / true rail% / optional snap / invalid and reset",asyn
   try {
     browser=await puppeteer.launch({
       executablePath:process.env.CHROME_BIN||"/usr/bin/google-chrome",
-      headless:true,args:["--no-sandbox","--disable-dev-shm-usage"]
+      headless:true,args:["--no-sandbox","--disable-dev-shm-usage", "--mute-audio"]
     });
     const page=await browser.newPage();
     await page.setViewport({width:390,height:844,deviceScaleFactor:2,isMobile:true,hasTouch:true});

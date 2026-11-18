@@ -13,7 +13,7 @@ test("#236 failed import and late ON must not misrepresent current debug state",
   try {
     browser=await puppeteer.launch({
       executablePath:process.env.CHROME_BIN||"/usr/bin/google-chrome",
-      headless:true,args:["--no-sandbox","--disable-dev-shm-usage"]
+      headless:true,args:["--no-sandbox","--disable-dev-shm-usage", "--mute-audio"]
     });
     const page=await browser.newPage();
     await page.setRequestInterception(true);

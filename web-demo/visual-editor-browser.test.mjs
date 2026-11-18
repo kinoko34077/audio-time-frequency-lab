@@ -8,7 +8,7 @@ test('layout inspector is opt-in, edits live DOM, restores local changes, and pr
   const server=spawn('python3',['-m','http.server','8793','--bind','127.0.0.1'],{cwd:resolve(process.env.WARP_WEB_ROOT||'_site'),stdio:'ignore'});
   let browser;
   try{
-    browser=await puppeteer.launch({executablePath:process.env.CHROME_BIN||'/usr/bin/google-chrome',headless:true,args:['--no-sandbox','--disable-dev-shm-usage']});
+    browser=await puppeteer.launch({executablePath:process.env.CHROME_BIN||'/usr/bin/google-chrome',headless:true,args:['--no-sandbox','--disable-dev-shm-usage', "--mute-audio"]});
     const page=await browser.newPage();
     await page.setViewport({width:1280,height:900});
     const failures=[];

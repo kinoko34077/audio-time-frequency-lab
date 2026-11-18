@@ -295,6 +295,8 @@ export function createSourcePCMRenderer({
           segment.generation===renderedGeneration&&
           segment.sequence===staged.sequence):-1;
       if(replacementIndex>=0){
+        if(timeline.state.sourceFrame>=renderedChunks[replacementIndex].endFrame)
+          return false;
         renderedChunks[replacementIndex]={generation,sequence:queueSequence,
           startFrame,endFrame,speed,coreFrames,channels};
         renderedChunks.splice(replacementIndex+1);
@@ -311,11 +313,19 @@ export function createSourcePCMRenderer({
       if(renderedChunks.length>=RENDERED_CHUNK_SLOTS)
         throw RangeError("rendered PCM chunk queue full");
       const previous=renderedChunks.at(-1)||previousRendered;
+      const lateHandoffResult=
+        (active&&stagedWorkerState&&stagedWorkerState.kind!=="seek"&&
+          queueSequence>stagedWorkerState.sequence)||
+        (staged&&!staged.firstChunkAccepted&&
+          queueSequence===staged.sequence);
       if(previous){
         const expected=previous.endFrame>=sourceFrames?0:previous.endFrame;
-        if(startFrame!==expected||queueSequence!==previous.sequence+1)
+        if(startFrame!==expected||queueSequence!==previous.sequence+1){
+          if(lateHandoffResult)return false;
           throw RangeError("rendered PCM chunks are not source-contiguous");
+        }
       }else if(queueSequence!==nextRenderedSequence){
+        if(lateHandoffResult)return false;
         throw RangeError("rendered PCM queue sequence is not contiguous");
       }
       workerMode=true;
@@ -340,7 +350,9 @@ export function createSourcePCMRenderer({
       const current=activeChunks.find(segment=>
         (position>=segment.startFrame&&position<segment.endFrame)||
         (state.loopEnabled&&segment.endFrame===sourceFrames&&
-          position<segment.startFrame))||activeChunks[0]||null;
+          position<segment.startFrame))||
+        activeChunks.find(segment=>position===segment.endFrame)||
+        activeChunks.find(segment=>position<segment.startFrame)||null;
       let frame,sequence;
       if(current){
         const currentIndex=activeChunks.indexOf(current);
@@ -348,6 +360,13 @@ export function createSourcePCMRenderer({
         frame=current.endFrame>=sourceFrames?0:current.endFrame;
         sequence=current.sequence+1;
         renderedChunks.splice(0,renderedChunks.length,...retained);
+      }else if(activeChunks.length&&
+          position>=activeChunks.at(-1).endFrame){
+        const consumed=activeChunks.at(-1);
+        frame=Math.floor(position);
+        sequence=consumed.sequence+1;
+        renderedChunks.length=0;
+        previousRendered=null;
       }else{
         frame=Math.floor(position);
         sequence=nextRenderedSequence;

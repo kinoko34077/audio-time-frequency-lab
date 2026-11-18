@@ -28,7 +28,7 @@ test("Chrome real-time Rust AudioWorklet streams, changes controls, seeks at wav
     browser=await puppeteer.launch({
       executablePath:process.env.CHROME_BIN||"/usr/bin/google-chrome",
       headless:true,
-      args:["--no-sandbox","--disable-dev-shm-usage","--autoplay-policy=no-user-gesture-required"]
+      args:["--no-sandbox","--disable-dev-shm-usage","--autoplay-policy=no-user-gesture-required", "--mute-audio"]
     });
     const page=await browser.newPage();
     // #240: independently observe the real AudioContext clock in the Chrome
