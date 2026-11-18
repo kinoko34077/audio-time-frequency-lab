@@ -54,3 +54,14 @@ export function installTestAudioSilenceGuard(scope,audit){
     }
   };
 }
+
+export async function installTestAudioSilenceGuardForPage(page){
+  if(typeof page?.evaluateOnNewDocument!=="function")
+    throw TypeError("test audio silence guard requires a browser page");
+  await page.evaluateOnNewDocument(guardSource=>{
+    const audit={mutedOutputRoutes:0,audioOutputMuteGain:null,
+      audioOutputMuteGains:[]};
+    window.__audioSilenceAudit=audit;
+    (0,eval)(`(${guardSource})`)(window,audit);
+  },installTestAudioSilenceGuard.toString());
+}
