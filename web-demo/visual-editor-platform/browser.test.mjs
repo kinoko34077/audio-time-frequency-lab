@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
 import {resolve} from 'node:path';
 import puppeteer from 'puppeteer-core';
+import {cleanupTestProcesses} from '../test-process-cleanup.mjs';
 test('v2 stable-ID opt-in editor persists and survives DOM regeneration while audio controls remain available',async()=>{
  const server=spawn('python3',['-m','http.server','8798','--bind','127.0.0.1'],{cwd:resolve(process.env.WARP_WEB_ROOT||'_site'),stdio:'ignore'});
  let browser;
@@ -44,5 +45,5 @@ test('v2 stable-ID opt-in editor persists and survives DOM regeneration while au
    assert.equal(await page.$('#visual-editor-v2'),null);
    assert.notEqual(await page.$eval('#player-title',e=>getComputedStyle(e).fontSize),'27px');
    assert.deepEqual(errors,[]);
- }finally{if(browser)await browser.close();server.kill('SIGTERM');}
+ }finally{await cleanupTestProcesses(browser,[server],'v2 visual editor HTTP server');}
 });

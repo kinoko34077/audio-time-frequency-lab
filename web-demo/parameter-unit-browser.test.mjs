@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import {spawn} from "node:child_process";
 import {resolve} from "node:path";
 import puppeteer from "puppeteer-core";
+import {cleanupTestProcesses} from "./test-process-cleanup.mjs";
 
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 test("low Hz / note+cents / true rail% / optional snap / invalid and reset",async()=>{
@@ -813,7 +814,6 @@ test("low Hz / note+cents / true rail% / optional snap / invalid and reset",asyn
       el.shadowRoot.querySelector("#fw-context-menu").hidden),true);
     assert.deepEqual(errors,[],"browser JS errors: "+errors.join("; "));
   }finally {
-    await browser?.close();
-    server.kill();
+    await cleanupTestProcesses(browser,[server],"parameter unit HTTP server");
   }
 });

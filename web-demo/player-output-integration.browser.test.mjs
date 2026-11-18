@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {spawn} from "node:child_process";
 import path from "node:path";
 import puppeteer from "puppeteer-core";
+import {cleanupTestProcesses} from "./test-process-cleanup.mjs";
 
 const WAV=path.resolve("web-demo/test-fixtures/meta-piano-a0-cc0-3s-48khz.wav");
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
@@ -343,7 +344,7 @@ test("recorded piano main player: gesture/parameter receipts AND actual output P
       scope:"CHROMIUM_WEB_AUDIO_OUTPUT_PCMC_SAMPLES_NOT_PHYSICAL_DAC"
     }));
     await page.click("#stop");
-  }finally{await browser?.close();server.kill("SIGTERM");}
+  }finally{await cleanupTestProcesses(browser,[server],"audio output HTTP server");}
 });
 
 for(const profile of [
@@ -488,6 +489,6 @@ test(`native Chrome actual ${profile.model} output follows 0×, reverse and sign
       positive,frozen,reverse,dragCommands:thrown.length,
       inertiaSpeeds:inertia.map(x=>x.speed),nodeStarts:start
     }));
-  }finally{await browser?.close();server.kill("SIGTERM");}
+  }finally{await cleanupTestProcesses(browser,[server],"audio gesture HTTP server");}
 });
 }

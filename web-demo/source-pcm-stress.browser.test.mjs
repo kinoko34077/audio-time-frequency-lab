@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {spawn} from "node:child_process";
 import path from "node:path";
 import puppeteer from "puppeteer-core";
+import {cleanupTestProcesses} from "./test-process-cleanup.mjs";
 
 test("native Chrome content-audio stereo output matches independent source-time reference",async()=>{
   const port=18746;
@@ -496,7 +497,6 @@ test("native Chrome content-audio stereo output matches independent source-time 
     // measure, do not demand impossible arbitrary-duration gaplessness.
     console.log("R2_CONTENT_AUDIO_EVIDENCE "+JSON.stringify(evidence));
   }finally{
-    await browser?.close();
-    server.kill();
+    await cleanupTestProcesses(browser,[server],"PCM stress HTTP server");
   }
 });

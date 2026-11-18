@@ -4,6 +4,7 @@ import {spawn} from "node:child_process";
 import {mkdirSync} from "node:fs";
 import path from "node:path";
 import puppeteer from "puppeteer-core";
+import {cleanupTestProcesses} from "./test-process-cleanup.mjs";
 
 // #36 visual acceptance: real staged site + real recorded WAV, at desktop
 // and iPhone-sized touch viewport. Captures are review evidence, NOT a
@@ -139,7 +140,6 @@ test("R4 usability visual captures: desktop and mobile player and folded researc
     console.log("UI_REVIEW_JPEG_MODEL_MOBILE:"+Buffer.from(await mobile.screenshot({type:"jpeg",quality:30})).toString("base64"));
     assert.deepEqual(errors,[],"no console page exceptions");
   }finally{
-    await browser?.close();
-    server.kill("SIGTERM");
+    await cleanupTestProcesses(browser,[server],"visual audit HTTP server");
   }
 });

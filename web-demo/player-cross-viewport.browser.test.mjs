@@ -4,6 +4,7 @@ import {spawn} from "node:child_process";
 import {mkdirSync} from "node:fs";
 import path from "node:path";
 import puppeteer from "puppeteer-core";
+import {cleanupTestProcesses} from "./test-process-cleanup.mjs";
 
 const WAV=path.resolve("web-demo/test-fixtures/meta-piano-a0-cc0-3s-48khz.wav");
 const imageDir=path.resolve("ui-review-screenshots");
@@ -158,5 +159,5 @@ test("real recorded waveform UX across mobile, Android-size, tablet and desktop 
         }));
       }finally{await page.close();}
     }
-  }finally{await browser?.close();server.kill("SIGTERM");}
+  }finally{await cleanupTestProcesses(browser,[server],"cross-viewport HTTP server");}
 });

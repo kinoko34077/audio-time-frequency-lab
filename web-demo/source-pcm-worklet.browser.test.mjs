@@ -5,6 +5,7 @@ import {mkdtemp,rm} from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import puppeteer from "puppeteer-core";
+import {cleanupTestProcesses} from "./test-process-cleanup.mjs";
 
 test("native Chrome experimental source-PCM AudioWorklet renders and loops without recreating its node",async()=>{
   const port=18743;
@@ -265,7 +266,6 @@ test("native Chrome experimental source-PCM AudioWorklet renders and loops witho
     assert.equal(evidence.farSeek.afterMissing,evidence.farSeek.beforeMissing,
       "far seek source cache should be ready without missing output frames");
   }finally{
-    await browser?.close();
-    server.kill();
+    await cleanupTestProcesses(browser,[server],"PCM Worklet HTTP server");
   }
 });

@@ -534,12 +534,16 @@ test("individual-period Worker plays through one shared PCM Worklet in Chrome",a
       return {x:rect.x,y:rect.y,width:rect.width,height:rect.height};
     });
     const seekPoint={x:wave.x+wave.width*.75,y:wave.y+wave.height/2};
+    const seekGenerationBefore=await page.evaluate(()=>window.__labAudit.messages
+      .filter(message=>message.type==="worker-state-activated").at(-1)?.generation??0);
     const seekStartedAt=await page.evaluate(()=>performance.now());
     await page.mouse.click(seekPoint.x,seekPoint.y);
     try{
-      await page.waitForFunction(target=>window.__labAudit.messages.some(message=>
+      await page.waitForFunction(({generation,target})=>window.__labAudit.messages.some(message=>
         message.type==="worker-state-activated"&&
-        Math.abs(message.sourceFrame-target)<=100),{timeout:10000},targetFrames.seek);
+        message.generation>generation&&
+        Math.abs(message.sourceFrame-target)<=100),{timeout:10000},
+        {generation:seekGenerationBefore,target:targetFrames.seek});
     }catch(error){
       const diagnostic=await page.evaluate(({point,targets})=>{
         const audit=window.__labAudit,wave=document.querySelector("#wave");
@@ -561,9 +565,10 @@ test("individual-period Worker plays through one shared PCM Worklet in Chrome",a
       console.log("Chrome seek acceptance diagnostic",JSON.stringify({diagnostic,pageErrors}));
       throw error;
     }
-    const seekResult=await page.evaluate(({target,startedAt})=>{
+    const seekResult=await page.evaluate(({target,startedAt,generation})=>{
       const activated=window.__labAudit.messages
         .filter(message=>message.type==="worker-state-activated"&&
+          message.generation>generation&&
           Math.abs(message.sourceFrame-target)<=100).at(-1);
       const staged=window.__labAudit.messages.findLast(message=>
         message.type==="worker-state-staged"&&
@@ -573,7 +578,8 @@ test("individual-period Worker plays through one shared PCM Worklet in Chrome",a
         missingFramesAtActivation:activated?.missingFrames,
         bufferedSegmentsAtStage:staged?.bufferedSegments,
         bufferedSegmentsAtActivation:activated?.bufferedSegments};
-    },{target:targetFrames.seek,startedAt:seekStartedAt});
+    },{target:targetFrames.seek,startedAt:seekStartedAt,
+      generation:seekGenerationBefore});
     const seekGeneration=seekResult.generation;
     const seekPcmEvidence=await waitForWorkerPCM(page,{generation:seekGeneration,
       missingBeforeFrames:missingBeforeSeek});
@@ -593,9 +599,10 @@ test("individual-period Worker plays through one shared PCM Worklet in Chrome",a
       message.type==="worker-state-activated"&&message.generation>generation&&
       Math.abs(message.sourceFrame-target)<=100),
       {timeout:10000},{generation:seekGeneration,target:targetFrames.nearEnd});
-    const loopSeekResult=await page.evaluate(({target,startedAt})=>{
+    const loopSeekResult=await page.evaluate(({target,startedAt,generation})=>{
       const activated=window.__labAudit.messages
         .filter(message=>message.type==="worker-state-activated"&&
+          message.generation>generation&&
           Math.abs(message.sourceFrame-target)<=100).at(-1);
       const staged=window.__labAudit.messages.findLast(message=>
         message.type==="worker-state-staged"&&
@@ -605,7 +612,8 @@ test("individual-period Worker plays through one shared PCM Worklet in Chrome",a
         missingFramesAtActivation:activated?.missingFrames,
         bufferedSegmentsAtStage:staged?.bufferedSegments,
         bufferedSegmentsAtActivation:activated?.bufferedSegments};
-    },{target:targetFrames.nearEnd,startedAt:loopSeekStartedAt});
+    },{target:targetFrames.nearEnd,startedAt:loopSeekStartedAt,
+      generation:seekGeneration});
     const loopGeneration=loopSeekResult.generation;
     await page.waitForFunction(({generation,totalFrames})=>{
       const progress=window.__labAudit.messages.filter(message=>

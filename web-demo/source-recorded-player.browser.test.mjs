@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {spawn} from "node:child_process";
 import path from "node:path";
 import puppeteer from "puppeteer-core";
+import {cleanupTestProcesses} from "./test-process-cleanup.mjs";
 
 const WAV=path.resolve("web-demo/test-fixtures/meta-piano-a0-cc0-3s-48khz.wav");
 const WEB_ROOT=path.resolve(process.env.WARP_WEB_ROOT||"_site");
@@ -513,6 +514,6 @@ test("recorded CC0 upright piano goes through the real granular file picker and 
       ?.dataset.pcmTransport,{timeout:10000});
     assert.deepEqual(errors,[]);
   }finally{
-    await browser?.close();server.kill();
+    await cleanupTestProcesses(browser,[server],"recorded player HTTP server");
   }
 });

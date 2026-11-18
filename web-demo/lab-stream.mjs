@@ -251,8 +251,8 @@ export async function createModelStream({ctx,sourceChannels,sampleRate,speed,sem
         for(const key of configs.keys())
           if(key!==activeGeneration&&key!==generation)configs.delete(key);
         onStatus(activeGeneration===generation?
-          'モデル設定を切替 · 共通PCM音源時計':
-          '次のモデル設定を準備中 · 共通PCM音源時計を継続');
+          'モデル設定を切替 · Worker共通PCM音源時計':
+          '次のモデル設定を準備中 · Worker共通PCM音源時計を継続');
         resolveTransition(activeGeneration,data);
         pump();
       }
@@ -323,7 +323,7 @@ export async function createModelStream({ctx,sourceChannels,sampleRate,speed,sem
         await bridge.play();
         if(stopped)return;
         started=true;onStarted(ctx.currentTime);
-        onStatus('モデル音声を再生中 · 共通PCM音源時計');
+        onStatus('モデル音声を再生中 · Worker共通PCM音源時計');
       }
       pump();
     }catch(error){

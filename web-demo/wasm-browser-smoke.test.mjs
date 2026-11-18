@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import {spawn} from "node:child_process";
 import puppeteer from "puppeteer-core";
+import {cleanupTestProcesses} from "./test-process-cleanup.mjs";
 
 function sineWav(seconds=12) {
   const rate=16000,samples=rate*seconds,wav=Buffer.alloc(44+samples*2);
@@ -1217,8 +1218,7 @@ test("Chrome real-time Rust AudioWorklet streams, changes controls, seeks at wav
     await coldPage.close();
     await page.close();
   }finally{
-    if(browser)await browser.close();
-    server.kill("SIGTERM");
-    await rm(temp,{recursive:true,force:true});
+    try{await cleanupTestProcesses(browser,[server],"WASM smoke HTTP server");}
+    finally{await rm(temp,{recursive:true,force:true});}
   }
 });

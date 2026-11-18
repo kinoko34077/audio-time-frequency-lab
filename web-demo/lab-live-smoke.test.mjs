@@ -5,6 +5,7 @@ import os from 'node:os';import path from 'node:path';
 import {spawn} from 'node:child_process';
 import {createServer} from 'node:net';
 import puppeteer from 'puppeteer-core';
+import {cleanupTestProcesses} from "./test-process-cleanup.mjs";
 function wav(){
  const rate=16000,n=rate*3,bytes=Buffer.alloc(44+2*n);
  bytes.write('RIFF',0);bytes.writeUInt32LE(36+2*n,4);bytes.write('WAVE',8);bytes.write('fmt ',12);
@@ -404,5 +405,8 @@ test('full Chrome: inherited Rust AudioWorklet live independent speed/pitch UI',
     JSON.stringify(restartedStartup));
   assert.deepEqual(errors,[]);
   await (await page.$('#stop')).click();
- }finally{await browser?.close();server.kill();await rm(temp,{recursive:true,force:true});}
+ }finally{
+   try{await cleanupTestProcesses(browser,[server],"live smoke HTTP server");}
+   finally{await rm(temp,{recursive:true,force:true});}
+ }
 });
