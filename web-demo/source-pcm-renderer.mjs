@@ -265,6 +265,8 @@ export function createSourcePCMRenderer({
         staged.sequence:nextRenderedSequence);
       if(!Number.isSafeInteger(queueSequence)||queueSequence<0)
         throw RangeError("invalid rendered PCM queue sequence");
+      if(active&&stagedWorkerState?.firstChunkAccepted&&
+         queueSequence>stagedWorkerState.sequence)return false;
       const expectedSpeed=active?timeline.state.speed:staged.speed;
       if(speed!==expectedSpeed)
         throw RangeError("rendered PCM speed does not match source clock");
@@ -277,6 +279,8 @@ export function createSourcePCMRenderer({
       if(replacementIndex>=0){
         renderedChunks[replacementIndex]={generation,sequence:queueSequence,
           startFrame,endFrame,speed,coreFrames,channels};
+        renderedChunks.splice(replacementIndex+1);
+        nextRenderedSequence=queueSequence+1;
         staged.firstChunkAccepted=true;
         workerMode=true;
         return renderedChunks.length;
@@ -323,9 +327,8 @@ export function createSourcePCMRenderer({
       if(current){
         const currentIndex=activeChunks.indexOf(current);
         const retained=activeChunks.slice(currentIndex,currentIndex+2);
-        const tail=retained.at(-1);
-        frame=tail.endFrame>=sourceFrames?0:tail.endFrame;
-        sequence=tail.sequence+1;
+        frame=current.endFrame>=sourceFrames?0:current.endFrame;
+        sequence=current.sequence+1;
         renderedChunks.splice(0,renderedChunks.length,...retained);
       }else{
         frame=Math.floor(position);

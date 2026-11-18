@@ -500,6 +500,12 @@ test("recorded CC0 upright piano goes through the real granular file picker and 
       "the staged generation is rendered by the active or parallel handoff Worker");
     assert.equal(transition.missingFrameDelta,0,
       "a recorded PV→WSOLA generation change must preserve audible PCM frames");
+    const oneChunkMs=1.5/(changeRequest.progress?.speed||1)*1000;
+    assert.ok(transition.stagedDistanceMs<=oneChunkMs,
+      "the new model must be staged at the first upcoming PCM chunk boundary");
+    assert.ok(transition.activationDelayMs<=Math.max(
+      transition.stagedDistanceMs,transition.timing.workerWallMs)+250,
+      "activation must wait only for that boundary or measured DSP work");
     assert.ok(transition.activationDelayMs<totalSourceFrames/decodedRate*1000,
       "a settings change must activate before waiting an extra full source loop");
     await page.click("#stop");

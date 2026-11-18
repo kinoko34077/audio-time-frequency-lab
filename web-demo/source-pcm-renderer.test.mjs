@@ -175,7 +175,7 @@ test("staged Worker settings keep queued PCM and switch the shared clock at the 
   assert.equal(p.timeline.state.sourceFrame,8);
 });
 
-test("staged Worker settings trim queued tail to the active chunk boundary",()=>{
+test("staged Worker settings target the next chunk and keep its PCM fallback",()=>{
   const p=createSourcePCMRenderer({sourceFrames:32,sourceSampleRate:4,
     outputSampleRate:4,channelCount:1,speed:1,startFrame:0});
   const chunk=(generation,start,value,speed=1,coreFrames=4)=>({
@@ -190,20 +190,23 @@ test("staged Worker settings trim queued tail to the active chunk boundary",()=>
   assert.deepEqual(Array.from(first[0]),[1,1]);
 
   const staged=p.stageRenderedState({generation:1,speed:2,pitchSemitones:5});
-  assert.deepEqual(staged,{sourceFrame:8,sequence:2,bufferedSegments:2},
-    "retain the active and one following PCM chunk, then stage before the old queue tail");
-  assert.equal(p.installRenderedChunk(chunk(1,8,2,2,2)),3);
-  const output=[new Float32Array(8)];
+  assert.deepEqual(staged,{sourceFrame:4,sequence:1,bufferedSegments:2},
+    "start rendering for the first upcoming boundary while retaining its old PCM fallback");
+  assert.equal(p.installRenderedChunk(chunk(1,4,2,2,2)),2,
+    "ready staged PCM replaces the matching fallback without growing the queue");
+  const output=[new Float32Array(4)];
   assert.equal(p.renderBuffered(output),0);
-  assert.deepEqual(Array.from(output[0].slice(0,7)),[1,1,1,9,9,9,9],
-    "the staged generation must begin after retained PCM without replacing its tail early");
-  assert.ok(output[0][7]<9&&output[0][7]>8.9,
-    "the in-quantum transition fade must start from the immediately preceding output sample");
+  assert.deepEqual(Array.from(output[0].slice(0,2)),[1,1],
+    "the currently audible PCM remains active up to the next chunk boundary");
+  assert.equal(output[0][2],1,
+    "the staged transition starts from the immediately preceding output sample");
+  assert.ok(output[0][3]<1.02&&output[0][3]>1,
+    "the in-quantum transition fades toward the new model without a jump");
   assert.equal(p.workerState.generation,1);
   assert.equal(p.timeline.state.speed,2);
-  assert.equal(p.timeline.state.sourceFrame,12);
+  assert.equal(p.timeline.state.sourceFrame,8);
   assert.equal(p.statistics.missingFrames,0);
-  assert.equal(p.installRenderedChunk(chunk(1,12,3,2,2)),2,
+  assert.equal(p.installRenderedChunk({...chunk(1,8,3,2,2),sequence:2}),2,
     "later chunks in the staged generation remain contiguous after its first chunk");
 });
 
@@ -250,18 +253,20 @@ test("staged Worker replacement follows queue order when a full-track source ran
   p.installRenderedChunk(chunk(0,1,4,8,9));
   p.installRenderedChunk(chunk(0,2,0,4,7));
   const staged=p.stageRenderedState({generation:1,speed:1,pitchSemitones:0});
-  assert.deepEqual(staged,{sourceFrame:0,sequence:2,bufferedSegments:2});
+  assert.deepEqual(staged,{sourceFrame:4,sequence:1,bufferedSegments:2});
   assert.equal(p.installRenderedChunk(chunk(0,2,0,4,7)),3,
-    "the in-flight old Worker result fills the staged queue occurrence");
-  assert.equal(p.installRenderedChunk(chunk(1,2,0,4,2)),3,
-    "replace the old fallback at the staged loop occurrence, not the first matching source range");
-  const output=[new Float32Array(9)];
+    "the in-flight old Worker result may still queue behind its fallback");
+  assert.equal(p.installRenderedChunk(chunk(1,1,4,8,2)),2,
+    "replace the first fallback and discard old-model tail PCM after the transition");
+  assert.equal(p.installRenderedChunk(chunk(0,3,4,8,7)),false,
+    "a late old-model result cannot append behind accepted staged PCM");
+  const output=[new Float32Array(8)];
   assert.equal(p.renderBuffered(output),0);
-  assert.deepEqual(Array.from(output[0].slice(0,8)),[1,1,1,1,9,9,9,9],
-    "the old loop remains audible until the selected queued occurrence");
+  assert.deepEqual(Array.from(output[0].slice(0,4)),[1,1,1,1],
+    "the old loop remains audible through the current chunk");
   assert.equal(p.workerState.generation,1);
-  assert.equal(p.timeline.state.sourceFrame,1);
-  assert.equal(p.takeWorkerActivation().sourceFrame,0);
+  assert.equal(p.timeline.state.sourceFrame,0);
+  assert.equal(p.takeWorkerActivation().sourceFrame,4);
 });
 
 test("negative fractional speed wraps 1 frame loop instead of inventing dropped samples",()=>{
@@ -556,7 +561,7 @@ test("staged Worker generation activates after a loop-spanning queue and late fa
   assert.equal(p.installRenderedChunk(chunk(1,0,216000,288000,1)),1);
   assert.equal(p.installRenderedChunk(chunk(1,1,0,72000,1)),2);
   assert.deepEqual(p.stageRenderedState({generation:2,speed,
-    pitchSemitones:2}),{sourceFrame:72000,sequence:2,bufferedSegments:2});
+    pitchSemitones:2}),{sourceFrame:0,sequence:1,bufferedSegments:2});
 
   const render=frames=>p.renderBuffered([new Float32Array(frames)]);
   let guard=0;
@@ -565,14 +570,11 @@ test("staged Worker generation activates after a loop-spanning queue and late fa
   while(p.timeline.state.sourceFrame<71950&&guard++<3000)render(64);
   assert.ok(guard<3000,"playback reaches the staged loop boundary");
   assert.equal(p.installRenderedChunk(chunk(1,2,72000,144000,1)),2,
-    "late active-generation PCM fills the held boundary");
-  render(8192);
-  assert.ok(p.timeline.state.sourceFrame>80000,
-    "the fallback lets the shared clock pass the staged boundary");
+    "late active-generation PCM fills the fallback behind the current segment");
   const positionBeforeActivation=p.timeline.state.sourceFrame;
-  assert.equal(p.installRenderedChunk(chunk(2,2,72000,144000,2)),1,
+  assert.equal(p.installRenderedChunk(chunk(2,1,0,72000,2)),1,
     "staged PCM replaces the matching queued fallback occurrence");
-  render(128);
+  render(20);
   const activation=p.takeWorkerActivation();
   assert.equal(p.workerState.generation,2);
   assert.equal(p.workerState.pitchSemitones,2);
@@ -580,7 +582,7 @@ test("staged Worker generation activates after a loop-spanning queue and late fa
   assert.equal(activation.sourceFrame,positionBeforeActivation,
     "late activation preserves the fractional source position exactly");
   assert.ok(Math.abs(p.timeline.state.sourceFrame-
-    (positionBeforeActivation+128*speed))<1e-7,
+    (positionBeforeActivation+20*speed))<1e-7,
     "the shared clock keeps its fractional phase across the setting edit");
   assert.equal(p.statistics.missingFrames,0);
 });
