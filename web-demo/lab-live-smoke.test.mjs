@@ -48,7 +48,7 @@ test('full Chrome: inherited Rust AudioWorklet live independent speed/pitch UI',
    const connect=AudioNode.prototype.connect;
    window.__rustOutputAnalysers=[];
    window.__rustMuteSinks=[];
-   window.__rustMutedRoutes=0;
+   window.__rustOutputRoutes={destination:0,media:0};
    window.__rustWorkletProgress=[];
    window.__rustStartupSnapshots=[];
    window.__rustCaptureStartedAt=0;
@@ -68,9 +68,9 @@ test('full Chrome: inherited Rust AudioWorklet live independent speed/pitch UI',
       elapsedMs:performance.now()-window.__rustCaptureStartedAt,peak,rms
      });
    },2);
-   const muteSinkFor=ctx=>{
+   const muteSinkFor=(ctx,target=ctx.destination)=>{
     const sink=ctx.createGain();sink.gain.value=0;
-    connect.call(sink,ctx.destination);
+    connect.call(sink,target);
     window.__rustMuteSinks.push(sink);return sink;
    };
    AudioNode.prototype.connect=function(target,...args){
@@ -81,8 +81,11 @@ test('full Chrome: inherited Rust AudioWorklet live independent speed/pitch UI',
      connect.call(this,analyser,...args);
      if(target===this.context.destination){
       connect.call(analyser,muteSinkFor(this.context));
-      window.__rustMutedRoutes++;
-     }else connect.call(analyser,target);
+      window.__rustOutputRoutes.destination++;
+     }else{
+      connect.call(analyser,muteSinkFor(this.context,target));
+      window.__rustOutputRoutes.media++;
+     }
      window.__rustOutputAnalysers.push(analyser);return target;
     }
     return connect.call(this,target,...args);
@@ -184,6 +187,19 @@ test('full Chrome: inherited Rust AudioWorklet live independent speed/pitch UI',
   assert.equal(await page.$eval('#granular-pitch-value',e=>e.value),'12');
   await page.waitForFunction(()=>window.__rustOutputAnalysers?.length>0,
    {timeout:10000});
+  await page.waitForFunction(()=>window.__rustOutputRoutes?.media>0,
+   {timeout:10000});
+  const startupOutputIsolation=await page.evaluate(()=>({
+   routes:window.__rustOutputRoutes,
+   gains:window.__rustMuteSinks.map(sink=>sink.gain.value)}));
+  const startupRouteCount=startupOutputIsolation.routes.destination+
+   startupOutputIsolation.routes.media;
+  assert.ok(startupOutputIsolation.routes.destination>0&&
+   startupOutputIsolation.routes.media>0&&
+   startupOutputIsolation.gains.length===startupRouteCount&&
+   startupOutputIsolation.gains.every(value=>value===0),
+   'all device and MediaStream output routes must be muted before PCM verification: '+
+    JSON.stringify(startupOutputIsolation));
   const setSpeed=async speed=>{
    const previous=Number(await page.$eval('#granular-optin-status',
     e=>e.dataset.renderRevision||0));
@@ -320,20 +336,33 @@ test('full Chrome: inherited Rust AudioWorklet live independent speed/pitch UI',
   assert.equal(await page.$eval('#granular-speed-value',e=>e.value),'0');
   const loopTarget=loopFrames-4000;
   const loopSeekX=wave.left+loopTarget/totalFrames*wave.width;
+  await page.evaluate(()=>{
+   const surface=document.querySelector('#wave');
+   window.__rustWavePointerEvents=[];
+   for(const type of ['pointerdown','pointerup','pointercancel','click'])
+    surface.addEventListener(type,e=>window.__rustWavePointerEvents.push({
+     type,trusted:e.isTrusted,x:e.clientX,y:e.clientY,button:e.button,
+     buttons:e.buttons,targetId:e.target.id,targetClass:String(e.target.className)
+    }),true);
+  });
   await page.mouse.click(loopSeekX,waveY);
   try{
    await page.waitForFunction(target=>Math.abs(Number(
     document.querySelector('#granular-optin-status')?.dataset.renderFrame)-target)<=500,
     {timeout:5000},loopTarget);
   }catch(error){
-   const failedSeek=await page.evaluate(target=>({target,
+   const failedSeek=await page.evaluate(({target,x,y})=>({target,
     frame:Number(document.querySelector('#granular-optin-status')?.dataset.renderFrame),
     status:document.querySelector('#granular-optin-status')?.textContent,
     speed:document.querySelector('#granular-speed-value')?.value,
     mainTab:document.body.dataset.mainTab,
+    waveHit:(()=>{const e=document.elementFromPoint(x,y);return e&&{
+     id:e.id,tag:e.tagName,className:String(e.className),
+     pointerEvents:getComputedStyle(e).pointerEvents}})(),
+    pointerEvents:window.__rustWavePointerEvents,
     progress:window.__rustWorkletProgress.slice(-8),
     wave:document.querySelector('#player-wave-editor')?.getBoundingClientRect().toJSON()
-   }),loopTarget);
+   }),{target:loopTarget,x:loopSeekX,y:waveY});
    console.log('RUST_AB_LOOP_SEEK_TIMEOUT '+JSON.stringify(failedSeek));
    throw error;
   }
@@ -420,12 +449,15 @@ test('full Chrome: inherited Rust AudioWorklet live independent speed/pitch UI',
     startupPeak:Math.max(0,...startup.map(x=>x.peak)),
     steadyPeak:steady[Math.floor(steady.length/2)]||0};
   });
-  const outputIsolation=await page.evaluate(()=>({routes:window.__rustMutedRoutes,
+  const outputIsolation=await page.evaluate(()=>({routes:window.__rustOutputRoutes,
    gains:window.__rustMuteSinks.map(sink=>sink.gain.value)}));
   console.log('RUST_OUTPUT_SILENCE_GUARD '+JSON.stringify(outputIsolation));
-  assert.ok(outputIsolation.routes>0&&outputIsolation.gains.length>0&&
+  const outputRouteCount=outputIsolation.routes.destination+
+   outputIsolation.routes.media;
+  assert.ok(outputIsolation.routes.destination>0&&outputIsolation.routes.media>0&&
+   outputIsolation.gains.length===outputRouteCount&&
    outputIsolation.gains.every(value=>value===0),
-   'browser PCM measurement must not route test audio to the device output');
+   'every direct and MediaStream browser audio output route must be silenced after measurement');
   console.log('RUST_CHROME_RESTART_STARTUP_PCM '+JSON.stringify(restartedStartup));
   assert.ok(restartedStartup.steadyPeak>1e-3,
    'restarted Rust AudioWorklet must produce browser-measured PCM: '+

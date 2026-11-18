@@ -182,18 +182,19 @@ function queueScrubCommand(player,speed,frame=null){
       message("波形スクラブの音声反映失敗: "+error.message,"error");
   }).finally(()=>{player.scratchBusy=false;});
 }
-function cancelTemporaryScrub(restore=true){
+function cancelTemporaryScrub(restore=true,sourceFrame=null){
   scrubMotionToken++;
   if(scrubMotionFrame)cancelAnimationFrame(scrubMotionFrame);
   scrubMotionFrame=0;
   const active=temporaryScrubSpeed!==null,p=state.player;
+  const restoreFrame=sourceFrame;
   if(p){
     if(p.scrubSpeedTimer){clearTimeout(p.scrubSpeedTimer);p.scrubSpeedTimer=null;}
     p.scratchQueued=null;
   }
   temporaryScrubSpeed=null;
   if(restore&&active&&p?.rawPCM&&p.granular&&!p.initializing&&!p.paused)
-    queueScrubCommand(p,granular.speed);
+    queueScrubCommand(p,granular.speed,restoreFrame);
 }
 function setTemporaryScrubSpeed(value,_force=false,frame=null){
   temporaryScrubSpeed=validatePlaybackSpeed(value);
@@ -1015,7 +1016,7 @@ if(PLAYER_GRANULAR_AVAILABLE){
         if(g.dragStarted)
           waveformScrubMotion(releaseScrubSpeed(g.velocity,
             performance.now()-g.lastMovedAt),"release");
-        else cancelTemporaryScrub();
+        else cancelTemporaryScrub(true,waveFrameFromPointer(e));
         // A tap has no throw velocity. It must not leave 480ms of
         // artificial inertia or an audible hold pending after pointerup.
       }else waveformScrubMotion(0,"cancel");
