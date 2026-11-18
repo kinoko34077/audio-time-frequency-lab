@@ -484,7 +484,10 @@ export function estimateSharedPartials({channels,sampleRate,K=PERIOD_K,maxPartia
 }
 export function renderJointAudio({channels,sampleRate,speed=1,semitones=0,sourceStartSeconds=0,periodCycles=PERIOD_K,renderResidual}){
  if(!(Number.isFinite(speed)&&speed>=.5&&speed<=2&&Number.isFinite(semitones)&&semitones>=-12&&semitones<=12))throw RangeError('invalid transform');
- if(!(Number.isFinite(sourceStartSeconds)&&sourceStartSeconds>=0))throw RangeError('source offset');
+ // A wrapped left analysis context can begin before source time zero when a
+ // loop starts near the beginning of the recording. This is a virtual DSP
+ // origin; the rendered core still maps to its nonnegative source frame.
+ if(!Number.isFinite(sourceStartSeconds))throw RangeError('source offset');
  if(typeof renderResidual!=='function')throw TypeError('residual renderer is required');
  const frames=Math.max(1,Math.round(channels[0].length/speed));
  if(frames*channels.length>14_000_000)throw RangeError('memory cap');

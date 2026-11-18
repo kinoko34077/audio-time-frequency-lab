@@ -43,6 +43,10 @@ export function createSourcePCMRenderer({
   let stagedWorkerState=null,workerActivation=null;
   let workerState={generation:0,speed,pitchSemitones:0};
   let workerTransitionLeft=0;
+  const nextRenderedFrame=(endFrame,loopState=timeline.state)=>
+    loopState.loopEnabled&&endFrame>=loopState.loopEndFrame?
+      loopState.loopStartFrame:
+      !loopState.loopEnabled&&endFrame>=sourceFrames?sourceFrames:endFrame;
   const find=(index)=>{
     for(let i=windows.length-1;i>=0;i--){
       const w=windows[i];
@@ -280,7 +284,11 @@ export function createSourcePCMRenderer({
         const previous=staged.preparedChunks.at(-1)||null;
         const expectedSequence=previous?previous.sequence+1:staged.sequence;
         const expectedStart=previous?
-          (previous.endFrame>=sourceFrames?0:previous.endFrame):staged.frame;
+          nextRenderedFrame(previous.endFrame,{
+            loopEnabled:staged.loopEnabled??timeline.state.loopEnabled,
+            loopStartFrame:staged.loopStartFrame??timeline.state.loopStartFrame,
+            loopEndFrame:staged.loopEndFrame??timeline.state.loopEndFrame
+          }):staged.frame;
         if(renderedChunks.length+staged.preparedChunks.length>=
            RENDERED_CHUNK_SLOTS)return false;
         if(queueSequence!==expectedSequence||startFrame!==expectedStart)
@@ -320,7 +328,9 @@ export function createSourcePCMRenderer({
         (staged&&!staged.firstChunkAccepted&&
           queueSequence===staged.sequence);
       if(previous){
-        const expected=previous.endFrame>=sourceFrames?0:previous.endFrame;
+        const expected=nextRenderedFrame(previous.endFrame,
+          staged&&staged.kind!=="seek"&&queueSequence>=staged.sequence?
+            staged:timeline.state);
         if(startFrame!==expected||queueSequence!==previous.sequence+1){
           if(lateHandoffResult)return false;
           throw RangeError("rendered PCM chunks are not source-contiguous");
@@ -339,10 +349,16 @@ export function createSourcePCMRenderer({
       return renderedChunks.length;
     },
     /** Stage a new Worker configuration after the currently audible chunk. */
-    stageRenderedState({generation,speed,pitchSemitones}={}){
+    stageRenderedState({generation,speed,pitchSemitones,
+      loopStartFrame=timeline.state.loopStartFrame,
+      loopEndFrame=timeline.state.loopEndFrame,
+      loopEnabled=timeline.state.loopEnabled}={}){
       if(!Number.isSafeInteger(generation)||generation<=renderedGeneration||
          !Number.isFinite(speed)||speed<.5||speed>2||
-         !Number.isFinite(pitchSemitones)||pitchSemitones<-12||pitchSemitones>12)
+         !Number.isFinite(pitchSemitones)||pitchSemitones<-12||pitchSemitones>12||
+         !Number.isSafeInteger(loopStartFrame)||loopStartFrame<0||
+         !Number.isSafeInteger(loopEndFrame)||loopStartFrame>=loopEndFrame||
+         loopEndFrame>sourceFrames||typeof loopEnabled!=="boolean")
         throw RangeError("invalid staged Worker playback state");
       const state=timeline.state;
       const position=state.sourceFrame;
@@ -350,7 +366,7 @@ export function createSourcePCMRenderer({
         segment.generation===renderedGeneration);
       const current=activeChunks.find(segment=>
         (position>=segment.startFrame&&position<segment.endFrame)||
-        (state.loopEnabled&&segment.endFrame===sourceFrames&&
+        (state.loopEnabled&&segment.endFrame>=state.loopEndFrame&&
           position<segment.startFrame))||
         activeChunks.find(segment=>position===segment.endFrame)||
         activeChunks.find(segment=>position<segment.startFrame)||null;
@@ -358,24 +374,44 @@ export function createSourcePCMRenderer({
       if(current){
         const currentIndex=activeChunks.indexOf(current);
         const retained=activeChunks.slice(currentIndex,currentIndex+2);
-        frame=current.endFrame>=sourceFrames?0:current.endFrame;
+        const boundary=nextRenderedFrame(current.endFrame,state);
+        if(!loopEnabled&&state.loopEnabled&&
+           current.endFrame>=state.loopEndFrame){
+          frame=loopEndFrame<sourceFrames?loopEndFrame:loopStartFrame;
+          if(current.startFrame<=state.loopStartFrame)
+            current.retireAfterLoop=true;
+        }else frame=loopEnabled&&
+          (position<loopStartFrame||position>=loopEndFrame||
+           boundary>=loopEndFrame)?loopStartFrame:boundary;
+        if(loopEnabled&&frame===loopStartFrame&&
+           current.startFrame===loopStartFrame&&
+           current.endFrame>=loopEndFrame)
+          current.retireAfterLoop=true;
+        if(loopEnabled&&position<loopEndFrame&&
+           current.startFrame<loopEndFrame&&current.endFrame>loopEndFrame)
+          current.endFrame=loopEndFrame;
         sequence=current.sequence+1;
         renderedChunks.splice(0,renderedChunks.length,...retained);
       }else if(activeChunks.length&&
           position>=activeChunks.at(-1).endFrame){
         const consumed=activeChunks.at(-1);
-        frame=Math.floor(position);
+        const cursor=Math.floor(position);
+        frame=loopEnabled&&(cursor<loopStartFrame||cursor>=loopEndFrame)?
+          loopStartFrame:cursor;
         sequence=consumed.sequence+1;
         renderedChunks.length=0;
         previousRendered=null;
       }else{
-        frame=Math.floor(position);
+        const cursor=Math.floor(position);
+        frame=loopEnabled&&(cursor<loopStartFrame||cursor>=loopEndFrame)?
+          loopStartFrame:cursor;
         sequence=nextRenderedSequence;
         renderedChunks.length=0;
         previousRendered=null;
       }
       nextRenderedSequence=sequence;
       stagedWorkerState={generation,frame,sequence,speed,pitchSemitones,
+        loopStartFrame,loopEndFrame,loopEnabled,
         firstChunkAccepted:false};
       workerMode=true;
       return {sourceFrame:frame,sequence,
@@ -408,7 +444,7 @@ export function createSourcePCMRenderer({
             if(!segment||segment.speed!==speed)break;
             if(offset){
               const previous=reusableChunks.at(-1);
-              const expected=previous.endFrame>=sourceFrames?0:previous.endFrame;
+              const expected=nextRenderedFrame(previous.endFrame,state);
               if(segment.startFrame!==expected)break;
             }
             reusableChunks.push({...segment,generation,sequence:offset});
@@ -418,7 +454,7 @@ export function createSourcePCMRenderer({
       }
       const current=activeChunks.find(segment=>
         (position>=segment.startFrame&&position<segment.endFrame)||
-        (state.loopEnabled&&segment.endFrame===sourceFrames&&
+        (state.loopEnabled&&segment.endFrame>=state.loopEndFrame&&
           position<segment.startFrame))||activeChunks[0]||null;
       const currentIndex=current?activeChunks.indexOf(current):0;
       const retainedLimit=RENDERED_CHUNK_SLOTS-requiredChunks;
@@ -433,8 +469,11 @@ export function createSourcePCMRenderer({
       workerMode=true;
       const lastReusable=reusableChunks.at(-1);
       return {sourceFrame:frame,sequence:0,
-        nextFrame:lastReusable?
-          (lastReusable.endFrame>=sourceFrames?0:lastReusable.endFrame):frame,
+        nextFrame:lastReusable?nextRenderedFrame(lastReusable.endFrame,{
+            loopEnabled:stagedWorkerState.loopEnabled??timeline.state.loopEnabled,
+            loopStartFrame:stagedWorkerState.loopStartFrame??timeline.state.loopStartFrame,
+            loopEndFrame:stagedWorkerState.loopEndFrame??timeline.state.loopEndFrame
+          }):frame,
         nextSequence:reusableChunks.length,
         bufferedSegments:renderedChunks.length+reusableChunks.length,
         reusedChunks:reusableChunks.length};
@@ -471,8 +510,8 @@ export function createSourcePCMRenderer({
         if(fraction===0)return a;
         let b=samples[at+1];
         if(!Number.isFinite(b)&&wrapDepth===0&&state.loopEnabled&&
-           segment.endFrame===sourceFrames){
-          // A fractional source position just before the full-track loop end
+           segment.endFrame===state.loopEndFrame){
+          // A fractional source position just before a loop end
           // needs the next rendered output sample, which belongs to the chunk
           // queued at the loop start. Without this bridge the shared clock
           // freezes on the final fractional frame forever.
@@ -517,8 +556,9 @@ export function createSourcePCMRenderer({
         }
         while(renderedChunks.length){
           const head=renderedChunks[0];
-          const wrapped=state.loopEnabled&&head.endFrame===sourceFrames&&
-            position<head.startFrame;
+          const wrapped=state.loopEnabled&&head.endFrame>=state.loopEndFrame&&
+            (position<head.startFrame||
+             head.retireAfterLoop&&head.completedLoop);
           if(position>=head.endFrame||wrapped){
             if(head.generation!==renderedGeneration)break;
             previousRendered=renderedChunks.shift();
@@ -538,9 +578,15 @@ export function createSourcePCMRenderer({
           // its boundary. Preserve its fractional sample position when it is
           // already inside the replacement chunk; scrub() is intentionally
           // integer-frame-only for user seeks and would throw here.
-          const activated=activationFrame===position?
+          timeline.setLoopConfiguration(staged.loopStartFrame,
+            staged.loopEndFrame,staged.loopEnabled);
+          const target=activationFrame===position&&
+            timeline.state.sourceFrame===position?position:
+            activationFrame===position?timeline.state.sourceFrame:
+            activationFrame;
+          const activated=target===timeline.state.sourceFrame?
             timeline.setSpeed(staged.speed):
-            timeline.scrub(activationFrame,staged.speed);
+            timeline.scrub(target,staged.speed);
           state=timeline.state;
           position=activated.sourceFrame;
           renderedGeneration=staged.generation;
@@ -596,6 +642,9 @@ export function createSourcePCMRenderer({
         if(workerTransitionLeft>0)workerTransitionLeft--;
         if(adjacent&&mix>=1)previousRendered=null;
         timeline.advance(1);
+        if(state.loopEnabled&&segment?.retireAfterLoop&&
+           timeline.state.sourceFrame<position)
+          segment.completedLoop=true;
       }
       missingFrames+=missing;
       renderedFrames+=len;

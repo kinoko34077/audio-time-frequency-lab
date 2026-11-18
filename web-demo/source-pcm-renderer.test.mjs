@@ -176,6 +176,55 @@ test("staged Worker settings keep queued PCM and switch the shared clock at the 
   assert.equal(p.timeline.state.sourceFrame,8);
 });
 
+test("staged Worker A/B settings activate at the next chunk and repeat the selected source interval",()=>{
+  const p=createSourcePCMRenderer({sourceFrames:32,sourceSampleRate:8,
+    outputSampleRate:8,channelCount:1,speed:1,startFrame:0,
+    loopStartFrame:0,loopEndFrame:32,loopEnabled:false});
+  const chunk=(generation,sequence,startFrame,endFrame,value)=>({generation,
+    sequence,startFrame,endFrame,speed:1,coreFrames:endFrame-startFrame,
+    channels:[new Float32Array(endFrame-startFrame+2).fill(value)]});
+  p.installRenderedChunk(chunk(0,0,0,8,1));
+  p.installRenderedChunk(chunk(0,1,8,16,1));
+  const staged=p.stageRenderedState({generation:1,speed:1,
+    pitchSemitones:0,loopStartFrame:4,loopEndFrame:8,loopEnabled:true});
+  assert.deepEqual(staged,{sourceFrame:4,sequence:1,bufferedSegments:2});
+  assert.equal(p.installRenderedChunk(chunk(1,1,4,8,2)),2);
+  const output=[new Float32Array(20)];
+  assert.equal(p.renderBuffered(output),0,
+    "the Worker handoff and loop wrap must not insert missing PCM");
+  assert.equal(p.workerState.generation,1);
+  assert.deepEqual(p.timeline.state,{sourceFrame:4,speed:1,
+    loopStartFrame:4,loopEndFrame:8,loopEnabled:true,revision:1,ended:false});
+  assert.deepEqual(Array.from(output[0].slice(0,8)),Array(8).fill(1));
+  assert.deepEqual(Array.from(output[0].slice(8)),Array(12).fill(2),
+    "the A/B chunk itself remains the repeated loop body");
+  assert.equal(p.statistics.missingFrames,0);
+});
+
+test("disabling a Worker A/B loop exits at B without restarting the Worklet clock",()=>{
+  const p=createSourcePCMRenderer({sourceFrames:32,sourceSampleRate:8,
+    outputSampleRate:8,channelCount:1,speed:1,startFrame:4,
+    loopStartFrame:4,loopEndFrame:8,loopEnabled:true});
+  const chunk=(generation,sequence,startFrame,endFrame,value)=>({generation,
+    sequence,startFrame,endFrame,speed:1,coreFrames:endFrame-startFrame,
+    channels:[new Float32Array(endFrame-startFrame+2).fill(value)]});
+  p.installRenderedChunk(chunk(0,0,4,8,1));
+  assert.deepEqual(p.stageRenderedState({generation:1,speed:1,
+    pitchSemitones:0,loopStartFrame:4,loopEndFrame:8,loopEnabled:false}),
+    {sourceFrame:8,sequence:1,bufferedSegments:1});
+  assert.equal(p.installRenderedChunk(chunk(1,1,8,16,2)),2);
+  const output=[new Float32Array(8)];
+  assert.equal(p.renderBuffered(output),0);
+  assert.deepEqual(Array.from(output[0].slice(0,4)),[1,1,1,1]);
+  assert.equal(output[0][4],1,"the existing boundary transition starts at prior PCM");
+  assert.deepEqual(Array.from(output[0].slice(5)),[2,2,2]);
+  assert.equal(p.workerState.generation,1);
+  assert.equal(p.timeline.state.loopEnabled,false);
+  assert.equal(p.timeline.state.sourceFrame,12,
+    "the common source clock continues forward from B after the staged exit");
+  assert.equal(p.statistics.missingFrames,0);
+});
+
 test("staged Worker settings target the next chunk and keep its PCM fallback",()=>{
   const p=createSourcePCMRenderer({sourceFrames:32,sourceSampleRate:4,
     outputSampleRate:4,channelCount:1,speed:1,startFrame:0});

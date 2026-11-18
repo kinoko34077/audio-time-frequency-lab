@@ -351,7 +351,7 @@ test("individual-period Worker plays through one shared PCM Worklet in Chrome",a
     assert.match(evidence.jobs[0].model,/period-joint/);
     assert.equal(evidence.jobs[0].jointBackend,"pv");
     assert.ok(evidence.jobs.every(job=>job.coreFrames<=72000&&job.sourceFrames<200000),evidence.jobs);
-    const loopControls=await page.evaluate(()=>({
+    const startupLoopControls=await page.evaluate(()=>({
       a:document.querySelector("#player-loop-a").disabled,
       b:document.querySelector("#player-loop-b").disabled,
       enabled:document.querySelector("#player-loop-enabled").disabled,
@@ -359,10 +359,10 @@ test("individual-period Worker plays through one shared PCM Worklet in Chrome",a
       bNow:document.querySelector("#player-loop-b-now").disabled,
       hint:document.querySelector("#player-loop-hint").textContent
     }));
-    assert.ok(loopControls.a&&loopControls.b&&loopControls.enabled&&
-      loopControls.aNow&&loopControls.bNow,
-      loopControls);
-    assert.match(loopControls.hint,/Worker.*A\/B.*未対応/);
+    assert.ok(!startupLoopControls.a&&!startupLoopControls.b&&
+      !startupLoopControls.enabled&&!startupLoopControls.aNow&&
+      !startupLoopControls.bNow,startupLoopControls);
+    assert.match(startupLoopControls.hint,/安全な区間境界/);
     const startupEvidence={...evidence};
     const startProgress=await page.evaluate(()=>{
       const progress=window.__labAudit.messages.filter(message=>

@@ -87,7 +87,10 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
           this.workerSeekRequestId=null;
           const staged=this.renderer.stageRenderedState({
             generation:m.generation,speed:m.speed,
-            pitchSemitones:m.pitchSemitones
+            pitchSemitones:m.pitchSemitones,
+            loopStartFrame:m.loopStartFrame,
+            loopEndFrame:m.loopEndFrame,
+            loopEnabled:m.loopEnabled
           });
           this.port.postMessage({type:"worker-state-staged",
             requestId:m.requestId,generation:m.generation,

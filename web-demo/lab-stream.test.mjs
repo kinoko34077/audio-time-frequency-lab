@@ -27,6 +27,47 @@ test('the final full-track Worker chunk includes bounded wrapped PCM for its int
  assert.equal(plan.outputFrames,plan.coreFrames+1);
  assert.ok(plan.wrapRight<sr*.7);
 });
+test('a legacy Worker A/B loop bounds chunks and wraps analysis context at both endpoints',()=>{
+ const sr=48000,total=sr*12,loopStart=sr*2,loopEnd=sr*7,start=sr*6;
+ const atEnd=planChunk({totalFrames:total,sampleRate:sr,speed:1.33,
+  startFrame:start,startSeconds:start/sr,loopStartFrame:loopStart,
+  loopEndFrame:loopEnd,loopEnabled:true,model:'pv',fftSize:2048,
+  referenceWindows:8});
+ assert.equal(atEnd.start, start);
+ assert.equal(atEnd.start+atEnd.core, loopEnd);
+ assert.equal(atEnd.nextFrame, loopStart);
+ assert.equal(atEnd.right, 0);
+ assert.ok(atEnd.wrapRight>0);
+
+ const atStart=planChunk({totalFrames:total,sampleRate:sr,speed:1.33,
+  startFrame:loopStart,startSeconds:loopStart/sr,
+  loopStartFrame:loopStart,loopEndFrame:loopEnd,loopEnabled:true,
+  model:'pv',fftSize:2048,referenceWindows:8});
+ assert.equal(atStart.start, loopStart);
+ assert.equal(atStart.from, loopStart);
+ assert.ok(atStart.wrapLeft>0);
+});
+test('A/B analysis origin may precede zero while the requested loop starts near the file beginning',()=>{
+ const sr=48000,total=sr*12,loopStart=96,loopEnd=sr*7;
+ const plan=planChunk({totalFrames:total,sampleRate:sr,speed:1,
+  startFrame:loopStart,startSeconds:loopStart/sr,loopStartFrame:loopStart,
+  loopEndFrame:loopEnd,loopEnabled:true,model:'pv',fftSize:2048,
+  referenceWindows:8});
+ assert.equal(plan.start,loopStart);
+ assert.ok(plan.wrapLeft>0);
+ assert.ok(plan.sourceStartFrame<0,plan);
+});
+test('disabling an A/B loop leaves the remaining full-track chunk unwrapped',()=>{
+ const sr=48000,total=sr*12,start=sr*10.5;
+ const plan=planChunk({totalFrames:total,sampleRate:sr,speed:1.25,
+  startFrame:start,startSeconds:start/sr,loopStartFrame:sr*2,
+  loopEndFrame:sr*7,loopEnabled:false,model:'pv',fftSize:2048,
+  referenceWindows:8});
+ assert.equal(plan.start,start);
+ assert.equal(plan.start+plan.core,total);
+ assert.equal(plan.nextFrame,total);
+ assert.equal(plan.wrapRight,0);
+});
 test('a Worker chunk starts at its exact integer source cursor after seconds round-trip',()=>{
  const sr=48000,total=sr*10,startFrame=202064;
  const plan=planChunk({totalFrames:total,sampleRate:sr,speed:1,
