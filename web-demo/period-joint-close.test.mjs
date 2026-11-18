@@ -51,6 +51,17 @@ test('close-pair search advances sinusoids recursively across PCM samples',()=>{
  assert.ok(fit,'the optimization must retain the detected close pair');
  assert.ok(calls<10000,`per-sample trigonometry remains: ${calls} calls`);
 });
+test('multi-partial source refinement avoids trigonometry on every sample',()=>{
+ const x=tone([[220,.12,.1],[330,.12,.2],[440,.12,.3],
+  [660,.12,.4],[880,.12,.5],[1100,.12,.6]],1.5);
+ const sin=Math.sin,cos=Math.cos;let calls=0,model;
+ Math.sin=value=>{calls++;return sin(value);};
+ Math.cos=value=>{calls++;return cos(value);};
+ try{model=estimateSharedPartials({channels:[x],sampleRate:Fs});}
+ finally{Math.sin=sin;Math.cos=cos;}
+ assert.ok(model.partials.length>=4,'the joint model must retain multiple partials');
+ assert.ok(calls<100000,`source refinement still uses per-sample trigonometry: ${calls} calls`);
+});
 test('time stretch and independent pitch preserve close tones at adjacent preview chunks',()=>{
  const duration=Fs*4,speed=.8,semi=3,p=2**(semi/12);
  const source=tone([[440,.18,.1],[441,.18,.7]],4);
