@@ -310,7 +310,8 @@ export async function createSourcePCMBridge({
         pitchSemitones:nextPitch,generation});
     },
     stageWorkerSeekPlayback({frame,speed:nextSpeed,
-      pitchSemitones:nextPitch,generation,requiredChunks=1}={}){
+      pitchSemitones:nextPitch,generation,requiredChunks=1,
+      reuseCompatible=false}={}){
       if(processingMode!=="worker")
         return Promise.reject(Error("Worker seek requires Worker processing mode"));
       if(!Number.isSafeInteger(frame)||frame<0||frame>=frames||
@@ -318,10 +319,11 @@ export async function createSourcePCMBridge({
          !Number.isFinite(nextPitch)||nextPitch<-12||nextPitch>12||
          !Number.isSafeInteger(generation)||generation<1||
          !Number.isSafeInteger(requiredChunks)||requiredChunks<1||
-         requiredChunks>RENDERED_CHUNK_SLOTS)
+         requiredChunks>RENDERED_CHUNK_SLOTS||
+         typeof reuseCompatible!=="boolean")
         return Promise.reject(RangeError("invalid staged legacy Worker seek"));
       return submit({type:"worker-seek-stage",frame,speed:nextSpeed,
-        pitchSemitones:nextPitch,generation,requiredChunks,
+        pitchSemitones:nextPitch,generation,requiredChunks,reuseCompatible,
         requestAudioTime:ctx.currentTime});
     },
     stageWorkerPlayback({speed:nextSpeed,pitchSemitones:nextPitch,

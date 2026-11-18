@@ -328,7 +328,7 @@ test("prepared Worker seek keeps old PCM playing until target PCM is ready",()=>
   assert.deepEqual(Array.from(before[0]),[1,1]);
   assert.deepEqual(p.stageRenderedSeekState({generation:1,frame:20,speed:1,
     pitchSemitones:3,requiredChunks:2}),{sourceFrame:20,sequence:0,
-    bufferedSegments:2});
+    nextFrame:20,nextSequence:0,bufferedSegments:2,reusedChunks:0});
   const waiting=[new Float32Array(2)];
   assert.equal(p.renderBuffered(waiting),0,
     "preparing a seek must not clear the currently audible PCM queue");
@@ -358,6 +358,29 @@ test("prepared Worker seek keeps old PCM playing until target PCM is ready",()=>
   assert.equal(after[0][0],1,
     "the target model transitions from the last audible old-model sample");
   assert.ok(after[0][3]>after[0][0]&&after[0][3]<9);
+  assert.equal(p.statistics.missingFrames,0);
+});
+
+test("same-settings seek reuses a fully buffered PCM range",()=>{
+  const p=createSourcePCMRenderer({sourceFrames:16,sourceSampleRate:8,
+    outputSampleRate:8,channelCount:1,speed:1,startFrame:0});
+  const chunk=(generation,sequence,startFrame,endFrame,value)=>({generation,
+    sequence,startFrame,endFrame,speed:1,coreFrames:endFrame-startFrame,
+    channels:[new Float32Array(endFrame-startFrame).fill(value)]});
+  p.installRenderedChunk(chunk(0,0,0,8,1));
+  p.installRenderedChunk(chunk(0,1,8,16,2));
+
+  const staged=p.stageRenderedSeekState({generation:1,frame:4,speed:1,
+    pitchSemitones:0,requiredChunks:1,reuseCompatible:true});
+  assert.equal(staged.reusedChunks,1);
+
+  const output=[new Float32Array(2)];
+  assert.equal(p.renderBuffered(output),0);
+  const activation=p.takeWorkerActivation();
+  assert.equal(activation.generation,1);
+  assert.equal(activation.sourceFrame,4);
+  assert.equal(activation.reusedChunks,1);
+  assert.equal(p.timeline.state.sourceFrame,6);
   assert.equal(p.statistics.missingFrames,0);
 });
 

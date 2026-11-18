@@ -47,6 +47,15 @@ export async function createModelStream({ctx,sourceChannels,sampleRate,speed,sem
   let config={speed,semitones,model,fftSize,shortFftSize,longFftSize,
     referenceWindows,periodCycles,jointBackend};
   let activeConfig=config;
+  const sameRenderConfig=(left,right)=>{
+    const leftKeys=Object.keys(left||{}),rightKeys=Object.keys(right||{});
+    return leftKeys.length===rightKeys.length&&leftKeys.every(key=>{
+      const a=left[key],b=right[key];
+      return Array.isArray(a)&&Array.isArray(b)?
+        a.length===b.length&&a.every((value,index)=>Object.is(value,b[index])):
+        Object.is(a,b);
+    });
+  };
   const configs=new Map([[0,config]]),transitionWaiters=new Map();
   const initial=Math.min(totalFrames-1,Math.max(0,
     Math.floor((((startSeconds%duration)+duration)%duration)*sampleRate)));
@@ -373,16 +382,19 @@ export async function createModelStream({ctx,sourceChannels,sampleRate,speed,sem
       try{
         const staged=await bridge.stageWorkerSeekPlayback({frame,
           speed:next.speed,pitchSemitones:next.semitones,
-          generation:requestedGeneration,requiredChunks});
+          generation:requestedGeneration,requiredChunks,
+          reuseCompatible:sameRenderConfig(activeConfig,next)});
         if(stopped||requestedGeneration!==generation)
           return {stale:true};
         stagedGeneration=requestedGeneration;
-        cursorFrame=staged.sourceFrame;sequenceCursor=staged.sequence;
+        cursorFrame=staged.nextFrame??staged.sourceFrame;
+        sequenceCursor=staged.nextSequence??staged.sequence;
         bufferedSegments=staged.bufferedSegments??bufferedSegments;
         const promise=new Promise((resolve,reject)=>
           transitionWaiters.set(requestedGeneration,{resolve,reject}));
-        startHandoffJob(requestedGeneration,next,staged.sourceFrame,
-          staged.sequence,{seek:true});
+        if((staged.reusedChunks||0)<requiredChunks)
+          startHandoffJob(requestedGeneration,next,staged.sourceFrame,
+            staged.sequence,{seek:true});
         return promise;
       }catch(error){
         if(!stopped&&requestedGeneration===generation)

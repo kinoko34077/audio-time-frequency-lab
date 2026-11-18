@@ -7,7 +7,7 @@ import {closeBrowserTree,stopChildProcess} from "./test-process-cleanup.mjs";
 import {installTestAudioSilenceGuard} from "./test-audio-silence-guard.mjs";
 
 async function waitForWorkerPCM(page,{backend=null,generation=null,
-  minimumGeneration=0,missingBeforeFrames=null}={}){
+  minimumGeneration=0,missingBeforeFrames=null,allowReused=false}={}){
   let matchHandle;
   try{matchHandle=await page.waitForFunction(expected=>{
     const audit=window.__labAudit;
@@ -25,7 +25,10 @@ async function waitForWorkerPCM(page,{backend=null,generation=null,
           message.generation===current&&!message.stale&&
           message.startFrame===job.planStart&&
           message.endFrame===job.planEnd));
-      return rendered&&audit.messages.some(message=>
+      const reused=expected.allowReused&&audit.messages.some(message=>
+        message.type==="worker-state-activated"&&
+        message.generation===current&&message.reusedChunks>0);
+      return reused||rendered&&audit.messages.some(message=>
           message.type==="progress"&&
           message.workerGeneration===current);
     });
@@ -89,7 +92,10 @@ async function waitForWorkerPCM(page,{backend=null,generation=null,
       peakRms,advanceFrames,
       missingFrames:Math.max(0,(lastProgress?.missingFrames||0)-
         (expected.missingBeforeFrames??start?.missingFrames??0)),
-      accepted:!!job&&audit.messages.some(message=>
+      accepted:expected.allowReused&&audit.messages.some(message=>
+        message.type==="worker-state-activated"&&
+        message.generation===current&&message.reusedChunks>0)||
+        !!job&&audit.messages.some(message=>
         message.type==="rendered-chunk-accepted"&&
         message.generation===current&&!message.stale&&
         message.startFrame===job.planStart&&message.endFrame===job.planEnd),
@@ -105,7 +111,8 @@ async function waitForWorkerPCM(page,{backend=null,generation=null,
       matchingJobs:audit.jobs.filter(item=>item.generation===current).slice(-4),
       matchingResults:audit.workerResults.filter(item=>
         item.generation===current).slice(-4)};
-  },{backend,generation:selected.generation,minimumGeneration,missingBeforeFrames});
+  },{backend,generation:selected.generation,minimumGeneration,
+    missingBeforeFrames,allowReused});
   assert.ok(evidence.accepted&&evidence.peakRms>.01&&
     evidence.advanceFrames>0,JSON.stringify(evidence));
   return evidence;
@@ -114,8 +121,18 @@ async function waitForWorkerPCM(page,{backend=null,generation=null,
 test("individual-period Worker plays through one shared PCM Worklet in Chrome",async()=>{
   const port=18749;
   const server=spawn(process.env.PYTHON||"python3",
-    ["-m","http.server",String(port),"--bind","127.0.0.1"],{
-    cwd:path.resolve("web-demo"),stdio:"ignore"
+    ["-c","import sys; from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler; ThreadingHTTPServer(('127.0.0.1', int(sys.argv[1])), SimpleHTTPRequestHandler).serve_forever()",
+      String(port)],{
+    cwd:path.resolve("web-demo"),stdio:["ignore","ignore","pipe"]
+  });
+  const serverDiagnostics={spawnError:null,exitCode:null,signal:null,stderr:[]};
+  server.on("error",error=>{serverDiagnostics.spawnError=error.message;});
+  server.on("exit",(code,signal)=>{
+    serverDiagnostics.exitCode=code;serverDiagnostics.signal=signal;
+  });
+  server.stderr?.on("data",chunk=>{
+    serverDiagnostics.stderr.push(...String(chunk).split(/\r?\n/).filter(Boolean));
+    serverDiagnostics.stderr=serverDiagnostics.stderr.slice(-12);
   });
   let browser;
   try{
@@ -127,6 +144,9 @@ test("individual-period Worker plays through one shared PCM Worklet in Chrome",a
     });
     const page=await browser.newPage();
     const pageErrors=[];
+    const requestFailures=[];
+    page.on("requestfailed",request=>requestFailures.push({url:request.url(),
+      error:request.failure()?.errorText}));
     page.on("pageerror",error=>pageErrors.push(error.message));
     page.on("console",message=>{
       if(message.type()==="error"&&
@@ -223,7 +243,8 @@ test("individual-period Worker plays through one shared PCM Worklet in Chrome",a
             transferSize:entry.transferSize}))
       }));
       throw Error("Audio Lab boot did not become ready: "+
-        JSON.stringify({bootDiagnostic,pageErrors}),{cause:error});
+        JSON.stringify({bootDiagnostic,pageErrors,requestFailures,
+          server:{pid:server.pid,...serverDiagnostics}}),{cause:error});
     }
     await page.evaluate(async()=>{
       const select=document.querySelector("#lab-model");
@@ -581,7 +602,10 @@ test("individual-period Worker plays through one shared PCM Worklet in Chrome",a
     const seekPoint={x:wave.x+wave.width*.75,y:wave.y+wave.height/2};
     const seekGenerationBefore=await page.evaluate(()=>window.__labAudit.messages
       .filter(message=>message.type==="worker-state-activated").at(-1)?.generation??0);
-    const seekStartedAt=await page.evaluate(()=>performance.now());
+    const seekRequest=await page.evaluate(()=>({
+      performanceTime:performance.now(),
+      audioTime:window.__labAudit.audioContext.currentTime
+    }));
     await page.mouse.click(seekPoint.x,seekPoint.y);
     try{
       await page.waitForFunction(({generation,target})=>window.__labAudit.messages.some(message=>
@@ -610,7 +634,8 @@ test("individual-period Worker plays through one shared PCM Worklet in Chrome",a
       console.log("Chrome seek acceptance diagnostic",JSON.stringify({diagnostic,pageErrors}));
       throw error;
     }
-    const seekResult=await page.evaluate(({target,startedAt,generation})=>{
+    const seekResult=await page.evaluate(({target,startedAt,
+      startedAudioTime,generation})=>{
       const activated=window.__labAudit.messages
         .filter(message=>message.type==="worker-state-activated"&&
           message.generation>generation&&
@@ -618,16 +643,57 @@ test("individual-period Worker plays through one shared PCM Worklet in Chrome",a
       const staged=window.__labAudit.messages.findLast(message=>
         message.type==="worker-state-staged"&&
         message.generation===activated?.generation);
+      const targetJobs=window.__labAudit.jobs.filter(item=>
+        item.generation===activated?.generation&&
+        item.planStart===staged?.sourceFrame);
+      const job=targetJobs[0];
+      const result=job&&window.__labAudit.workerResults.findLast(item=>
+        item.job===job.job&&item.generation===activated?.generation);
+      const installed=window.__labAudit.messages.findLast(message=>
+        message.type==="rendered-chunk-accepted"&&
+        message.generation===activated?.generation&&
+        message.startFrame===job?.planStart&&
+        message.endFrame===job?.planEnd&&!message.stale);
       return {generation:activated?.generation,
         activationLatencyMs:activated?.receivedAt-startedAt,
         missingFramesAtActivation:activated?.missingFrames,
         bufferedSegmentsAtStage:staged?.bufferedSegments,
-        bufferedSegmentsAtActivation:activated?.bufferedSegments};
-    },{target:targetFrames.seek,startedAt:seekStartedAt,
+        bufferedSegmentsAtActivation:activated?.bufferedSegments,
+        reusedChunks:staged?.reusedChunks||0,
+        workerJobsForTarget:targetJobs.length,
+        latencyBreakdown:{
+          requestToStageAudioMs:(staged?.stageAudioTime-startedAudioTime)*1000,
+          requestToWorkletCommandMs:
+            (staged?.stageRequestAudioTime-startedAudioTime)*1000,
+          workletCommandToStageMs:
+            (staged?.stageAudioTime-staged?.stageRequestAudioTime)*1000,
+          requestToStageMessageMs:staged?.receivedAt-startedAt,
+          stageMessageToWorkerStartMs:job?
+            job.sentAt-staged.receivedAt:null,
+          workerRoundTripMs:result?
+            result.receivedAt-job.sentAt:null,
+          workerElapsedMs:result?.workerElapsedMs??null,
+          workerResultToPCMReadyMs:result&&installed?
+            installed.receivedAt-result.receivedAt:null,
+          pcmReadyToActivationMs:installed&&activated?
+            activated.receivedAt-installed.receivedAt:null,
+          resultToActivationMs:result&&activated?
+            activated.receivedAt-result.receivedAt:null,
+          requestToActivationAudioMs:
+            (activated?.activationAudioTime-startedAudioTime)*1000,
+          requestToActivationMessageMs:activated?.receivedAt-startedAt
+        }};
+    },{target:targetFrames.seek,startedAt:seekRequest.performanceTime,
+      startedAudioTime:seekRequest.audioTime,
       generation:seekGenerationBefore});
+    assert.ok(Number.isFinite(seekResult.latencyBreakdown?.requestToStageAudioMs),
+      "seek timing must report request-to-Worklet staging: "+
+        JSON.stringify(seekResult));
+    assert.equal(seekResult.reusedChunks,1,JSON.stringify(seekResult));
+    assert.equal(seekResult.workerJobsForTarget,0,JSON.stringify(seekResult));
     const seekGeneration=seekResult.generation;
     const seekPcmEvidence=await waitForWorkerPCM(page,{generation:seekGeneration,
-      missingBeforeFrames:missingBeforeSeek});
+      missingBeforeFrames:missingBeforeSeek,allowReused:true});
     const seekTransitionMissingFrames=Math.max(0,
       (seekResult.missingFramesAtActivation||0)-missingBeforeSeek);
     assert.equal(seekPcmEvidence.missingFrames,0,
@@ -638,13 +704,17 @@ test("individual-period Worker plays through one shared PCM Worklet in Chrome",a
     const missingBeforeLoop=await page.evaluate(()=>window.__labAudit.messages
       .filter(message=>message.type==="progress"&&
         message.processingMode==="worker").at(-1)?.missingFrames||0);
-    const loopSeekStartedAt=await page.evaluate(()=>performance.now());
+    const loopSeekRequest=await page.evaluate(()=>({
+      performanceTime:performance.now(),
+      audioTime:window.__labAudit.audioContext.currentTime
+    }));
     await page.mouse.click(wave.x+wave.width*.98,wave.y+wave.height/2);
     await page.waitForFunction(({generation,target})=>window.__labAudit.messages.some(message=>
       message.type==="worker-state-activated"&&message.generation>generation&&
       Math.abs(message.sourceFrame-target)<=100),
       {timeout:10000},{generation:seekGeneration,target:targetFrames.nearEnd});
-    const loopSeekResult=await page.evaluate(({target,startedAt,generation})=>{
+    const loopSeekResult=await page.evaluate(({target,startedAt,
+      startedAudioTime,generation})=>{
       const activated=window.__labAudit.messages
         .filter(message=>message.type==="worker-state-activated"&&
           message.generation>generation&&
@@ -652,14 +722,71 @@ test("individual-period Worker plays through one shared PCM Worklet in Chrome",a
       const staged=window.__labAudit.messages.findLast(message=>
         message.type==="worker-state-staged"&&
         message.generation===activated?.generation);
+      const targetJobs=window.__labAudit.jobs.filter(item=>
+        item.generation===activated?.generation&&
+        item.planStart===staged?.sourceFrame);
+      const job=targetJobs[0];
+      const result=job&&window.__labAudit.workerResults.findLast(item=>
+        item.job===job.job&&item.generation===activated?.generation);
+      const installed=window.__labAudit.messages.findLast(message=>
+        message.type==="rendered-chunk-accepted"&&
+        message.generation===activated?.generation&&
+        message.startFrame===job?.planStart&&
+        message.endFrame===job?.planEnd&&!message.stale);
       return {generation:activated?.generation,
         activationLatencyMs:activated?.receivedAt-startedAt,
         missingFramesAtActivation:activated?.missingFrames,
         bufferedSegmentsAtStage:staged?.bufferedSegments,
-        bufferedSegmentsAtActivation:activated?.bufferedSegments};
-    },{target:targetFrames.nearEnd,startedAt:loopSeekStartedAt,
+        bufferedSegmentsAtActivation:activated?.bufferedSegments,
+        reusedChunks:staged?.reusedChunks||0,
+        workerJobsForTarget:targetJobs.length,
+        latencyBreakdown:{
+          requestToStageAudioMs:(staged?.stageAudioTime-startedAudioTime)*1000,
+          requestToWorkletCommandMs:
+            (staged?.stageRequestAudioTime-startedAudioTime)*1000,
+          workletCommandToStageMs:
+            (staged?.stageAudioTime-staged?.stageRequestAudioTime)*1000,
+          requestToStageMessageMs:staged?.receivedAt-startedAt,
+          stageMessageToWorkerStartMs:job?
+            job.sentAt-staged.receivedAt:null,
+          workerRoundTripMs:result?
+            result.receivedAt-job.sentAt:null,
+          workerElapsedMs:result?.workerElapsedMs??null,
+          workerResultToPCMReadyMs:result&&installed?
+            installed.receivedAt-result.receivedAt:null,
+          pcmReadyToActivationMs:installed&&activated?
+            activated.receivedAt-installed.receivedAt:null,
+          resultToActivationMs:result&&activated?
+            activated.receivedAt-result.receivedAt:null,
+          requestToActivationAudioMs:
+            (activated?.activationAudioTime-startedAudioTime)*1000,
+          requestToActivationMessageMs:activated?.receivedAt-startedAt
+        }};
+    },{target:targetFrames.nearEnd,startedAt:loopSeekRequest.performanceTime,
+      startedAudioTime:loopSeekRequest.audioTime,
       generation:seekGeneration});
     const loopGeneration=loopSeekResult.generation;
+    const measuredLatencyPhases=["requestToStageAudioMs",
+      "requestToWorkletCommandMs","workletCommandToStageMs",
+      "requestToStageMessageMs","requestToActivationAudioMs",
+      "requestToActivationMessageMs"];
+    const workerLatencyPhases=["stageMessageToWorkerStartMs",
+      "workerRoundTripMs","workerElapsedMs","workerResultToPCMReadyMs",
+      "pcmReadyToActivationMs","resultToActivationMs"];
+    for(const [label,result] of [["seek",seekResult],
+      ["near-end loop",loopSeekResult]]){
+      assert.ok(measuredLatencyPhases.every(key=>
+        Number.isFinite(result.latencyBreakdown?.[key])),
+        `${label} timing has incomplete transition events: `+
+          JSON.stringify(result));
+      if(result.reusedChunks===0)
+        assert.ok(workerLatencyPhases.every(key=>
+          Number.isFinite(result.latencyBreakdown?.[key])),
+          `${label} Worker timing is incomplete: `+JSON.stringify(result));
+      else assert.equal(result.workerJobsForTarget,0,
+        `${label} reused PCM but rerendered its target: `+
+          JSON.stringify(result));
+    }
     await page.waitForFunction(({generation,totalFrames})=>{
       const progress=window.__labAudit.messages.filter(message=>
         message.type==="progress"&&message.workerGeneration===generation);
@@ -741,8 +868,14 @@ test("individual-period Worker plays through one shared PCM Worklet in Chrome",a
       generationUpdates:evidence.workletStates.length,
       maxObservedUnderrunFrames:evidence.maxMissingFrames,
       seekActivationLatencyMs:seekResult.activationLatencyMs,
+      seekLatencyBreakdown:seekResult.latencyBreakdown,
+      seekReusedChunks:seekResult.reusedChunks,
+      seekWorkerJobsForTarget:seekResult.workerJobsForTarget,
       seekTransitionMissingFrames,seekPostActivationMissingFrames,
       loopSeekActivationLatencyMs:loopSeekResult.activationLatencyMs,
+      loopSeekLatencyBreakdown:loopSeekResult.latencyBreakdown,
+      loopSeekReusedChunks:loopSeekResult.reusedChunks,
+      loopSeekWorkerJobsForTarget:loopSeekResult.workerJobsForTarget,
       loopSeekMissingAtActivation:Math.max(0,
         (loopSeekResult.missingFramesAtActivation||0)-missingBeforeLoop),
       seekFrame:recovery.sourceFrames.at(-1),

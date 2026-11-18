@@ -109,19 +109,24 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
              !Number.isSafeInteger(m.generation)||
              m.generation<=this.workerGeneration||
              !Number.isSafeInteger(m.requiredChunks)||
-             m.requiredChunks<1||m.requiredChunks>RENDERED_CHUNK_SLOTS)
+             m.requiredChunks<1||m.requiredChunks>RENDERED_CHUNK_SLOTS||
+             m.reuseCompatible!==undefined&&
+               typeof m.reuseCompatible!=="boolean")
             throw RangeError("invalid staged legacy Worker seek");
           const staged=this.renderer.stageRenderedSeekState({
             generation:m.generation,frame:m.frame,speed:m.speed,
             pitchSemitones:m.pitchSemitones,
-            requiredChunks:m.requiredChunks
+            requiredChunks:m.requiredChunks,
+            reuseCompatible:m.reuseCompatible===true
           });
           this.workerSeekRequestId=m.requestId;
           this.port.postMessage({type:"worker-state-staged",
             requestId:m.requestId,generation:m.generation,
             sourceFrame:staged.sourceFrame,sequence:staged.sequence,
+            nextFrame:staged.nextFrame,nextSequence:staged.nextSequence,
             speed:m.speed,pitchSemitones:m.pitchSemitones,
             bufferedSegments:staged.bufferedSegments,
+            reusedChunks:staged.reusedChunks,
             stageRequestAudioTime:m.requestAudioTime,
             stageAudioTime:currentTime});
           return;
