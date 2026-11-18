@@ -67,19 +67,31 @@ function observationFit(signal,sr,f,centers,K){
  let cc=0,cs=0,ss=0,yc=0,ys=0,energy=0;
  const half=theoreticalWindow(f,K)/2;
  const phaseStep=TAU*f/sr,stepCos=Math.cos(phaseStep),stepSin=Math.sin(phaseStep);
+ const windowStep=Math.PI/(sr*half),windowStepCos=Math.cos(windowStep),
+  windowStepSin=Math.sin(windowStep);
  for(const center of centers){
   const {firstSample,endSample}=sampleInterval(center,f,sr,K);
   const loopStart=Math.max(0,firstSample);
   let x=Math.cos(phaseStep*loopStart),y=Math.sin(phaseStep*loopStart);
+  const firstPosition=(loopStart/sr-center)/half;
+  let windowCos=Math.cos(Math.PI*firstPosition),windowSin=Math.sin(Math.PI*firstPosition);
   for(let i=Math.max(0,firstSample);i<Math.min(signal.length,endSample);i++){
    const t=i/sr,position=(t-center)/half;
    if(Math.abs(position)<1){
-    const w=.5+.5*Math.cos(Math.PI*position),sample=signal[i];
+    const w=.5+.5*windowCos,sample=signal[i];
     cc+=w*x*x;cs+=w*x*y;ss+=w*y*y;yc+=w*sample*x;ys+=w*sample*y;
     energy+=w*sample*sample;
    }
+   const nextWindowCos=windowCos*windowStepCos-windowSin*windowStepSin;
+   windowSin=windowSin*windowStepCos+windowCos*windowStepSin;
+   windowCos=nextWindowCos;
    const nextX=x*stepCos-y*stepSin;
    y=y*stepCos+x*stepSin;x=nextX;
+   if(((i-loopStart)&1023)===1023){
+    const nextPosition=((i+1)/sr-center)/half;
+    windowCos=Math.cos(Math.PI*nextPosition);
+    windowSin=Math.sin(Math.PI*nextPosition);
+   }
    if((i&4095)===4095){
     x=Math.cos(phaseStep*(i+1));y=Math.sin(phaseStep*(i+1));
    }

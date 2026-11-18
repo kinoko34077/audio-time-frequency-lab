@@ -56,3 +56,15 @@ test('noise-only can be rendered without inventing a unique physical source',()=
  assert.ok(allFinite(r.channels));
  assert.equal(r.channels[0].length,Math.round(sr/1.1));
 });
+test('shared partial estimation bounds per-sample trigonometry on close piano-like tones',()=>{
+ const x=Float32Array.from({length:sr*1.5},(_,i)=>
+  .22*Math.cos(2*Math.PI*440*i/sr)+.19*Math.cos(2*Math.PI*441*i/sr));
+ const original=Math.cos;
+ let calls=0,estimate;
+ Math.cos=value=>{calls++;return original(value)};
+ try{estimate=estimateSharedPartials({channels:[x],sampleRate:sr});}
+ finally{Math.cos=original;}
+ assert.ok(estimate.partials.some(p=>Math.abs(p.frequency-440)<.1));
+ assert.ok(estimate.partials.some(p=>Math.abs(p.frequency-441)<.1));
+ assert.ok(calls<1_000_000,`unexpected Math.cos count ${calls}`);
+});
