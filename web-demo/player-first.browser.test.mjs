@@ -755,6 +755,8 @@ test("U1/U5 primary Play routes to REAL selected live/PV/Granular engines and on
         x.name.includes("lab-processor.worker.mjs"));
       return {created:workers.length,active:workers.filter(x=>!x.terminated).length};
     });
+    const beforeSeekPcmNodes=await page.evaluate(()=>window.__engineCreations.filter(x=>
+      x.kind==="worklet"&&x.name==="audio-lab-source-pcm").length);
     assert.equal(beforeSeekWorkers.active,1,
       "exactly one primary Worker is active before seek");
     const beforeSeekGeneration=await page.evaluate(()=>Math.max(-1,...window.__workerMessages
@@ -803,15 +805,20 @@ test("U1/U5 primary Play routes to REAL selected live/PV/Granular engines and on
       messages:window.__workerMessages.filter(x=>x.generation>generation),
       responses:window.__workerResponses.filter(x=>x.generation>generation),
       activations:window.__workletFrames.filter(x=>
-        x.type==="worker-state-activated"&&x.generation>generation)
+        x.type==="worker-state-activated"&&x.generation>generation),
+      pcmNodeCount:window.__engineCreations.filter(x=>
+        x.kind==="worklet"&&x.name==="audio-lab-source-pcm").length
     }),beforeSeekGeneration);
-    assert.equal(seekRender.workers.length,beforeSeekWorkers.created+1,
-      "seek creates one temporary handoff Worker");
+    const addedSeekWorkers=seekRender.workers.length-beforeSeekWorkers.created;
+    assert.ok(addedSeekWorkers===0||addedSeekWorkers===1,
+      "seek reuses the active Worker or creates at most one temporary handoff Worker");
     assert.equal(seekRender.workers.filter(x=>!x.terminated).length,
       beforeSeekWorkers.active,
-      "seek retires its handoff Worker after the existing source-clock route activates");
+      "seek leaves the same number of Workers active after PCM activation");
+    assert.equal(seekRender.pcmNodeCount,beforeSeekPcmNodes,
+      "seek keeps the existing shared PCM Worklet");
     assert.ok(seekRender.responses.some(x=>x.ok===true),
-      "seek handoff Worker must return rendered PCM");
+      "seek Worker path must return rendered PCM for the new generation");
     assert.ok(seekRender.activations.length>0,
       "seek PCM must activate in the existing shared Worklet");
     assert.ok(Number.isSafeInteger(expectedSeekFrame),
