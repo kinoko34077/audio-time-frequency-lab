@@ -41,6 +41,16 @@ test('pure off-grid 440.4Hz does not get hallucinated as two partials',()=>{
  const p=detectClosePair({channels:[x],sampleRate:Fs,peakFrequency:440.4});
  assert.equal(p,null,'one oscillator should not be split in two');
 });
+test('close-pair search advances sinusoids recursively across PCM samples',()=>{
+ const x=tone([[440,.19,.2],[441,.19,1]],1.6);
+ const sin=Math.sin,cos=Math.cos;let calls=0,fit;
+ Math.sin=value=>{calls++;return sin(value);};
+ Math.cos=value=>{calls++;return cos(value);};
+ try{fit=detectClosePair({channels:[x],sampleRate:Fs,peakFrequency:440.5});}
+ finally{Math.sin=sin;Math.cos=cos;}
+ assert.ok(fit,'the optimization must retain the detected close pair');
+ assert.ok(calls<10000,`per-sample trigonometry remains: ${calls} calls`);
+});
 test('time stretch and independent pitch preserve close tones at adjacent preview chunks',()=>{
  const duration=Fs*4,speed=.8,semi=3,p=2**(semi/12);
  const source=tone([[440,.18,.1],[441,.18,.7]],4);

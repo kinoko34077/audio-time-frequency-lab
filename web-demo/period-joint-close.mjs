@@ -24,12 +24,22 @@ function solve(matrix,vector){
 }
 function pairFit(ch,sr,f1,f2,stride=1){
  const m=Array.from({length:4},()=>[0,0,0,0]),v=[0,0,0,0];
- let energy=0;
+ let energy=0,count=0;
+ const step1=TAU*f1*stride/sr,step2=TAU*f2*stride/sr;
+ const c1s=Math.cos(step1),s1s=Math.sin(step1),
+  c2s=Math.cos(step2),s2s=Math.sin(step2);
+ let c1=1,s1=0,c2=1,s2=0;
  for(let i=0;i<ch.length;i+=stride){
-  const time=i/sr,p1=TAU*f1*time,p2=TAU*f2*time;
-  const q=[Math.cos(p1),Math.sin(p1),Math.cos(p2),Math.sin(p2)],y=ch[i];
+  const q=[c1,s1,c2,s2],y=ch[i];
   energy+=y*y;
   for(let a=0;a<4;a++){v[a]+=q[a]*y;for(let b=0;b<=a;b++)m[a][b]+=q[a]*q[b];}
+  const n1=c1*c1s-s1*s1s; s1=s1*c1s+c1*s1s; c1=n1;
+  const n2=c2*c2s-s2*s2s; s2=s2*c2s+c2*s2s; c2=n2;
+  if((++count&1023)===0){
+   const next=i+stride;
+   const p1=TAU*f1*next/sr,p2=TAU*f2*next/sr;
+   c1=Math.cos(p1);s1=Math.sin(p1);c2=Math.cos(p2);s2=Math.sin(p2);
+  }
  }
  for(let a=0;a<4;a++)for(let b=a+1;b<4;b++)m[a][b]=m[b][a];
  const x=solve(m,v);
@@ -40,9 +50,17 @@ function pairFit(ch,sr,f1,f2,stride=1){
 }
 function singleFit(ch,sr,f,stride){
  let cc=0,cs=0,ss=0,cy=0,sy=0,energy=0;
+ const step=TAU*f*stride/sr,stepCos=Math.cos(step),stepSin=Math.sin(step);
+ let x=1,y=0,count=0;
  for(let i=0;i<ch.length;i+=stride){
-  const angle=TAU*f*i/sr,c=Math.cos(angle),s=Math.sin(angle),y=ch[i];
-  cc+=c*c;cs+=c*s;ss+=s*s;cy+=c*y;sy+=s*y;energy+=y*y;
+  const sample=ch[i];
+  cc+=x*x;cs+=x*y;ss+=y*y;cy+=x*sample;sy+=y*sample;energy+=sample*sample;
+  const next=x*stepCos-y*stepSin;
+  y=y*stepCos+x*stepSin;x=next;
+  if((++count&1023)===0){
+   const phase=TAU*f*(i+stride)/sr;
+   x=Math.cos(phase);y=Math.sin(phase);
+  }
  }
  const d=cc*ss-cs*cs;
  if(d<1e-12)return {residual:energy,energy};
