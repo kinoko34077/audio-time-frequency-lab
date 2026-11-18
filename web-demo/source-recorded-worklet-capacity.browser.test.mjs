@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {spawn} from "node:child_process";
 import path from "node:path";
 import puppeteer from "puppeteer-core";
+import {cleanupTestProcesses} from "./test-process-cleanup.mjs";
 
 // #36 R2: same checksum-verified, rights-cleared recorded piano as the
 // offline source-reference suite. Exercise the ACTUAL AudioWorklet render
@@ -22,7 +23,7 @@ test("recorded ultrashort loops: real Chrome Worklet PCM, source oracle and WebA
     browser=await puppeteer.launch({
       executablePath:process.env.CHROME_BIN||"/usr/bin/google-chrome",
       headless:true,args:["--no-sandbox","--disable-dev-shm-usage",
-        "--autoplay-policy=no-user-gesture-required"]
+        "--autoplay-policy=no-user-gesture-required", "--mute-audio"]
     });
     const page=await browser.newPage(),errors=[],contexts=[];
     page.on("pageerror",error=>errors.push(error.message));
@@ -315,5 +316,5 @@ test("recorded ultrashort loops: real Chrome Worklet PCM, source oracle and WebA
       interpretation:"Chrome graph-wide renderCapacity and callback interval; NOT per-quantum execution-time or device DAC/glitch guarantee",
       shortLoopContract:"raw source-step oracle permits original A/B edge jumps; granular nonzero finite and missing/receipt only"
     }));
-  }finally{await browser?.close();server.kill("SIGTERM");}
+  }finally{await cleanupTestProcesses(browser,[server],"recorded capacity HTTP server");}
 });

@@ -9,6 +9,7 @@ import {mkdtemp,writeFile,rm} from "node:fs/promises";
 import {tmpdir} from "node:os";
 import {join,resolve} from "node:path";
 import puppeteer from "puppeteer-core";
+import {cleanupTestProcesses} from "./test-process-cleanup.mjs";
 
 function shortWav(seconds=1){
   const rate=16000,frames=Math.max(1,Math.round(rate*seconds)),wav=Buffer.alloc(44+frames*2);
@@ -33,7 +34,7 @@ test("Pages entry: mobile settings opens and tapping the visible source opens na
     browser=await puppeteer.launch({
       executablePath:process.env.CHROME_BIN||"/usr/bin/google-chrome",
       headless:true,
-      args:["--no-sandbox","--disable-dev-shm-usage","--autoplay-policy=no-user-gesture-required"]
+      args:["--no-sandbox","--disable-dev-shm-usage","--autoplay-policy=no-user-gesture-required", "--mute-audio"]
     });
     const page=await browser.newPage();
     await page.setViewport({width:390,height:844,deviceScaleFactor:2,isMobile:true,hasTouch:true});
@@ -176,8 +177,7 @@ test("Pages entry: mobile settings opens and tapping the visible source opens na
     }
     await page.close();
   }finally{
-    if(browser)await browser.close();
-    if(server)server.kill("SIGTERM");
-    await rm(root,{recursive:true,force:true});
+    try{await cleanupTestProcesses(browser,[server],"entry smoke HTTP server");}
+    finally{await rm(root,{recursive:true,force:true});}
   }
 });

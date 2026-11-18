@@ -3,8 +3,12 @@ import assert from "node:assert/strict";
 import {spawn} from "node:child_process";
 import path from "node:path";
 import puppeteer from "puppeteer-core";
+import {cleanupTestProcesses} from "./test-process-cleanup.mjs";
+import {installTestAudioSilenceGuard} from "./test-audio-silence-guard.mjs";
 
 const WAV=path.resolve("web-demo/test-fixtures/meta-piano-a0-cc0-3s-48khz.wav");
+const pythonCommand=process.env.PYTHON||"python3";
+const webRoot=path.resolve(process.env.WARP_WEB_ROOT||"_site");
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 
 // End-to-end R2/R3 observation: use the published player, not a laboratory
@@ -14,19 +18,23 @@ const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 // This does not measure a phone DAC or certify perceptual fidelity.
 test("recorded piano main player: gesture/parameter receipts AND actual output PCM",async()=>{
   const port=18791;
-  const server=spawn("python3",["-m","http.server",String(port),"--bind","127.0.0.1"],{
-    cwd:path.resolve("_site"),stdio:"ignore"
+  const server=spawn(pythonCommand,["-m","http.server",String(port),"--bind","127.0.0.1"],{
+    cwd:webRoot,stdio:"ignore"
   });
   let browser;
   try{
     browser=await puppeteer.launch({
       executablePath:process.env.CHROME_BIN||"/usr/bin/google-chrome",
       headless:true,args:["--no-sandbox","--disable-dev-shm-usage",
-        "--autoplay-policy=no-user-gesture-required"]
+        "--autoplay-policy=no-user-gesture-required", "--mute-audio"]
     });
     const page=await browser.newPage(),errors=[];
     page.on("pageerror",error=>errors.push(error.message));
-    await page.evaluateOnNewDocument(()=>{
+    await page.evaluateOnNewDocument(guardSource=>{
+      const audit={mutedOutputRoutes:0,audioOutputMuteGain:null,
+        audioOutputMuteGains:[]};
+      window.__audioSilenceAudit=audit;
+      (0,eval)(`(${guardSource})`)(window,audit);
       const nativeConnect=AudioNode.prototype.connect;
       window.__audioOutputPaths=[];
       AudioNode.prototype.connect=function(destination,...rest){
@@ -47,7 +55,7 @@ test("recorded piano main player: gesture/parameter receipts AND actual output P
         }
         return nativeConnect.call(this,destination,...rest);
       };
-    });
+    },installTestAudioSilenceGuard.toString());
     await page.goto("http://127.0.0.1:"+port+"/",{
       waitUntil:"domcontentloaded",timeout:20000
     });
@@ -81,6 +89,16 @@ test("recorded piano main player: gesture/parameter receipts AND actual output P
     await page.waitForFunction(()=>document.querySelector("#granular-optin-status")
       ?.dataset.renderRunning==="true",{timeout:20000});
     await page.waitForFunction(()=>window.__audioOutputPaths?.length>=2,{timeout:20000});
+    const outputSilence=await page.evaluate(()=>({
+      kinds:[...new Set(window.__audioOutputPaths.map(({kind})=>kind))],
+      routeCount:window.__audioSilenceAudit.mutedOutputRoutes,
+      gains:window.__audioSilenceAudit.audioOutputMuteGains
+    }));
+    assert.ok(outputSilence.kinds.includes("direct")&&
+      outputSilence.kinds.includes("media"),outputSilence);
+    assert.equal(outputSilence.gains.length,outputSilence.routeCount,outputSilence);
+    assert.ok(outputSilence.gains.length>=2&&
+      outputSilence.gains.every(value=>value===0),outputSilence);
     const route=await page.$eval("#rt-telemetry",el=>el.dataset.pcmTransport);
     assert.equal(route,"spectral-realtime",
       "recorded music must use real selected STFT audio Worklet, not Granular");
@@ -343,7 +361,7 @@ test("recorded piano main player: gesture/parameter receipts AND actual output P
       scope:"CHROMIUM_WEB_AUDIO_OUTPUT_PCMC_SAMPLES_NOT_PHYSICAL_DAC"
     }));
     await page.click("#stop");
-  }finally{await browser?.close();server.kill("SIGTERM");}
+  }finally{await cleanupTestProcesses(browser,[server],"audio output HTTP server");}
 });
 
 for(const profile of [
@@ -354,20 +372,28 @@ for(const profile of [
 ]){
 test(`native Chrome actual ${profile.model} output follows 0×, reverse and signed scratch on ONE Worklet`,async()=>{
   const port=profile.port;
-  const server=spawn("python3",["-m","http.server",String(port),"--bind","127.0.0.1"],{
-    cwd:path.resolve("_site"),stdio:"ignore"
+  const server=spawn(pythonCommand,["-m","http.server",String(port),"--bind","127.0.0.1"],{
+    cwd:webRoot,stdio:"ignore"
   });
   let browser;
   try{
     browser=await puppeteer.launch({
       executablePath:process.env.CHROME_BIN||"/usr/bin/google-chrome",
       headless:true,args:["--no-sandbox","--disable-dev-shm-usage",
-        "--autoplay-policy=no-user-gesture-required"]
+        "--autoplay-policy=no-user-gesture-required", "--mute-audio"]
     });
-    const page=await browser.newPage(),errors=[];
+    const page=await browser.newPage(),errors=[],failedRequests=[];
     page.on("pageerror",e=>errors.push(e.message));
-    await page.evaluateOnNewDocument(()=>{
+    page.on("requestfailed",request=>failedRequests.push({
+      url:request.url(),error:request.failure()?.errorText
+    }));
+    await page.evaluateOnNewDocument(guardSource=>{
+      const audit={mutedOutputRoutes:0,audioOutputMuteGain:null,
+        audioOutputMuteGains:[]};
+      window.__pvSilenceAudit=audit;
+      (0,eval)(`(${guardSource})`)(window,audit);
       window.__pvAnalysers=[];window.__pvScratch=[];
+      window.__pvOutputRoutes={direct:0,media:0};
       const connect=AudioNode.prototype.connect;
       AudioNode.prototype.connect=function(target,...args){
         const media=typeof MediaStreamAudioDestinationNode!=="undefined"&&
@@ -376,6 +402,7 @@ test(`native Chrome actual ${profile.model} output follows 0×, reverse and sign
           const analyser=this.context.createAnalyser();analyser.fftSize=2048;
           connect.call(this,analyser,...args);connect.call(analyser,target);
           window.__pvAnalysers.push(analyser);
+          window.__pvOutputRoutes[media?"media":"direct"]++;
           return target;
         }
         return connect.call(this,target,...args);
@@ -388,11 +415,24 @@ test(`native Chrome actual ${profile.model} output follows 0×, reverse and sign
             speed:message.speed});
         return post.call(this,message,...args);
       };
-    });
+    },installTestAudioSilenceGuard.toString());
     await page.goto(`http://127.0.0.1:${port}/`,{
       waitUntil:"domcontentloaded",timeout:20000
     });
-    await page.waitForFunction(()=>document.documentElement.dataset.fwBoot==="ready",{timeout:20000});
+    try{
+      await page.waitForFunction(()=>document.documentElement.dataset.fwBoot==="ready",
+        {timeout:20000});
+    }catch(error){
+      const boot=await page.evaluate(()=>({
+        state:document.documentElement.dataset.fwBoot,
+        body:document.body?.innerText?.slice(0,1000),
+        status:document.querySelector("#status")?.textContent,
+        scripts:[...document.scripts].map(script=>script.src||"inline")
+      }));
+      throw Error("Audio Lab did not finish booting: "+JSON.stringify({
+        boot,errors,failedRequests
+      })+" / "+error.message);
+    }
     await (await page.$("#audio-file")).uploadFile(WAV);
     await page.waitForSelector("#play-main:not([disabled])",{timeout:15000});
     const set=(id,value)=>page.$eval("#"+id,(el,v)=>{
@@ -407,6 +447,16 @@ test(`native Chrome actual ${profile.model} output follows 0×, reverse and sign
       ?.dataset.pcmTransport===route&&
       document.querySelector("#granular-optin-status")?.dataset.renderRunning==="true",
       {timeout:20000},profile.route);
+    await page.waitForFunction(()=>window.__pvOutputRoutes?.direct>0&&
+      window.__pvOutputRoutes?.media>0,{timeout:10000});
+    const outputSilence=await page.evaluate(()=>({
+      routes:window.__pvOutputRoutes,
+      routeCount:window.__pvSilenceAudit.mutedOutputRoutes,
+      gains:window.__pvSilenceAudit.audioOutputMuteGains
+    }));
+    assert.equal(outputSilence.gains.length,outputSilence.routeCount,outputSilence);
+    assert.ok(outputSilence.gains.length>=2&&
+      outputSilence.gains.every(value=>value===0),outputSilence);
     const start=Number(await page.$eval("#rt-telemetry",e=>e.dataset.pcmNodeStarts));
     const sound=()=>page.evaluate(()=>{
       const v=(window.__pvAnalysers||[]).map(analyser=>{
@@ -488,6 +538,6 @@ test(`native Chrome actual ${profile.model} output follows 0×, reverse and sign
       positive,frozen,reverse,dragCommands:thrown.length,
       inertiaSpeeds:inertia.map(x=>x.speed),nodeStarts:start
     }));
-  }finally{await browser?.close();server.kill("SIGTERM");}
+  }finally{await cleanupTestProcesses(browser,[server],"audio gesture HTTP server");}
 });
 }

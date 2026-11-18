@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {spawn} from "node:child_process";
 import path from "node:path";
 import puppeteer from "puppeteer-core";
+import {cleanupTestProcesses} from "./test-process-cleanup.mjs";
 
 test("live Audio Lab routes the selected Rust model through the shared PCM node",async()=>{
   // Verify the production entry point with a user-shaped native WAV file,
@@ -18,7 +19,7 @@ test("live Audio Lab routes the selected Rust model through the shared PCM node"
     browser=await puppeteer.launch({
       executablePath:process.env.CHROME_BIN||"/usr/bin/google-chrome",
       headless:true,args:["--no-sandbox","--disable-dev-shm-usage",
-        "--autoplay-policy=no-user-gesture-required"]
+        "--autoplay-policy=no-user-gesture-required", "--mute-audio"]
     });
     const page=await browser.newPage();
     const errors=[];
@@ -242,7 +243,6 @@ test("live Audio Lab routes the selected Rust model through the shared PCM node"
       ?.dataset.pcmTransport,{timeout:10000});
     assert.deepEqual(errors,[]);
   }finally{
-    await browser?.close();
-    server.kill();
+    await cleanupTestProcesses(browser,[server],"PCM player HTTP server");
   }
 });

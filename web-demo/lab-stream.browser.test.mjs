@@ -1,0 +1,977 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import {spawn} from "node:child_process";
+import path from "node:path";
+import puppeteer from "puppeteer-core";
+import {closeBrowserTree,stopChildProcess} from "./test-process-cleanup.mjs";
+import {installTestAudioSilenceGuard} from "./test-audio-silence-guard.mjs";
+
+async function waitForWorkerPCM(page,{backend=null,generation=null,
+  minimumGeneration=0,missingBeforeFrames=null,allowReused=false}={}){
+  let matchHandle;
+  try{matchHandle=await page.waitForFunction(expected=>{
+    const audit=window.__labAudit;
+    const generations=expected.generation===null?
+      [...new Set(audit.jobs.filter(job=>
+        job.generation>=expected.minimumGeneration&&
+        (!expected.backend||job.jointBackend===expected.backend))
+        .map(job=>job.generation))]:[expected.generation];
+    const current=generations.find(current=>{
+      const jobs=audit.jobs.filter(item=>item.generation===current&&
+        (!expected.backend||item.jointBackend===expected.backend));
+      const rendered=jobs.findLast(job=>audit.workerResults.some(result=>
+        result.job===job.job&&result.ok)&&audit.messages.some(message=>
+          message.type==="rendered-chunk-accepted"&&
+          message.generation===current&&!message.stale&&
+          message.startFrame===job.planStart&&
+          message.endFrame===job.planEnd));
+      const reused=expected.allowReused&&audit.messages.some(message=>
+        message.type==="worker-state-activated"&&
+        message.generation===current&&message.reusedChunks>0);
+      return reused||rendered&&audit.messages.some(message=>
+          message.type==="progress"&&
+          message.workerGeneration===current);
+    });
+    return current===undefined?false:{generation:current};
+  },{timeout:15000},{backend,generation,minimumGeneration});}
+  catch(error){
+    const diagnostic=await page.evaluate(expected=>{
+      const audit=window.__labAudit;
+      const jobs=audit.jobs.filter(job=>(!expected.backend||
+        job.jointBackend===expected.backend)&&
+        (expected.generation===null||job.generation===expected.generation));
+      const relevantJobs=new Set(jobs.map(job=>job.job));
+      return {selectedModel:document.querySelector("#lab-model")?.value,
+        status:document.querySelector("#lab-status")?.textContent,
+        jobs:jobs.slice(-8),results:audit.workerResults.filter(result=>
+          relevantJobs.has(result.job)).slice(-8),
+        states:audit.messages.filter(message=>
+          message.type==="worker-state-accepted").slice(-8),
+        progress:audit.messages.filter(message=>message.type==="progress"&&
+          message.processingMode==="worker").slice(-8)};
+    },{backend,generation,minimumGeneration});
+    throw Error("Worker PCM evidence timed out: "+JSON.stringify(diagnostic),
+      {cause:error});
+  }
+  const selected=await matchHandle.jsonValue();
+  await matchHandle.dispose();
+  const evidence=await page.evaluate(async expected=>{
+    const audit=window.__labAudit;
+    const current=expected.generation;
+    const jobs=audit.jobs.filter(item=>item.generation===current&&
+      (!expected.backend||item.jointBackend===expected.backend));
+    const job=jobs.findLast(item=>audit.workerResults.some(result=>
+      result.job===item.job&&result.ok)&&audit.messages.some(message=>
+        message.type==="rendered-chunk-accepted"&&
+        message.generation===current&&!message.stale&&
+        message.startFrame===item.planStart&&message.endFrame===item.planEnd));
+    const start=audit.messages.filter(message=>message.type==="progress"&&
+      message.workerGeneration===current).at(-1);
+    let peakRms=0,lastProgress=start,advanceFrames=0;
+    const loopLength=start.loopEndFrame-start.loopStartFrame;
+    const probe=audit.probe,pcm=new Float32Array(probe?.fftSize||0);
+    const deadline=performance.now()+12000;
+    while(performance.now()<deadline){
+      const currentProgress=audit.messages.filter(message=>
+        message.type==="progress"&&message.workerGeneration===current).at(-1);
+      if(currentProgress){
+        let delta=currentProgress.sourceFrame-lastProgress.sourceFrame;
+        if(delta< -loopLength/2)delta+=loopLength;
+        if(delta>0)advanceFrames+=delta;
+        lastProgress=currentProgress;
+      }
+      if(probe&&pcm.length){
+        probe.getFloatTimeDomainData(pcm);
+        const rms=Math.sqrt(pcm.reduce((sum,value)=>sum+value*value,0)/pcm.length);
+        peakRms=Math.max(peakRms,rms);
+      }
+      if(peakRms>.01&&advanceFrames>0)break;
+      await new Promise(resolve=>setTimeout(resolve,100));
+    }
+    return {backend:job?.jointBackend,generation:current,
+      peakRms,advanceFrames,
+      missingFrames:Math.max(0,(lastProgress?.missingFrames||0)-
+        (expected.missingBeforeFrames??start?.missingFrames??0)),
+      accepted:expected.allowReused&&audit.messages.some(message=>
+        message.type==="worker-state-activated"&&
+        message.generation===current&&message.reusedChunks>0)||
+        !!job&&audit.messages.some(message=>
+        message.type==="rendered-chunk-accepted"&&
+        message.generation===current&&!message.stale&&
+        message.startFrame===job.planStart&&message.endFrame===job.planEnd),
+      renderedJob:job?.job,startSourceFrame:start?.sourceFrame,
+      lastSourceFrame:lastProgress?.sourceFrame,
+      missingTotal:lastProgress?.missingFrames||0,
+      firstMissingFrame:lastProgress?.firstMissingFrame,
+      matchingAcks:audit.messages.filter(message=>
+        message.type==="rendered-chunk-accepted"&&
+        message.generation===current).map(({stale,bufferedSegments,
+          startFrame,endFrame,speed,coreFrames,outputFrames})=>({stale,
+          bufferedSegments,startFrame,endFrame,speed,coreFrames,outputFrames})),
+      matchingJobs:audit.jobs.filter(item=>item.generation===current).slice(-4),
+      matchingResults:audit.workerResults.filter(item=>
+        item.generation===current).slice(-4)};
+  },{backend,generation:selected.generation,minimumGeneration,
+    missingBeforeFrames,allowReused});
+  assert.ok(evidence.accepted&&evidence.peakRms>.01&&
+    evidence.advanceFrames>0,JSON.stringify(evidence));
+  return evidence;
+}
+
+test("individual-period Worker plays through one shared PCM Worklet in Chrome",async()=>{
+  const port=18749;
+  const server=spawn(process.env.PYTHON||"python3",
+    ["-c","import sys; from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler; ThreadingHTTPServer(('127.0.0.1', int(sys.argv[1])), SimpleHTTPRequestHandler).serve_forever()",
+      String(port)],{
+    cwd:path.resolve("web-demo"),stdio:["ignore","ignore","pipe"]
+  });
+  const serverDiagnostics={spawnError:null,exitCode:null,signal:null,stderr:[]};
+  server.on("error",error=>{serverDiagnostics.spawnError=error.message;});
+  server.on("exit",(code,signal)=>{
+    serverDiagnostics.exitCode=code;serverDiagnostics.signal=signal;
+  });
+  server.stderr?.on("data",chunk=>{
+    serverDiagnostics.stderr.push(...String(chunk).split(/\r?\n/).filter(Boolean));
+    serverDiagnostics.stderr=serverDiagnostics.stderr.slice(-12);
+  });
+  let browser;
+  try{
+    browser=await puppeteer.launch({
+      executablePath:process.env.CHROME_BIN||"/usr/bin/google-chrome",
+      headless:true,args:["--no-sandbox","--disable-dev-shm-usage",
+        "--mute-audio",
+        "--autoplay-policy=no-user-gesture-required"]
+    });
+    const page=await browser.newPage();
+    const pageErrors=[];
+    const requestFailures=[];
+    page.on("requestfailed",request=>requestFailures.push({url:request.url(),
+      error:request.failure()?.errorText}));
+    page.on("pageerror",error=>pageErrors.push(error.message));
+    page.on("console",message=>{
+      if(message.type()==="error"&&
+         !message.text().startsWith("Failed to load resource: the server responded with a status of 404"))
+        pageErrors.push(message.text());
+    });
+    await page.evaluateOnNewDocument(guardSource=>{
+      const audit={worklets:[],workers:[],jobs:[],workerResults:[],messages:[],
+        pointerEvents:[],bufferSources:0,probe:null,mutedOutputRoutes:0,
+        audioOutputMuteGain:null,
+        audioContext:null};
+      Object.defineProperty(window,"__labAudit",{value:audit});
+      (0,eval)(`(${guardSource})`)(window,audit);
+      for(const type of ["pointerdown","pointerup","click"])
+        document.addEventListener(type,event=>{
+          if(event.target?.id==="wave")audit.pointerEvents.push({type,
+            x:event.clientX,y:event.clientY});
+        },true);
+      const NativeWorklet=window.AudioWorkletNode;
+      const nativeConnect=NativeWorklet.prototype.connect;
+      NativeWorklet.prototype.connect=function(destination,...rest){
+        const result=nativeConnect.call(this,destination,...rest);
+        if(this.__labWorkerMode&&!this.__labProbe){
+          const analyser=this.context.createAnalyser();analyser.fftSize=2048;
+          const mute=this.context.createGain();mute.gain.value=0;
+          nativeConnect.call(this,analyser);analyser.connect(mute);
+          mute.connect(this.context.destination);
+          this.__labProbe=true;audit.probe=analyser;
+        }
+        return result;
+      };
+      window.AudioWorkletNode=class extends NativeWorklet{
+        constructor(ctx,name,options){
+          super(ctx,name,options);
+          audit.audioContext=ctx;
+          const mode=options?.processorOptions?.processingMode||"raw";
+          this.__labWorkerMode=mode==="worker";
+          audit.worklets.push({name,mode});
+          this.port.addEventListener("message",event=>audit.messages.push({
+            ...(event.data||{}),receivedAt:performance.now(),
+            audioTime:ctx.currentTime
+          }));
+          this.port.start();
+        }
+      };
+      const NativeWorker=window.Worker;
+      window.Worker=class extends NativeWorker{
+        constructor(url,options){
+          super(url,options);this.__labUrl=String(url);
+          audit.workers.push(this.__labUrl);
+          this.addEventListener("message",event=>audit.workerResults.push({
+            receivedAt:performance.now(),job:event.data?.job,
+            audioTime:audit.audioContext?.currentTime,
+            generation:event.data?.generation,ok:event.data?.ok,
+            workerElapsedMs:event.data?.workerElapsedMs
+          }));
+        }
+        postMessage(payload,...rest){
+          if(this.__labUrl.includes("lab-processor.worker"))
+            audit.jobs.push({job:payload.job,generation:payload.generation,
+              model:payload.model,jointBackend:payload.jointBackend,
+              speed:payload.speed,semitones:payload.semitones,
+            sentAt:performance.now(),
+              sentAudioTime:audit.audioContext?.currentTime,
+              coreFrames:payload.plan?.core,
+              planStart:payload.plan?.start,
+              planEnd:payload.plan?.start+payload.plan?.core,
+              outputFrames:payload.plan?.outputFrames,
+              sourceFrames:payload.plan?.to-payload.plan?.from+
+                (payload.plan?.wrapRight||0)});
+          return super.postMessage(payload,...rest);
+        }
+      };
+      const nativeBufferSource=AudioContext.prototype.createBufferSource;
+      AudioContext.prototype.createBufferSource=function(...args){
+        audit.bufferSources++;
+        return nativeBufferSource.apply(this,args);
+      };
+    },installTestAudioSilenceGuard.toString());
+    await page.goto(`http://127.0.0.1:${port}/index.html`,{
+      waitUntil:"domcontentloaded",timeout:20000
+    });
+    try{
+      await page.waitForFunction(()=>
+        document.documentElement.dataset.fwBoot==="ready",{timeout:20000});
+    }catch(error){
+      const bootDiagnostic=await page.evaluate(()=>({
+        boot:document.documentElement.dataset.fwBoot,
+        title:document.title,
+        status:document.querySelector("#status")?.textContent,
+        scripts:[...document.scripts].map(script=>script.src),
+        resources:performance.getEntriesByType("resource").slice(-12)
+          .map(entry=>({name:entry.name,duration:entry.duration,
+            transferSize:entry.transferSize}))
+      }));
+      throw Error("Audio Lab boot did not become ready: "+
+        JSON.stringify({bootDiagnostic,pageErrors,requestFailures,
+          server:{pid:server.pid,...serverDiagnostics}}),{cause:error});
+    }
+    await page.evaluate(async()=>{
+      const select=document.querySelector("#lab-model");
+      select.value="pv";select.dispatchEvent(new Event("change",{bubbles:true}));
+      await new Promise(resolve=>setTimeout(resolve,40));
+      const individual=document.querySelector("#lab-individual-periods");
+      individual.checked=true;
+      individual.dispatchEvent(new Event("change",{bubbles:true}));
+      await new Promise(resolve=>setTimeout(resolve,40));
+      const sampleRate=48000,frames=sampleRate*30;
+      const bytes=new ArrayBuffer(44+frames*2),view=new DataView(bytes);
+      view.setUint32(0,0x46464952,true);view.setUint32(4,bytes.byteLength-8,true);
+      view.setUint32(8,0x45564157,true);view.setUint32(12,0x20746d66,true);
+      view.setUint32(16,16,true);view.setUint16(20,1,true);
+      view.setUint16(22,1,true);view.setUint32(24,sampleRate,true);
+      view.setUint32(28,sampleRate*2,true);view.setUint16(32,2,true);
+      view.setUint16(34,16,true);view.setUint32(36,0x61746164,true);
+      view.setUint32(40,frames*2,true);
+      for(let i=0;i<frames;i++)
+        view.setInt16(44+i*2,Math.round(.2*Math.sin(2*Math.PI*440*i/sampleRate)*32767),true);
+      const file=new File([bytes],"worker-source-tone.wav",{type:"audio/wav"});
+      const transfer=new DataTransfer();transfer.items.add(file);
+      const input=document.querySelector("#audio-file");input.files=transfer.files;
+      input.dispatchEvent(new Event("change",{bubbles:true}));
+    });
+    try{
+      await page.waitForFunction(()=>document.querySelector("#file-meta")?.textContent
+        .includes("worker-source-tone.wav")&&
+        !document.querySelector("#file-meta").textContent.includes("読み込み中"),
+        {timeout:15000});
+    }catch(error){
+      const diagnostic=await page.evaluate(()=>({
+        title:document.title,meta:document.querySelector("#file-meta")?.textContent,
+        status:document.querySelector("#status")?.textContent,
+        body:document.body.innerText.slice(0,1200)
+      }));
+      console.log("Chrome file-load diagnostic",JSON.stringify({diagnostic,pageErrors}));
+      throw error;
+    }
+    const compatibility=await page.$eval("#lab-model-compatibility",node=>node.textContent);
+    assert.match(compatibility,/0\.5〜2倍/);
+    assert.match(compatibility,/A\/B/);
+    assert.match(compatibility,/即時スクラブは未対応/);
+
+    await page.evaluate(()=>document.querySelector("#play-wet").click());
+    try{
+      await page.waitForFunction(()=>document.querySelector("#rt-indicator")?.textContent
+        .includes("モデル再生中")&&window.__labAudit.worklets.length===1,
+        {timeout:20000});
+    }catch(error){
+      const diagnostic=await page.evaluate(()=>({
+        indicator:document.querySelector("#rt-indicator")?.textContent,
+        status:document.querySelector("#lab-status")?.textContent,
+        file:document.querySelector("#file-meta")?.textContent,
+        worklets:window.__labAudit.worklets,workers:window.__labAudit.workers,
+        mutedOutputRoutes:window.__labAudit.mutedOutputRoutes,
+        jobs:window.__labAudit.jobs.slice(-5),
+        results:window.__labAudit.workerResults.slice(-5)
+      }));
+      console.log("Chrome playback-start diagnostic",JSON.stringify({diagnostic,pageErrors}));
+      throw error;
+    }
+    await page.waitForFunction(()=>window.__labAudit.messages.some(message=>
+      message.type==="progress"&&message.processingMode==="worker"),
+      {timeout:10000});
+    await page.waitForFunction(()=>{
+      const probe=window.__labAudit.probe;
+      if(!probe)return false;
+      const pcm=new Float32Array(probe.fftSize);probe.getFloatTimeDomainData(pcm);
+      const rms=Math.sqrt(pcm.reduce((sum,value)=>sum+value*value,0)/pcm.length);
+      window.__labAudit.maxRms=Math.max(window.__labAudit.maxRms||0,rms);
+      return window.__labAudit.maxRms>.01;
+    },{timeout:5000});
+    await page.waitForFunction(()=>{
+      const frames=window.__labAudit.messages.filter(message=>
+        message.type==="progress"&&message.processingMode==="worker")
+        .map(message=>message.sourceFrame);
+      return frames.length>=2&&frames.at(-1)>frames[0];
+    },{timeout:5000});
+    let evidence=await page.evaluate(()=>{
+      const probe=window.__labAudit.probe;
+      const pcm=new Float32Array(probe?.fftSize||0);
+      probe?.getFloatTimeDomainData(pcm);
+      return {
+        worklets:window.__labAudit.worklets,
+        workers:window.__labAudit.workers,
+        jobs:window.__labAudit.jobs,
+        bufferSources:window.__labAudit.bufferSources,
+        rms:window.__labAudit.maxRms||
+          (pcm.length?Math.sqrt(pcm.reduce((sum,value)=>sum+value*value,0)/pcm.length):0),
+        frames:window.__labAudit.messages.filter(message=>
+          message.type==="progress"&&message.processingMode==="worker")
+          .map(message=>message.sourceFrame),
+        indicator:document.querySelector("#rt-indicator")?.textContent
+      };
+    });
+    assert.equal(evidence.worklets.length,1,evidence);
+    assert.equal(evidence.worklets[0].mode,"worker",evidence);
+    assert.equal(evidence.workers.filter(url=>url.includes("lab-processor.worker")).length,1,evidence);
+    assert.equal(evidence.bufferSources,0,evidence);
+    assert.ok(evidence.rms>.01,evidence);
+    assert.ok(evidence.frames.length>=2&&
+      evidence.frames.at(-1)>evidence.frames[0],evidence);
+    assert.match(evidence.jobs[0].model,/period-joint/);
+    assert.equal(evidence.jobs[0].jointBackend,"pv");
+    assert.ok(evidence.jobs.every(job=>job.coreFrames<=72000&&job.sourceFrames<200000),evidence.jobs);
+    const loopControls=await page.evaluate(()=>({
+      a:document.querySelector("#player-loop-a").disabled,
+      b:document.querySelector("#player-loop-b").disabled,
+      enabled:document.querySelector("#player-loop-enabled").disabled,
+      aNow:document.querySelector("#player-loop-a-now").disabled,
+      bNow:document.querySelector("#player-loop-b-now").disabled,
+      hint:document.querySelector("#player-loop-hint").textContent
+    }));
+    assert.ok(loopControls.a&&loopControls.b&&loopControls.enabled&&
+      loopControls.aNow&&loopControls.bNow,
+      loopControls);
+    assert.match(loopControls.hint,/Worker.*A\/B.*未対応/);
+    const startupEvidence={...evidence};
+    const startProgress=await page.evaluate(()=>{
+      const progress=window.__labAudit.messages.filter(message=>
+        message.type==="progress"&&message.processingMode==="worker").at(-1);
+      return {sourceFrame:progress?.sourceFrame,missingFrames:progress?.missingFrames||0};
+    });
+    await new Promise(resolve=>setTimeout(resolve,5000));
+    const steadyEvidence=await page.evaluate(()=>{
+      const progress=window.__labAudit.messages.filter(message=>
+        message.type==="progress"&&message.processingMode==="worker").at(-1);
+      return {sourceFrame:progress?.sourceFrame,missingFrames:progress?.missingFrames||0};
+    });
+    assert.ok(steadyEvidence.sourceFrame>startProgress.sourceFrame,
+      {startProgress,steadyEvidence});
+
+    // Model and pitch/speed edits reset only the Worker generation. The same
+    // Worklet remains the single source clock and applies each actual setting.
+    await page.$eval("#granular-speed-value",node=>{
+      node.value="1.33";node.dispatchEvent(new Event("change",{bubbles:true}));
+    });
+    await page.waitForFunction(()=>window.__labAudit.messages.some(message=>
+      message.type==="worker-state-activated"&&message.speed===1.33),
+      {timeout:10000});
+    const speedGeneration=await page.evaluate(()=>window.__labAudit.messages
+      .filter(message=>message.type==="worker-state-activated"&&
+        message.speed===1.33).at(-1).generation);
+    await page.waitForFunction(({generation,frame})=>window.__labAudit.messages.some(
+      message=>message.type==="progress"&&
+        message.workerGeneration===generation&&
+        message.sourceFrame>frame+12000&&
+        !Number.isInteger(message.sourceFrame)),
+      {timeout:15000},{generation:speedGeneration,frame:steadyEvidence.sourceFrame});
+    const fractionalProgress=await page.evaluate(generation=>{
+      const messages=window.__labAudit.messages.filter(message=>
+        message.type==="progress"&&message.workerGeneration===generation&&
+        !Number.isInteger(message.sourceFrame));
+      return messages.at(-1);
+    },speedGeneration);
+    assert.ok(Number.isFinite(fractionalProgress?.sourceFrame),fractionalProgress);
+    const missingBeforePitch=await page.evaluate(()=>window.__labAudit.messages
+      .filter(message=>message.type==="progress"&&
+        message.processingMode==="worker").at(-1)?.missingFrames||0);
+    const pitchRequest=await page.$eval("#granular-pitch-value",node=>{
+      const audit=window.__labAudit;
+      const progress=audit.messages.filter(message=>message.type==="progress"&&
+        message.processingMode==="worker").at(-1);
+      const requestAudioTime=audit.audioContext.currentTime;
+      const requestPerformanceTime=performance.now();
+      node.value="2";node.dispatchEvent(new Event("change",{bubbles:true}));
+      return {sourceFrame:progress?.sourceFrame,
+        progressAudioTime:progress?.outputTime,speed:progress?.speed,
+        requestAudioTime,requestPerformanceTime,
+        sampleRate:audit.audioContext.sampleRate};
+    });
+    try{
+      await page.waitForFunction(generation=>window.__labAudit.messages.some(message=>
+        message.type==="worker-state-activated"&&message.pitchSemitones===2&&
+          message.generation>generation),
+        {timeout:10000},speedGeneration);
+    }catch(error){
+      const diagnostic=await page.evaluate(generation=>{
+        const audit=window.__labAudit;
+        const jobs=audit.jobs.filter(item=>item.generation>generation);
+        const jobIds=new Set(jobs.map(item=>item.job));
+        return {status:document.querySelector("#lab-status")?.textContent,
+          stage:audit.messages.filter(item=>item.type==="worker-state-staged"&&
+            item.generation>generation).slice(-4),
+          activations:audit.messages.filter(item=>
+            item.type==="worker-state-activated"&&item.generation>generation).slice(-4),
+          jobs:jobs.slice(-4),results:audit.workerResults.filter(item=>
+            jobIds.has(item.job)).slice(-4),
+          progress:audit.messages.filter(item=>item.type==="progress"&&
+            item.processingMode==="worker").slice(-4)};
+      },speedGeneration);
+      throw Error("Worker pitch activation timed out: "+JSON.stringify(diagnostic),
+        {cause:error});
+    }
+    const pitchAccepted=await page.evaluate(generation=>window.__labAudit.messages
+      .filter(message=>message.type==="worker-state-activated"&&
+        message.pitchSemitones===2&&message.generation>generation).at(-1),
+      speedGeneration);
+    const missingAfterPitch=await page.evaluate(()=>window.__labAudit.messages
+      .filter(message=>message.type==="progress"&&
+        message.processingMode==="worker").at(-1)?.missingFrames||0);
+    const pitchStage=await page.evaluate(generation=>window.__labAudit.messages
+      .filter(message=>message.type==="worker-state-staged"&&
+        message.generation>generation).at(-1),speedGeneration);
+    const loopEnd=await page.evaluate(()=>window.__labAudit.messages
+      .filter(message=>message.type==="progress").at(-1)?.loopEndFrame);
+    assert.ok(Number.isFinite(pitchRequest.sourceFrame)&&
+      Number.isFinite(pitchRequest.progressAudioTime)&&
+      Number.isFinite(pitchRequest.speed)&&
+      Number.isFinite(pitchRequest.requestAudioTime)&&
+      Number.isFinite(pitchRequest.requestPerformanceTime)&&
+      Number.isFinite(pitchRequest.sampleRate)&&pitchRequest.sampleRate>0,
+      pitchRequest);
+    const requestFrame=((pitchRequest.sourceFrame+
+      pitchRequest.speed*pitchRequest.sampleRate*(pitchRequest.requestAudioTime-
+        pitchRequest.progressAudioTime))%loopEnd+loopEnd)%loopEnd;
+    const transitionLatencyMs=(pitchAccepted.audioTime-
+      pitchRequest.requestAudioTime)*1000;
+    assert.ok(Number.isFinite(pitchAccepted.activationAudioTime),
+      JSON.stringify({pitchAccepted,
+        reason:"activation must include the AudioWorklet sample time"}));
+    assert.ok(Number.isFinite(pitchStage.stageAudioTime),
+      JSON.stringify({pitchStage,
+        reason:"Worker staging must include the AudioWorklet sample time"}));
+    assert.ok(Number.isFinite(pitchStage.stageRequestAudioTime),pitchStage);
+    const expectedActivationFrame=((requestFrame+pitchRequest.speed*
+      pitchRequest.sampleRate*
+      (pitchAccepted.activationAudioTime-pitchRequest.requestAudioTime))%loopEnd+loopEnd)%loopEnd;
+    const sourcePositionErrorFrames=((pitchAccepted.sourceFrame-
+      expectedActivationFrame+loopEnd/2)%loopEnd+loopEnd)%loopEnd-loopEnd/2;
+    const pitchWorkerTiming=await page.evaluate(({generation,stagedFrame})=>{
+      const job=window.__labAudit.jobs.filter(item=>
+        item.generation>generation&&item.semitones===2&&
+          item.planStart===stagedFrame).at(-1);
+      const result=job&&window.__labAudit.workerResults.findLast(item=>
+        item.job===job.job);
+      return {jobSentAt:job?.sentAt,resultReceivedAt:result?.receivedAt,
+        jobSentAudioTime:job?.sentAudioTime,
+        resultAudioTime:result?.audioTime,
+        workerElapsedMs:result?.workerElapsedMs,
+        browserRoundTripMs:job&&result?result.receivedAt-job.sentAt:null,
+        model:job?.model,jointBackend:job?.jointBackend,
+        planStart:job?.planStart,coreFrames:job?.coreFrames,
+        sourceFrames:job?.sourceFrames};
+    },{generation:speedGeneration,stagedFrame:pitchStage.sourceFrame});
+    const boundaryDistance=((pitchStage.sourceFrame-requestFrame)%loopEnd+
+      loopEnd)%loopEnd;
+    const latencyBreakdown={
+      requestToActivationMs:transitionLatencyMs,
+      requestToWorkletStageMs:(pitchStage.stageAudioTime-
+        pitchRequest.requestAudioTime)*1000,
+      requestToStageMessageMs:pitchStage.receivedAt-
+        pitchRequest.requestPerformanceTime,
+      requestToStageCommandMs:(pitchStage.stageRequestAudioTime-
+        pitchRequest.requestAudioTime)*1000,
+      stageCommandToWorkletMs:(pitchStage.stageAudioTime-
+        pitchStage.stageRequestAudioTime)*1000,
+      stageMessageToWorkerStartMs:pitchWorkerTiming.jobSentAt-
+        pitchStage.receivedAt,
+      workerRoundTripMs:pitchWorkerTiming.browserRoundTripMs,
+      workerElapsedMs:pitchWorkerTiming.workerElapsedMs,
+      resultMessageToActivationMs:pitchAccepted.receivedAt-
+        pitchWorkerTiming.resultReceivedAt,
+      nextChunkBoundaryWaitEstimateMs:boundaryDistance/
+        (pitchRequest.speed*pitchRequest.sampleRate)*1000
+    };
+    assert.equal(pitchWorkerTiming.model,"period-joint",
+      JSON.stringify(pitchWorkerTiming));
+    assert.equal(pitchWorkerTiming.jointBackend,"pv",
+      JSON.stringify(pitchWorkerTiming));
+    assert.ok(transitionLatencyMs>=0&&transitionLatencyMs<1500,
+      JSON.stringify({transitionLatencyMs,pitchRequest,pitchStage,
+        pitchAccepted,pitchWorkerTiming}));
+    assert.ok(Math.abs(sourcePositionErrorFrames)<128,
+      JSON.stringify({fractionalProgress,pitchRequest,pitchStage,
+        pitchAccepted,expectedActivationFrame,sourcePositionErrorFrames,
+        loopEnd,pitchWorkerTiming}));
+    assert.equal(missingAfterPitch,missingBeforePitch,
+      "pitch handoff must not add missing PCM frames");
+    const backendPcmEvidence=[];
+    let missingBeforeModel=await page.evaluate(()=>window.__labAudit.messages
+      .filter(message=>message.type==="progress"&&
+        message.processingMode==="worker").at(-1)?.missingFrames||0);
+    await page.$eval("#lab-model",node=>{
+      node.value="wsola";node.dispatchEvent(new Event("change",{bubbles:true}));
+    });
+    backendPcmEvidence.push(await waitForWorkerPCM(page,{backend:"wsola",
+      minimumGeneration:0,missingBeforeFrames:missingBeforeModel}));
+    for(const model of ["dual","am"]){
+      missingBeforeModel=await page.evaluate(()=>window.__labAudit.messages
+        .filter(message=>message.type==="progress"&&
+          message.processingMode==="worker").at(-1)?.missingFrames||0);
+      await page.$eval("#lab-model",(node,value)=>{
+        node.value=value;node.dispatchEvent(new Event("change",{bubbles:true}));
+      },model);
+      backendPcmEvidence.push(await waitForWorkerPCM(page,{backend:model,
+        minimumGeneration:0,missingBeforeFrames:missingBeforeModel}));
+    }
+    evidence=await page.evaluate(()=>{
+      const progress=window.__labAudit.messages.filter(message=>
+        message.type==="progress"&&message.processingMode==="worker");
+      const active=progress.at(-1);
+      const activeProgress=progress.filter(message=>
+        message.workerGeneration===active?.workerGeneration);
+      const missingBaseline=activeProgress[0]?.missingFrames||0;
+      return {
+      worklets:window.__labAudit.worklets,
+      workletStates:window.__labAudit.messages.filter(message=>
+        message.type==="worker-state-accepted"||
+          message.type==="worker-state-activated"),
+      retainedBackendJobs:window.__labAudit.jobs.filter(job=>
+        ["pv","wsola","dual","am"].includes(job.jointBackend)),
+      successfulBackendJobs:window.__labAudit.workerResults.map(result=>({
+        ...result,job:window.__labAudit.jobs.find(item=>item.job===result.job)
+      })).filter(result=>result.ok&&["pv","wsola","dual","am"]
+        .includes(result.job?.jointBackend)),
+      activeGeneration:active?.workerGeneration,
+      maxMissingFrames:Math.max(0,...activeProgress.map(message=>
+        (message.missingFrames||0)-missingBaseline)),
+      buffers:window.__labAudit.bufferSources,
+      status:document.querySelector("#lab-status")?.textContent
+      };
+    });
+    assert.equal(evidence.worklets.length,1,evidence);
+    assert.equal(evidence.buffers,0,evidence);
+    assert.ok(evidence.workletStates.length>=5,evidence);
+    for(const model of ["pv","wsola","dual","am"])
+      assert.ok(evidence.retainedBackendJobs.some(job=>job.jointBackend===model),
+        {model,evidence});
+    assert.deepEqual([...new Set(evidence.successfulBackendJobs
+      .map(result=>result.job.jointBackend))].sort(),
+      ["am","dual","pv","wsola"],evidence.successfulBackendJobs);
+    assert.ok(backendPcmEvidence.every(item=>item.accepted&&
+      item.peakRms>.01&&item.advanceFrames>0),backendPcmEvidence);
+    if(evidence.maxMissingFrames>0)
+      assert.match(evidence.status,/欠落PCMを記録しました/);
+
+    await page.$eval("#wave",canvas=>canvas.scrollIntoView({block:"center"}));
+    const targetFrames=await page.evaluate(()=>{
+      const progress=window.__labAudit.messages.filter(message=>
+        message.type==="progress"&&message.processingMode==="worker").at(-1);
+      const totalFrames=progress?.loopEndFrame;
+      if(!Number.isSafeInteger(totalFrames)||totalFrames<2)
+        throw Error("Worker source-frame extent is unavailable");
+      const currentChunk=window.__labAudit.messages.findLast(message=>
+        message.type==="rendered-chunk-accepted"&&
+        message.generation===progress.workerGeneration&&!message.stale&&
+        progress.sourceFrame>=message.startFrame&&
+        progress.sourceFrame<message.endFrame);
+      if(!currentChunk)
+        throw Error("A currently audible rendered chunk is unavailable for a warm seek");
+      return {totalFrames,seek:Math.round(Math.max(currentChunk.startFrame,
+        Math.min(progress.sourceFrame,currentChunk.endFrame-1))),
+        coldSeek:Math.round(totalFrames*.75),nearEnd:Math.round(totalFrames*.98)};
+    });
+    const missingBeforeSeek=await page.evaluate(()=>window.__labAudit.messages
+      .filter(message=>message.type==="progress"&&
+        message.processingMode==="worker").at(-1)?.missingFrames||0);
+    const wave=await page.$eval("#wave",canvas=>{
+      const rect=canvas.getBoundingClientRect();
+      return {x:rect.x,y:rect.y,width:rect.width,height:rect.height};
+    });
+    const seekPoint={x:wave.x+wave.width*targetFrames.seek/targetFrames.totalFrames,
+      y:wave.y+wave.height/2};
+    const seekGenerationBefore=await page.evaluate(()=>window.__labAudit.messages
+      .filter(message=>message.type==="worker-state-activated").at(-1)?.generation??0);
+    const seekRequest=await page.evaluate(()=>({
+      performanceTime:performance.now(),
+      audioTime:window.__labAudit.audioContext.currentTime
+    }));
+    await page.mouse.click(seekPoint.x,seekPoint.y);
+    try{
+      await page.waitForFunction(({generation,target})=>window.__labAudit.messages.some(message=>
+        message.type==="worker-state-activated"&&
+        message.generation>generation&&
+        Math.abs(message.sourceFrame-target)<=100),{timeout:10000},
+        {generation:seekGenerationBefore,target:targetFrames.seek});
+    }catch(error){
+      const diagnostic=await page.evaluate(({point,targets})=>{
+        const audit=window.__labAudit,wave=document.querySelector("#wave");
+        const hit=document.elementFromPoint(point.x,point.y);
+        return {selectedModel:document.querySelector("#lab-model")?.value,
+          status:document.querySelector("#lab-status")?.textContent,
+          indicator:document.querySelector("#rt-indicator")?.textContent,
+          file:document.querySelector("#file-meta")?.textContent,
+          waveRect:wave?.getBoundingClientRect().toJSON(),
+          seekHit:{id:hit?.id,tag:hit?.tagName,className:hit?.className},
+          pointerEvents:audit.pointerEvents.slice(-8),
+          targets,
+          workerStates:audit.messages.filter(message=>
+            message.type==="worker-state-activated").slice(-8),
+          workerProgress:audit.messages.filter(message=>
+            message.type==="progress"&&message.processingMode==="worker").slice(-8),
+          jobs:audit.jobs.slice(-8),results:audit.workerResults.slice(-8)};
+      },{point:seekPoint,targets:targetFrames});
+      console.log("Chrome seek acceptance diagnostic",JSON.stringify({diagnostic,pageErrors}));
+      throw error;
+    }
+    const seekResult=await page.evaluate(({target,startedAt,
+      startedAudioTime,generation})=>{
+      const activated=window.__labAudit.messages
+        .filter(message=>message.type==="worker-state-activated"&&
+          message.generation>generation&&
+          Math.abs(message.sourceFrame-target)<=100).at(-1);
+      const staged=window.__labAudit.messages.findLast(message=>
+        message.type==="worker-state-staged"&&
+        message.generation===activated?.generation);
+      const targetJobs=window.__labAudit.jobs.filter(item=>
+        item.generation===activated?.generation&&
+        item.planStart===staged?.sourceFrame);
+      const job=targetJobs[0];
+      const result=job&&window.__labAudit.workerResults.findLast(item=>
+        item.job===job.job&&item.generation===activated?.generation);
+      const installed=window.__labAudit.messages.findLast(message=>
+        message.type==="rendered-chunk-accepted"&&
+        message.generation===activated?.generation&&
+        message.startFrame===job?.planStart&&
+        message.endFrame===job?.planEnd&&!message.stale);
+      return {generation:activated?.generation,
+        activationLatencyMs:activated?.receivedAt-startedAt,
+        missingFramesAtActivation:activated?.missingFrames,
+        bufferedSegmentsAtStage:staged?.bufferedSegments,
+        bufferedSegmentsAtActivation:activated?.bufferedSegments,
+        reusedChunks:staged?.reusedChunks||0,
+        workerJobsForTarget:targetJobs.length,
+        latencyBreakdown:{
+          requestToStageAudioMs:(staged?.stageAudioTime-startedAudioTime)*1000,
+          requestToWorkletCommandMs:
+            (staged?.stageRequestAudioTime-startedAudioTime)*1000,
+          workletCommandToStageMs:
+            (staged?.stageAudioTime-staged?.stageRequestAudioTime)*1000,
+          requestToStageMessageMs:staged?.receivedAt-startedAt,
+          stageMessageToWorkerStartMs:job?
+            job.sentAt-staged.receivedAt:null,
+          workerRoundTripMs:result?
+            result.receivedAt-job.sentAt:null,
+          workerElapsedMs:result?.workerElapsedMs??null,
+          workerResultToPCMReadyMs:result&&installed?
+            installed.receivedAt-result.receivedAt:null,
+          pcmReadyToActivationMs:installed&&activated?
+            activated.receivedAt-installed.receivedAt:null,
+          resultToActivationMs:result&&activated?
+            activated.receivedAt-result.receivedAt:null,
+          requestToActivationAudioMs:
+            (activated?.activationAudioTime-startedAudioTime)*1000,
+          requestToActivationMessageMs:activated?.receivedAt-startedAt
+        }};
+    },{target:targetFrames.seek,startedAt:seekRequest.performanceTime,
+      startedAudioTime:seekRequest.audioTime,
+      generation:seekGenerationBefore});
+    assert.ok(Number.isFinite(seekResult.latencyBreakdown?.requestToStageAudioMs),
+      "seek timing must report request-to-Worklet staging: "+
+        JSON.stringify(seekResult));
+    assert.equal(seekResult.reusedChunks,1,JSON.stringify(seekResult));
+    assert.equal(seekResult.workerJobsForTarget,0,JSON.stringify(seekResult));
+    const seekGeneration=seekResult.generation;
+    const seekPcmEvidence=await waitForWorkerPCM(page,{generation:seekGeneration,
+      missingBeforeFrames:missingBeforeSeek,allowReused:true});
+    const seekTransitionMissingFrames=Math.max(0,
+      (seekResult.missingFramesAtActivation||0)-missingBeforeSeek);
+    assert.equal(seekPcmEvidence.missingFrames,0,
+      "seek and its first audible buffer must not insert missing PCM: "+
+        JSON.stringify({seekResult,seekPcmEvidence,missingBeforeSeek}));
+    const seekPostActivationMissingFrames=
+      seekPcmEvidence.missingFrames-seekTransitionMissingFrames;
+
+    const missingBeforeColdSeek=await page.evaluate(()=>window.__labAudit.messages
+      .filter(message=>message.type==="progress"&&
+        message.processingMode==="worker").at(-1)?.missingFrames||0);
+    const coldSeekGenerationBefore=await page.evaluate(()=>window.__labAudit.messages
+      .filter(message=>message.type==="worker-state-activated").at(-1)?.generation??0);
+    const coldSeekRequest=await page.evaluate(()=>(
+      {performanceTime:performance.now(),audioTime:window.__labAudit.audioContext.currentTime}));
+    const coldSeekPoint={x:wave.x+wave.width*targetFrames.coldSeek/targetFrames.totalFrames,
+      y:wave.y+wave.height/2};
+    await page.mouse.click(coldSeekPoint.x,coldSeekPoint.y);
+    await page.waitForFunction(({generation,target})=>window.__labAudit.messages.some(message=>
+      message.type==="worker-state-activated"&&message.generation>generation&&
+      Math.abs(message.sourceFrame-target)<=100),{timeout:10000},
+      {generation:coldSeekGenerationBefore,target:targetFrames.coldSeek});
+    const coldSeekResult=await page.evaluate(({target,generation,startedAt})=>{
+      const audit=window.__labAudit;
+      const activated=audit.messages.filter(message=>
+        message.type==="worker-state-activated"&&message.generation>generation&&
+        Math.abs(message.sourceFrame-target)<=100).at(-1);
+      const staged=audit.messages.findLast(message=>
+        message.type==="worker-state-staged"&&
+        message.generation===activated?.generation);
+      const targetJobs=audit.jobs.filter(item=>
+        item.generation===activated?.generation&&
+        item.planStart===staged?.sourceFrame);
+      const job=targetJobs[0];
+      const result=job&&audit.workerResults.findLast(item=>
+        item.job===job.job&&item.generation===activated?.generation);
+      const installed=job&&audit.messages.findLast(message=>
+        message.type==="rendered-chunk-accepted"&&
+        message.generation===activated?.generation&&
+        message.startFrame===job.planStart&&message.endFrame===job.planEnd&&
+        !message.stale);
+      return {generation:activated?.generation,
+        activationLatencyMs:activated?.receivedAt-startedAt,
+        sourceFrame:activated?.sourceFrame,
+        reusedChunks:staged?.reusedChunks||0,
+        workerJobsForTarget:targetJobs.length,
+        workerElapsedMs:result?.workerElapsedMs??null,
+        renderedChunkAccepted:!!installed,
+        missingFramesAtActivation:activated?.missingFrames};
+    },{target:targetFrames.coldSeek,generation:coldSeekGenerationBefore,
+      startedAt:coldSeekRequest.performanceTime});
+    assert.equal(coldSeekResult.reusedChunks,0,JSON.stringify(coldSeekResult));
+    assert.ok(coldSeekResult.workerJobsForTarget>=1,JSON.stringify(coldSeekResult));
+    assert.ok(Number.isFinite(coldSeekResult.workerElapsedMs),
+      JSON.stringify(coldSeekResult));
+    assert.ok(coldSeekResult.renderedChunkAccepted,JSON.stringify(coldSeekResult));
+    const coldSeekPcmEvidence=await waitForWorkerPCM(page,{
+      generation:coldSeekResult.generation,
+      missingBeforeFrames:missingBeforeColdSeek
+    });
+    const coldSeekTransitionMissingFrames=Math.max(0,
+      (coldSeekResult.missingFramesAtActivation||0)-missingBeforeColdSeek);
+    assert.equal(coldSeekPcmEvidence.missingFrames,0,
+      "cold-cache seek must deliver Worker PCM without missing output: "+
+        JSON.stringify({coldSeekResult,coldSeekPcmEvidence,missingBeforeColdSeek}));
+    const coldSeekPostActivationMissingFrames=
+      coldSeekPcmEvidence.missingFrames-coldSeekTransitionMissingFrames;
+    const missingBeforeLoop=await page.evaluate(()=>window.__labAudit.messages
+      .filter(message=>message.type==="progress"&&
+        message.processingMode==="worker").at(-1)?.missingFrames||0);
+    const loopSeekRequest=await page.evaluate(()=>({
+      performanceTime:performance.now(),
+      audioTime:window.__labAudit.audioContext.currentTime
+    }));
+    await page.mouse.click(wave.x+wave.width*.98,wave.y+wave.height/2);
+    await page.waitForFunction(({generation,target})=>window.__labAudit.messages.some(message=>
+      message.type==="worker-state-activated"&&message.generation>generation&&
+      Math.abs(message.sourceFrame-target)<=100),
+      {timeout:10000},{generation:coldSeekResult.generation,target:targetFrames.nearEnd});
+    const loopSeekResult=await page.evaluate(({target,startedAt,
+      startedAudioTime,generation})=>{
+      const activated=window.__labAudit.messages
+        .filter(message=>message.type==="worker-state-activated"&&
+          message.generation>generation&&
+          Math.abs(message.sourceFrame-target)<=100).at(-1);
+      const staged=window.__labAudit.messages.findLast(message=>
+        message.type==="worker-state-staged"&&
+        message.generation===activated?.generation);
+      const targetJobs=window.__labAudit.jobs.filter(item=>
+        item.generation===activated?.generation&&
+        item.planStart===staged?.sourceFrame);
+      const job=targetJobs[0];
+      const result=job&&window.__labAudit.workerResults.findLast(item=>
+        item.job===job.job&&item.generation===activated?.generation);
+      const installed=window.__labAudit.messages.findLast(message=>
+        message.type==="rendered-chunk-accepted"&&
+        message.generation===activated?.generation&&
+        message.startFrame===job?.planStart&&
+        message.endFrame===job?.planEnd&&!message.stale);
+      return {generation:activated?.generation,
+        activationLatencyMs:activated?.receivedAt-startedAt,
+        missingFramesAtActivation:activated?.missingFrames,
+        bufferedSegmentsAtStage:staged?.bufferedSegments,
+        bufferedSegmentsAtActivation:activated?.bufferedSegments,
+        reusedChunks:staged?.reusedChunks||0,
+        workerJobsForTarget:targetJobs.length,
+        latencyBreakdown:{
+          requestToStageAudioMs:(staged?.stageAudioTime-startedAudioTime)*1000,
+          requestToWorkletCommandMs:
+            (staged?.stageRequestAudioTime-startedAudioTime)*1000,
+          workletCommandToStageMs:
+            (staged?.stageAudioTime-staged?.stageRequestAudioTime)*1000,
+          requestToStageMessageMs:staged?.receivedAt-startedAt,
+          stageMessageToWorkerStartMs:job?
+            job.sentAt-staged.receivedAt:null,
+          workerRoundTripMs:result?
+            result.receivedAt-job.sentAt:null,
+          workerElapsedMs:result?.workerElapsedMs??null,
+          workerResultToPCMReadyMs:result&&installed?
+            installed.receivedAt-result.receivedAt:null,
+          pcmReadyToActivationMs:installed&&activated?
+            activated.receivedAt-installed.receivedAt:null,
+          resultToActivationMs:result&&activated?
+            activated.receivedAt-result.receivedAt:null,
+          requestToActivationAudioMs:
+            (activated?.activationAudioTime-startedAudioTime)*1000,
+          requestToActivationMessageMs:activated?.receivedAt-startedAt
+        }};
+    },{target:targetFrames.nearEnd,startedAt:loopSeekRequest.performanceTime,
+      startedAudioTime:loopSeekRequest.audioTime,
+      generation:seekGeneration});
+    const loopGeneration=loopSeekResult.generation;
+    const measuredLatencyPhases=["requestToStageAudioMs",
+      "requestToWorkletCommandMs","workletCommandToStageMs",
+      "requestToStageMessageMs","requestToActivationAudioMs",
+      "requestToActivationMessageMs"];
+    const workerLatencyPhases=["stageMessageToWorkerStartMs",
+      "workerRoundTripMs","workerElapsedMs","workerResultToPCMReadyMs",
+      "pcmReadyToActivationMs","resultToActivationMs"];
+    for(const [label,result] of [["seek",seekResult],
+      ["near-end loop",loopSeekResult]]){
+      assert.ok(measuredLatencyPhases.every(key=>
+        Number.isFinite(result.latencyBreakdown?.[key])),
+        `${label} timing has incomplete transition events: `+
+          JSON.stringify(result));
+      if(result.reusedChunks===0)
+        assert.ok(workerLatencyPhases.every(key=>
+          Number.isFinite(result.latencyBreakdown?.[key])),
+          `${label} Worker timing is incomplete: `+JSON.stringify(result));
+      else assert.equal(result.workerJobsForTarget,0,
+        `${label} reused PCM but rerendered its target: `+
+          JSON.stringify(result));
+    }
+    await page.waitForFunction(({generation,totalFrames})=>{
+      const progress=window.__labAudit.messages.filter(message=>
+        message.type==="progress"&&message.workerGeneration===generation);
+      const endIndex=progress.findIndex(message=>
+        message.sourceFrame>totalFrames*.9965);
+      const wrapped=endIndex>=0&&progress.slice(endIndex+1).some(message=>
+        message.sourceFrame<4096);
+      if(!wrapped)return false;
+      const probe=window.__labAudit.probe,pcm=new Float32Array(probe?.fftSize||0);
+      if(!probe||!pcm.length)return false;
+      probe.getFloatTimeDomainData(pcm);
+      return Math.sqrt(pcm.reduce((sum,value)=>sum+value*value,0)/pcm.length)>.01;
+    },{timeout:15000},{generation:loopGeneration,totalFrames:targetFrames.totalFrames});
+    const loopWrapEvidence=await page.evaluate((generation,missingBefore,totalFrames)=>{
+      const progress=window.__labAudit.messages.filter(message=>
+        message.type==="progress"&&message.workerGeneration===generation);
+      const endIndex=progress.findIndex(message=>
+        message.sourceFrame>totalFrames*.9965);
+      const nearEnd=progress[endIndex],afterWrap=progress.slice(endIndex+1)
+        .find(message=>message.sourceFrame<4096);
+      return {generation,nearEndFrame:nearEnd?.sourceFrame,
+        afterWrapFrame:afterWrap?.sourceFrame,
+        missingFrames:(afterWrap?.missingFrames||0)-missingBefore};
+    },loopGeneration,missingBeforeLoop,targetFrames.totalFrames);
+    assert.ok(loopWrapEvidence.nearEndFrame>targetFrames.totalFrames*.9965&&
+      loopWrapEvidence.afterWrapFrame<4096,loopWrapEvidence);
+
+    // A decode failure must leave the current Worker audio stream and source
+    // file intact so the listener can resume without reselecting it.
+    await page.evaluate(()=>{
+      const broken=new File([Uint8Array.from([1,2,3,4])],"broken.wav",{type:"audio/wav"});
+      const transfer=new DataTransfer();transfer.items.add(broken);
+      const input=document.querySelector("#audio-file");input.files=transfer.files;
+      input.dispatchEvent(new Event("change",{bubbles:true}));
+    });
+    await page.waitForFunction(()=>document.querySelector("#status")?.textContent
+      .includes("以前の音声は保持しています"),{timeout:10000});
+    const recovery=await page.evaluate(()=>({
+      file:document.querySelector("#file-meta")?.textContent,
+      worklets:window.__labAudit.worklets,
+      status:document.querySelector("#status")?.textContent,
+      sourceFrames:window.__labAudit.messages.filter(message=>
+        message.type==="progress"&&message.processingMode==="worker")
+        .map(message=>message.sourceFrame)
+    }));
+    assert.match(recovery.file,/worker-source-tone\.wav/);
+    assert.equal(recovery.worklets.length,1,recovery);
+    assert.deepEqual(pageErrors,[]);
+    console.log("Chrome legacy Worker PCM evidence",JSON.stringify({
+      startup:{mode:startupEvidence.worklets[0]?.mode,
+        workerCount:startupEvidence.workers.filter(url=>
+          url.includes("lab-processor.worker")).length,
+        firstOutputRms:startupEvidence.rms,
+        sourceFrameStart:startupEvidence.frames[0],
+        sourceFrameEnd:startupEvidence.frames.at(-1),
+        firstModel:startupEvidence.jobs[0]?.jointBackend},
+      selectedDSPs:["pv","wsola","dual","am"],
+      successfulDSPs:[...new Set(evidence.successfulBackendJobs
+        .map(result=>result.job.jointBackend))],
+      steadyFiveSeconds:{sourceFramesAdvanced:
+        steadyEvidence.sourceFrame-startProgress.sourceFrame,
+        missingOutputFrames:steadyEvidence.missingFrames-startProgress.missingFrames},
+      backendPcmEvidence,seekPcmEvidence,loopWrapEvidence,
+      workerRenderMs:["pv","wsola","dual","am"].map(backend=>{
+        const samples=evidence.successfulBackendJobs.filter(result=>
+          result.job.jointBackend===backend).map(result=>
+          Math.round(result.receivedAt-result.job.sentAt)).sort((a,b)=>a-b);
+        return {backend,jobs:samples.length,
+          medianMs:samples[Math.floor(samples.length/2)],
+          maxMs:samples.at(-1)};
+      }),
+      pitchHandoff:{stagedFrame:pitchStage.sourceFrame,
+        activatedFrame:pitchAccepted.sourceFrame,requestFrame,
+        fractionalProgress: fractionalProgress.sourceFrame,loopEnd,
+        expectedActivationFrame,sourcePositionErrorFrames,
+        transitionLatencyMs,
+        missingBefore:missingBeforePitch,missingAfter:missingAfterPitch,
+        worker:pitchWorkerTiming,latencyBreakdown},
+      generationUpdates:evidence.workletStates.length,
+      maxObservedUnderrunFrames:evidence.maxMissingFrames,
+      seekActivationLatencyMs:seekResult.activationLatencyMs,
+      seekLatencyBreakdown:seekResult.latencyBreakdown,
+      seekReusedChunks:seekResult.reusedChunks,
+      seekWorkerJobsForTarget:seekResult.workerJobsForTarget,
+      seekTransitionMissingFrames,seekPostActivationMissingFrames,
+      loopSeekActivationLatencyMs:loopSeekResult.activationLatencyMs,
+      coldSeekActivationLatencyMs:coldSeekResult.activationLatencyMs,
+      coldSeekWorkerElapsedMs:coldSeekResult.workerElapsedMs,
+      coldSeekReusedChunks:coldSeekResult.reusedChunks,
+      coldSeekWorkerJobsForTarget:coldSeekResult.workerJobsForTarget,
+      coldSeekTransitionMissingFrames,coldSeekPostActivationMissingFrames,
+      loopSeekLatencyBreakdown:loopSeekResult.latencyBreakdown,
+      loopSeekReusedChunks:loopSeekResult.reusedChunks,
+      loopSeekWorkerJobsForTarget:loopSeekResult.workerJobsForTarget,
+      loopSeekMissingAtActivation:Math.max(0,
+        (loopSeekResult.missingFramesAtActivation||0)-missingBeforeLoop),
+      seekFrame:recovery.sourceFrames.at(-1),
+      failedReplacementRetainedSource:recovery.file,
+      workletCountAfterRecovery:recovery.worklets.length
+    }));
+    await page.evaluate(()=>document.querySelector("#stop").click());
+    const audioSilence=await page.evaluate(()=>({
+      mutedOutputRoutes:window.__labAudit.mutedOutputRoutes,
+      muteGain:window.__labAudit.audioOutputMuteGain
+    }));
+    assert.ok(audioSilence.mutedOutputRoutes>0,audioSilence);
+    assert.equal(audioSilence.muteGain,0,audioSilence);
+  }finally{
+    const cleanupResults=await Promise.allSettled([
+      closeBrowserTree(browser),
+      stopChildProcess(server,"test HTTP server")
+    ]);
+    const cleanupErrors=cleanupResults.filter(result=>
+      result.status==="rejected").map(result=>result.reason);
+    if(cleanupErrors.length)
+      throw new AggregateError(cleanupErrors,"Browser test cleanup failed");
+  }
+});

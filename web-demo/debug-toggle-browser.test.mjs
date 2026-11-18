@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {spawn} from "node:child_process";
 import {resolve} from "node:path";
 import puppeteer from "puppeteer-core";
+import {cleanupTestProcesses} from "./test-process-cleanup.mjs";
 
 // #236: real Chromium behavior at the staged Pages origin, not a DOM mock.
 test("#236 failed import and late ON must not misrepresent current debug state", async () => {
@@ -13,7 +14,7 @@ test("#236 failed import and late ON must not misrepresent current debug state",
   try {
     browser=await puppeteer.launch({
       executablePath:process.env.CHROME_BIN||"/usr/bin/google-chrome",
-      headless:true,args:["--no-sandbox","--disable-dev-shm-usage"]
+      headless:true,args:["--no-sandbox","--disable-dev-shm-usage", "--mute-audio"]
     });
     const page=await browser.newPage();
     await page.setRequestInterception(true);
@@ -70,7 +71,6 @@ test("#236 failed import and late ON must not misrepresent current debug state",
     assert.equal(await race.$eval("#debug-mode",el=>el.checked),true);
     await race.close();
   }finally{
-    if(browser)await browser.close();
-    server.kill("SIGTERM");
+    await cleanupTestProcesses(browser,[server],"debug toggle HTTP server");
   }
 });

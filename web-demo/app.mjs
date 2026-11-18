@@ -182,18 +182,19 @@ function queueScrubCommand(player,speed,frame=null){
       message("波形スクラブの音声反映失敗: "+error.message,"error");
   }).finally(()=>{player.scratchBusy=false;});
 }
-function cancelTemporaryScrub(restore=true){
+function cancelTemporaryScrub(restore=true,sourceFrame=null){
   scrubMotionToken++;
   if(scrubMotionFrame)cancelAnimationFrame(scrubMotionFrame);
   scrubMotionFrame=0;
   const active=temporaryScrubSpeed!==null,p=state.player;
+  const restoreFrame=sourceFrame;
   if(p){
     if(p.scrubSpeedTimer){clearTimeout(p.scrubSpeedTimer);p.scrubSpeedTimer=null;}
     p.scratchQueued=null;
   }
   temporaryScrubSpeed=null;
   if(restore&&active&&p?.rawPCM&&p.granular&&!p.initializing&&!p.paused)
-    queueScrubCommand(p,granular.speed);
+    queueScrubCommand(p,granular.speed,restoreFrame);
 }
 function setTemporaryScrubSpeed(value,_force=false,frame=null){
   temporaryScrubSpeed=validatePlaybackSpeed(value);
@@ -339,6 +340,13 @@ function refreshAB(){
     if(document.activeElement!==input)input.value=String(value);
   }
   $("#player-loop-enabled").checked=ab.enabled;
+  const workerPlayback=Boolean(state.player?.labStream);
+  for(const id of ["player-loop-a","player-loop-b","player-loop-enabled",
+    "player-loop-a-now","player-loop-b-now"])
+    $("#"+id).disabled=workerPlayback;
+  if(workerPlayback)
+    $("#player-loop-hint").textContent=
+      "Worker研究モデルは全曲ループで再生中です。A/B区間の編集・適用は未対応です。";
   detailWaveEditor?.refresh(true);
 }
 function syncLoopToPlayer(player=state.player){
@@ -800,7 +808,7 @@ function playPosition(){
   // of truth; callback progress/command ACK can lag behind the dragged point.
   if(activeWavePointer!==null||detailWaveScrubbing||hoverWave!==null)return state.seek;
   if(!state.player||!state.ctx||!duration())return state.seek;
-  if(state.player.labStream)return state.player.stream.sourcePositionAt(state.ctx.currentTime);
+  if(state.player.labStream)return state.player.stream.sourcePositionAt();
   if(state.player.rawPCM){
     // The command-acknowledged paused source position is canonical. A stale
     // asynchronous progress event must not drag the fixed playhead backward.
@@ -1008,7 +1016,7 @@ if(PLAYER_GRANULAR_AVAILABLE){
         if(g.dragStarted)
           waveformScrubMotion(releaseScrubSpeed(g.velocity,
             performance.now()-g.lastMovedAt),"release");
-        else cancelTemporaryScrub();
+        else cancelTemporaryScrub(true,waveFrameFromPointer(e));
         // A tap has no throw velocity. It must not leave 480ms of
         // artificial inertia or an audible hold pending after pointerup.
       }else waveformScrubMotion(0,"cancel");
@@ -1207,9 +1215,9 @@ function seek(seconds){
   state.seek=where;mediaStatus(Boolean(p&&!p.paused));
   if(!p)return;
   if(p.labStream){
-    // Restart the existing, applied renderer. Requested model settings can
-    // still be pending; play("wet") would reject AFTER stopping this stream.
-    void startModelPlayback(where,p.appliedConfig);
+    p.offset=where;
+    scheduleModelSeek(p,Math.min(state.dry[0].length-1,
+      Math.max(0,Math.round(where*state.decoded.sampleRate))));
     return;
   }
   if(p.rawPCM){
@@ -1225,6 +1233,26 @@ function seek(seconds){
   startSource(p,where);
   p.master.gain.setTargetAtTime(1,now+.040,.02);
   message("波形位置 "+fmtTime(where)+" から再生します。","info");
+}
+function scheduleModelSeek(player,frame){
+  player.queuedSeekFrame=frame;
+  if(player.seekInFlight)return;
+  player.seekInFlight=true;
+  void (async()=>{
+    while(state.player===player&&player.queuedSeekFrame!==null){
+      const target=player.queuedSeekFrame;
+      player.queuedSeekFrame=null;
+      await player.stream.seek(target);
+    }
+  })().catch(error=>{
+    player.queuedSeekFrame=null;
+    if(state.player===player)
+      message("Workerモデルのシーク後に再バッファできません: "+error.message,"error");
+  }).finally(()=>{
+    player.seekInFlight=false;
+    if(state.player===player&&player.queuedSeekFrame!==null)
+      scheduleModelSeek(player,player.queuedSeekFrame);
+  });
 }
 // Reuse the existing persistent PCM Worklet rather than stopping/rebuilding
 // the main player on every play/pause. This is user-facing transport, not an
@@ -1349,7 +1377,7 @@ async function stop(){
   state.seek=playPosition();
   state.player=null;
   if(p.labStream){
-    p.stream.stop();mediaStatus(false);controls.stop.disabled=true;
+    p.stream.stop();mediaStatus(false);controls.stop.disabled=true;refreshAB();
     $("#rt-telemetry").textContent="";indicator("停止中");refreshStatusSeek();return;
   }
   if(p.rawPCM){
@@ -2466,6 +2494,15 @@ const syncLabInput=(input,value,disabled)=>{
 };
 const selectedPeriodCycles=()=>2**Number(labPeriod.value);
 function labStatusText(text){labStatus.textContent=text;}
+function labSettingsPending(applied){
+  return Boolean(applied&&(
+    applied.mode!==lab.mode||applied.speed!==lab.speed||
+    applied.semitones!==lab.semitones||applied.individual!==lab.individual||
+    applied.fftSize!==lab.fftSize||applied.shortFftSize!==lab.shortFftSize||
+    applied.longFftSize!==lab.longFftSize||
+    applied.referenceWindows!==lab.referenceWindows||
+    applied.periodCycles!==lab.periodCycles));
+}
 function labRefresh(){
   $("#lab-short-output").textContent=String(lab.shortFftSize)+" samples";
   $("#lab-long-output").textContent=String(lab.longFftSize)+" samples";
@@ -2525,7 +2562,7 @@ function labRefresh(){
     {individual:lab.individual});
   $("#lab-model-compatibility").textContent=cap.sampleAB?
     "このモデルは0/逆再生・サンプル単位A/B・スクラブ対応。再生/モデルの両タブが同じ設定値です。":
-    (cap.reason||"研究モデルは0.5〜2倍のみ対応。A/B・0/逆再生・即時スクラブ非対応（元のA/B設定は保持）。");
+    (cap.reason||"Worker研究モデルは正方向0.5〜2倍のみ対応。A/B・0倍・逆方向・±2倍超は未対応です。1.5秒区間の再計算中は一時無音になる場合があります。シークは区間再計算を待ち、即時スクラブは未対応です。");
   if(!state.player?.labStream)labStatusText(!cap.supported?
     "未適用: "+cap.reason:lab.mode==="live"?
     "Rust/WASMの部分音処理 · 選択時に主再生へ適用":
@@ -2595,7 +2632,25 @@ async function labSettingsChanged(){
       "0/逆再生とサンプル単位A/B・即時スクラブは未対応。設定値は保持。"):
     "未適用: "+capability.reason;
   if(player&&player.mode!=="dry"){
-    if(previous!==nextMode||
+    if(player.labStream&&!isPCMModel(nextMode,nextIndividual)){
+      const nextConfig=Object.freeze({mode:nextMode,speed:nextSpeed,
+        semitones:nextSemi,individual:nextIndividual,fftSize:lab.fftSize,
+        shortFftSize:nextShort,longFftSize:nextLong,
+        referenceWindows:nextWindows,periodCycles:nextCycles});
+      await player.stream.updateSettings({
+        frame:Math.max(0,Math.min(state.dry[0].length-1,
+          Math.round(currentTime*state.decoded.sampleRate))),
+        speed:nextSpeed,semitones:nextSemi,
+        model:nextIndividual?"period-joint":nextMode,
+        jointBackend:nextIndividual?nextMode:null,
+        fftSize:nextConfig.fftSize,shortFftSize:nextShort,
+        longFftSize:nextLong,referenceWindows:nextWindows,
+        periodCycles:nextCycles
+      });
+      if(ticket!==modelSelectionEpoch||state.player!==player)return;
+      player.appliedConfig=nextConfig;player.appliedLabMode=nextMode;
+      player.sourceTimeRate=nextSpeed;player.offset=currentTime;
+    }else if(previous!==nextMode||
        (nextMode==="wsola"&&!nextIndividual&&previousShort!==nextShort)||
        (nextMode==="dual"&&!nextIndividual&&
          (previousShort!==nextShort||previousLong!==nextLong))||
@@ -2670,9 +2725,7 @@ async function startModelPlayback(offset=null,appliedOverride=null){
     shortFftSize:lab.shortFftSize,longFftSize:lab.longFftSize,
     referenceWindows:lab.referenceWindows,periodCycles:lab.periodCycles
   });
-  const pending=Boolean(appliedOverride)&&(
-    applied.mode!==lab.mode||applied.speed!==lab.speed||
-    applied.semitones!==lab.semitones||applied.individual!==lab.individual);
+  const pending=labSettingsPending(applied);
   const where=clamp(offset??(state.player?playPosition():state.seek),0,Math.max(0,duration()-.001));
   if(state.player)await stop();
   // Native AudioContext (and original file decoder/transport) is inherited;
@@ -2685,7 +2738,7 @@ async function startModelPlayback(offset=null,appliedOverride=null){
     applied.mode.toUpperCase()+" · 再生位置から先読み処理を開始…");
   let player;
   try{
-    const stream=createModelStream({
+    const stream=await createModelStream({
       ctx,sourceChannels:state.dry,sampleRate:state.decoded.sampleRate,
       speed:applied.speed,semitones:applied.semitones,
       model:applied.individual?"period-joint":applied.mode,
@@ -2693,13 +2746,19 @@ async function startModelPlayback(offset=null,appliedOverride=null){
       fftSize:applied.fftSize,shortFftSize:applied.shortFftSize,
       longFftSize:applied.longFftSize,referenceWindows:applied.referenceWindows,
       periodCycles:applied.periodCycles,startSeconds:where,
-      onStatus:text=>{if(state.player===player&&!pending)labStatusText(text);},
+      onStatus:text=>{
+        if(state.player!==player)return;
+        if(labSettingsPending(player.appliedConfig))
+          $("#rt-telemetry").textContent=text;
+        else labStatusText(text);
+      },
       onStarted:at=>{
         if(state.player!==player)return;
         player.at=at;controls.stop.disabled=false;
         indicator("モデル再生中 · "+(applied.individual?"個別波長＋":"")+
           applied.mode.toUpperCase()+" · 自動先読み"+
-          (pending?"（新しいモデル設定は適用待ち）":""));
+          (labSettingsPending(player.appliedConfig)?
+            "（新しいモデル設定は適用待ち）":""));
         message("選択モデルを順次処理して再生中。全曲の計算は不要です。");
       },
       onFailure:error=>{
@@ -2717,10 +2776,12 @@ async function startModelPlayback(offset=null,appliedOverride=null){
         })();
       }
     });
+    if(epoch!==state.transportEpoch){stream.stop();return;}
     player={labStream:true,stream,mode:"wet",appliedLabMode:applied.mode,
       appliedConfig:applied,offset:where,at:ctx.currentTime,
       sourceTimeRate:applied.speed,master:stream.master};
     state.player=player;controls.stop.disabled=false;
+    refreshAB();
     controls.main.textContent="■ モデル停止";
     controls.main.setAttribute("aria-label","選択した処理モデルの再生を停止");
     mediaStatus(true);stream.start();refreshPlayhead();

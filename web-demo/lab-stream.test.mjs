@@ -17,6 +17,23 @@ test('long 4-minute 48k stereo 0.5x track is split into strictly bounded preview
   }
  }
 });
+test('the final full-track Worker chunk includes bounded wrapped PCM for its interpolation neighbor',()=>{
+ const sr=48000,total=sr*6,speed=1.33;
+ const plan=planChunk({totalFrames:total,sampleRate:sr,speed,
+  startSeconds:4.5,model:'pv',fftSize:2048,referenceWindows:8});
+ assert.equal(plan.start+plan.core,total);
+ assert.ok(plan.wrapRight>0);
+ assert.equal(plan.coreFrames,Math.ceil(plan.core/speed));
+ assert.equal(plan.outputFrames,plan.coreFrames+1);
+ assert.ok(plan.wrapRight<sr*.7);
+});
+test('a Worker chunk starts at its exact integer source cursor after seconds round-trip',()=>{
+ const sr=48000,total=sr*10,startFrame=202064;
+ const plan=planChunk({totalFrames:total,sampleRate:sr,speed:1,
+  startSeconds:startFrame/sr,startFrame,model:'pv',fftSize:2048,
+  referenceWindows:8});
+ assert.equal(plan.start,startFrame);
+});
 test('all four DSP engines render bounded 48k stereo segments without memory errors',()=>{
  const sr=48000,total=sr*240,startSeconds=120;
  const plan=planChunk({totalFrames:total,sampleRate:sr,speed:.5,startSeconds,fftSize:1024,referenceWindows:2});

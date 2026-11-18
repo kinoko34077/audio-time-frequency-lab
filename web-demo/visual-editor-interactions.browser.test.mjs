@@ -3,12 +3,13 @@ import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
 import {resolve} from 'node:path';
 import puppeteer from 'puppeteer-core';
+import {cleanupTestProcesses} from './test-process-cleanup.mjs';
 
 test('Inspector minimize, drag, cut/copy/paste context and Settings debug mode',async()=>{
   const server=spawn('python3',['-m','http.server','8794','--bind','127.0.0.1'],{cwd:resolve(process.env.WARP_WEB_ROOT||'_site'),stdio:'ignore'});
   let browser;
   try{
-    browser=await puppeteer.launch({executablePath:process.env.CHROME_BIN||'/usr/bin/google-chrome',headless:true,args:['--no-sandbox','--disable-dev-shm-usage']});
+    browser=await puppeteer.launch({executablePath:process.env.CHROME_BIN||'/usr/bin/google-chrome',headless:true,args:['--no-sandbox','--disable-dev-shm-usage', "--mute-audio"]});
     const page=await browser.newPage();
     await page.setViewport({width:1280,height:900});
     const errors=[];page.on('pageerror',e=>errors.push(e.message));
@@ -124,7 +125,6 @@ test('Inspector minimize, drag, cut/copy/paste context and Settings debug mode',
     assert.equal(await page.$eval('#debug-mode',el=>el.checked),false);
     assert.deepEqual(errors,[]);
   }finally{
-    if(browser)await browser.close();
-    server.kill('SIGTERM');
+    await cleanupTestProcesses(browser,[server],'visual interactions HTTP server');
   }
 });

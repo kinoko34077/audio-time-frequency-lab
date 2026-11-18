@@ -2,7 +2,8 @@
  * Uses decoded local PCM; no whole-song transfer or per-loop Worker startup.
  * Experimental transport ONLY; not pitch-preserving DSP or user-facing player.
  */
-import {chooseSourceWindowStart,SOURCE_WINDOW_FRAMES} from "./source-pcm-renderer.mjs";
+import {chooseSourceWindowStart,SOURCE_WINDOW_FRAMES,
+  RENDERED_CHUNK_SLOTS} from "./source-pcm-renderer.mjs";
 import {validatePlaybackSpeed} from "./source-timeline.mjs";
 
 const installations=new WeakMap();
@@ -40,8 +41,10 @@ export async function createSourcePCMBridge({
   if(!Number.isFinite(commandTimeoutMs)||commandTimeoutMs<1||commandTimeoutMs>60000)
     throw RangeError("invalid PCM command timeout");
   let currentSpeed=validatePlaybackSpeed(speed);
-  if(!["raw","granular","spectral","pv","wsola","dual","am","live"].includes(processingMode))
+  if(!["raw","granular","spectral","pv","wsola","dual","am","live","worker"].includes(processingMode))
     throw RangeError("invalid PCM processing mode");
+  if(processingMode==="worker"&&!(currentSpeed>=.5&&currentSpeed<=2))
+    throw RangeError("legacy Worker playback supports only positive 0.5..2x");
   if(processingMode==="live"&&(!(wasmBytes instanceof ArrayBuffer)||
      !rustSettings||rustSettings.engine!==3))
     throw RangeError("Rust engine 3 requires the shared WASM module and settings");
@@ -151,7 +154,10 @@ export async function createSourcePCMBridge({
       rustReadyResolve?.();rustReadyResolve=null;rustReadyReject=null;
     }else if(data.type==="rust-error"){
       rustReadyReject?.(Error(data.message));rustReadyResolve=null;rustReadyReject=null;
-    }else if(data.type==="command-accepted"||data.type==="error"){
+    }else if(data.type==="command-accepted"||
+             data.type==="rendered-chunk-accepted"||
+             data.type==="worker-state-accepted"||
+             data.type==="worker-state-staged"||data.type==="error"){
       const ticket=pending.get(data.requestId);
       if(ticket){
         pending.delete(data.requestId);
@@ -185,8 +191,10 @@ export async function createSourcePCMBridge({
   // At initial start only, populate both loop endpoints before play.
   // Later user A/B changes use one atomic loop-config message.
   // The renderer bounds its cache to four windows by default.
-  primeLoop();
-  sendWindow(startFrame===frames?frames-1:startFrame);
+  if(processingMode!=="worker"){
+    primeLoop();
+    sendWindow(startFrame===frames?frames-1:startFrame);
+  }
   const command=(op,params={})=>submit({type:"command",op,...params});
   const updateLoop=(a,b,enabled,op)=>{
     if(closed)return Promise.reject(Error("PCM bridge disposed"));
@@ -204,6 +212,8 @@ export async function createSourcePCMBridge({
     async play(){await ctx.resume();return command("play");},
     pause(){return command("pause");},
     seek(frame){
+      if(processingMode==="worker")
+        return Promise.reject(Error("legacy Worker seeks must reset the Worker generation"));
       if(!Number.isSafeInteger(frame)||frame<0||frame>frames)
         return Promise.reject(RangeError("invalid source-frame seek"));
       if(closed)return Promise.reject(Error("PCM bridge disposed"));
@@ -214,6 +224,8 @@ export async function createSourcePCMBridge({
         channels.map(x=>x.buffer));
     },
     setSpeed(next){
+      if(processingMode==="worker")
+        return Promise.reject(Error("legacy Worker speed changes must reset the Worker generation"));
       try{currentSpeed=validatePlaybackSpeed(next);}
       catch(error){return Promise.reject(error);}
       return command("speed",{speed:currentSpeed});
@@ -252,6 +264,8 @@ export async function createSourcePCMBridge({
     setPitch(next){
       if(processingMode==="raw")
         return Promise.reject(Error("independent pitch requires a synthesis model"));
+      if(processingMode==="worker")
+        return Promise.reject(Error("legacy Worker pitch changes must reset the Worker generation"));
       try{next=validatePitch(next);}
       catch(error){return Promise.reject(error);}
       // Preserve caller's full finite input precision, independent of any
@@ -259,16 +273,74 @@ export async function createSourcePCMBridge({
       return command("pitch",{semitones:next});
     },
     setLoopBounds(a,b){
+      if(processingMode==="worker")
+        return Promise.reject(Error("A/B playback is unavailable for the legacy Worker"));
       if(!Number.isSafeInteger(a)||!Number.isSafeInteger(b)||
          a<0||a>=b||b>frames)return Promise.reject(RangeError("invalid A/B bounds"));
       A=a;B=b;
       return updateLoop(a,b,loop,"bounds");
     },
     setLoopEnabled(enabled){
+      if(processingMode==="worker")
+        return Promise.reject(Error("A/B playback is unavailable for the legacy Worker"));
       if(typeof enabled!=="boolean")
         return Promise.reject(TypeError("invalid loop enabled"));
       loop=enabled;
       return updateLoop(A,B,enabled,"loop");
+    },
+    pushRenderedChunk(chunk){
+      if(processingMode!=="worker")
+        return Promise.reject(Error("rendered Worker chunks require Worker processing mode"));
+      if(!chunk||!Array.isArray(chunk.channels))
+        return Promise.reject(RangeError("invalid rendered Worker chunk"));
+      return submit({type:"rendered-chunk",...chunk},
+        chunk.channels.map(channel=>channel.buffer));
+    },
+    resetWorkerPlayback({frame,speed:nextSpeed,pitchSemitones:nextPitch,
+      generation}={}){
+      if(processingMode!=="worker")
+        return Promise.reject(Error("Worker playback state requires Worker processing mode"));
+      if(!Number.isSafeInteger(frame)||frame<0||frame>=frames||
+         !Number.isFinite(nextSpeed)||nextSpeed<.5||nextSpeed>2||
+         !Number.isFinite(nextPitch)||nextPitch<-12||nextPitch>12||
+         !Number.isSafeInteger(generation)||generation<1)
+        return Promise.reject(RangeError("invalid legacy Worker playback state"));
+      currentSpeed=nextSpeed;
+      return submit({type:"worker-state",frame,speed:nextSpeed,
+        pitchSemitones:nextPitch,generation});
+    },
+    stageWorkerSeekPlayback({frame,speed:nextSpeed,
+      pitchSemitones:nextPitch,generation,requiredChunks=1,
+      reuseCompatible=false,reuseGeneration=null}={}){
+      if(processingMode!=="worker")
+        return Promise.reject(Error("Worker seek requires Worker processing mode"));
+      if(!Number.isSafeInteger(frame)||frame<0||frame>=frames||
+         !Number.isFinite(nextSpeed)||nextSpeed<.5||nextSpeed>2||
+         !Number.isFinite(nextPitch)||nextPitch<-12||nextPitch>12||
+         !Number.isSafeInteger(generation)||generation<1||
+         !Number.isSafeInteger(requiredChunks)||requiredChunks<1||
+         requiredChunks>RENDERED_CHUNK_SLOTS||
+         typeof reuseCompatible!=="boolean"||
+         reuseGeneration!==null&&
+           (!Number.isSafeInteger(reuseGeneration)||reuseGeneration<0)||
+         reuseCompatible&&reuseGeneration===null)
+        return Promise.reject(RangeError("invalid staged legacy Worker seek"));
+      return submit({type:"worker-seek-stage",frame,speed:nextSpeed,
+        pitchSemitones:nextPitch,generation,requiredChunks,reuseCompatible,
+        reuseGeneration,
+        requestAudioTime:ctx.currentTime});
+    },
+    stageWorkerPlayback({speed:nextSpeed,pitchSemitones:nextPitch,
+      generation}={}){
+      if(processingMode!=="worker")
+        return Promise.reject(Error("staged playback requires Worker processing mode"));
+      if(!Number.isFinite(nextSpeed)||nextSpeed<.5||nextSpeed>2||
+         !Number.isFinite(nextPitch)||nextPitch<-12||nextPitch>12||
+         !Number.isSafeInteger(generation)||generation<1)
+        return Promise.reject(RangeError("invalid staged legacy Worker playback state"));
+      return submit({type:"worker-stage",speed:nextSpeed,
+        pitchSemitones:nextPitch,generation,
+        requestAudioTime:ctx.currentTime});
     },
     get latest(){return latest;},
     get processingMode(){return processingMode;},

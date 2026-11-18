@@ -5,6 +5,11 @@ import os from "node:os";
 import path from "node:path";
 import {spawn} from "node:child_process";
 import puppeteer from "puppeteer-core";
+import {cleanupTestProcesses} from "./test-process-cleanup.mjs";
+import {installTestAudioSilenceGuardForPage} from "./test-audio-silence-guard.mjs";
+
+const pythonCommand=process.env.PYTHON||
+  (process.platform==="win32"?"python":"python3");
 
 function sineWav(seconds=12) {
   const rate=16000,samples=rate*seconds,wav=Buffer.alloc(44+samples*2);
@@ -20,7 +25,7 @@ function sineWav(seconds=12) {
 }
 test("Chrome real-time Rust AudioWorklet streams, changes controls, seeks at waveform click",async()=>{
   const temp=await mkdtemp(path.join(os.tmpdir(),"warp-realtime-"));
-  const server=spawn("python3",["-m","http.server","8765","--bind","127.0.0.1"],
+  const server=spawn(pythonCommand,["-m","http.server","8765","--bind","127.0.0.1"],
     {cwd:path.resolve(process.env.WARP_WEB_ROOT||"web-demo"),stdio:"ignore"});
   let browser;
   try{
@@ -28,9 +33,10 @@ test("Chrome real-time Rust AudioWorklet streams, changes controls, seeks at wav
     browser=await puppeteer.launch({
       executablePath:process.env.CHROME_BIN||"/usr/bin/google-chrome",
       headless:true,
-      args:["--no-sandbox","--disable-dev-shm-usage","--autoplay-policy=no-user-gesture-required"]
+      args:["--no-sandbox","--disable-dev-shm-usage","--autoplay-policy=no-user-gesture-required", "--mute-audio"]
     });
     const page=await browser.newPage();
+    await installTestAudioSilenceGuardForPage(page);
     // #240: independently observe the real AudioContext clock in the Chrome
     // page; do not mistake a stalled UI label for stopped source playback.
     await page.evaluateOnNewDocument(()=>{
@@ -75,6 +81,7 @@ test("Chrome real-time Rust AudioWorklet streams, changes controls, seeks at wav
           document.querySelector("#curve").width,document.querySelector("#curve").height],
         errors:window.__uiErrors||[]
       })))+" | "+err.message);});
+    await page.click("#main-tab-model");
     const dimensions=await page.$eval("#curve",el=>({w:el.width,h:el.height}));
     assert.equal(dimensions.w,dimensions.h,"20-2kHz mapping must be square");
     assert.equal(await page.$eval("#invert",el=>el.value),"0");
@@ -1200,6 +1207,7 @@ test("Chrome real-time Rust AudioWorklet streams, changes controls, seeks at wav
     // Reproduce a cold iOS decoder that never settles on its first path.
     // The first file selection on a NEW page must recover on its own.
     const coldPage=await browser.newPage();
+    await installTestAudioSilenceGuardForPage(coldPage);
     await coldPage.goto("http://127.0.0.1:8765/index.html");
     await coldPage.evaluate(()=>{
       OfflineAudioContext.prototype.decodeAudioData=function(){
@@ -1214,11 +1222,17 @@ test("Chrome real-time Rust AudioWorklet streams, changes controls, seeks at wav
     });
     assert.match(await coldPage.$eval("#status",el=>el.textContent),/読み込み完了/);
     assert.equal(await coldPage.$eval("#file-meta",el=>el.textContent.includes("12.0秒")),true);
+    const outputIsolation=await page.evaluate(()=>window.__audioSilenceAudit);
+    assert.ok(outputIsolation.mutedOutputRoutes>0,outputIsolation);
+    assert.ok(outputIsolation.audioOutputMuteGains.length>0,outputIsolation);
+    assert.ok(outputIsolation.audioOutputMuteGains.every(gain=>gain===0),outputIsolation);
+    const coldOutputIsolation=await coldPage.evaluate(()=>window.__audioSilenceAudit);
+    assert.ok(coldOutputIsolation, "cold recovery page must install the output guard");
+    assert.ok(coldOutputIsolation.audioOutputMuteGains.every(gain=>gain===0),coldOutputIsolation);
     await coldPage.close();
     await page.close();
   }finally{
-    if(browser)await browser.close();
-    server.kill("SIGTERM");
-    await rm(temp,{recursive:true,force:true});
+    try{await cleanupTestProcesses(browser,[server],"WASM smoke HTTP server");}
+    finally{await rm(temp,{recursive:true,force:true});}
   }
 });

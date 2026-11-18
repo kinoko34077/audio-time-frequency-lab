@@ -5,6 +5,7 @@ import {createHash} from "node:crypto";
 import {spawn} from "node:child_process";
 import path from "node:path";
 import puppeteer from "puppeteer-core";
+import {cleanupTestProcesses} from "./test-process-cleanup.mjs";
 
 // #36 R2: a COMPLETE, CC0, originally released stereo orchestral music
 // recording, not a mono isolated note or a generated music-like test tone.
@@ -39,7 +40,7 @@ test("full real CC0 stereo orchestral song: three musical sections, L/R output, 
     browser=await puppeteer.launch({
       executablePath:process.env.CHROME_BIN||"/usr/bin/google-chrome",
       headless:true,args:["--no-sandbox","--disable-dev-shm-usage",
-        "--autoplay-policy=no-user-gesture-required"]
+        "--autoplay-policy=no-user-gesture-required", "--mute-audio"]
     });
     const page=await browser.newPage(),errors=[];
     page.on("pageerror",error=>errors.push(error.message));
@@ -459,7 +460,7 @@ test("full real CC0 stereo orchestral song: three musical sections, L/R output, 
       nodeStarts:originalNodes,scope:"REAL_COMPLETE_STEREO_ORCHESTRAL_SONG_CHROMIUM_WEB_AUDIO_NOT_DAC_OR_SUBJECTIVE_AUDIO"
     }));
   }finally{
-    await browser?.close();
-    sourceServer.kill("SIGTERM");appServer.kill("SIGTERM");
+    await cleanupTestProcesses(browser,[sourceServer,appServer],
+      "stereo music HTTP server");
   }
 });

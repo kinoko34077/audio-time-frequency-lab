@@ -13,13 +13,23 @@ function fft(re,im){
   if(i<j){[re[i],re[j]]=[re[j],re[i]];[im[i],im[j]]=[im[j],im[i]];}
  }
  for(let size=2;size<=n;size*=2){
-  const step=TAU/size;
-  for(let start=0;start<n;start+=size){
-   for(let j=0;j<size/2;j++){
-    const angle=-step*j,wr=Math.cos(angle),wi=Math.sin(angle),k=start+j,p=k+size/2;
+  const half=size/2,step=-TAU/size;
+  const stepCos=Math.cos(step),stepSin=Math.sin(step);
+  let twiddleCos=1,twiddleSin=0;
+  for(let j=0;j<half;j++){
+   for(let start=0;start<n;start+=size){
+    const k=start+j,p=k+half;
+    const wr=twiddleCos,wi=twiddleSin;
     const tr=re[p]*wr-im[p]*wi,ti=re[p]*wi+im[p]*wr;
     re[p]=re[k]-tr;im[p]=im[k]-ti;
     re[k]+=tr;im[k]+=ti;
+   }
+   const nextCos=twiddleCos*stepCos-twiddleSin*stepSin;
+   twiddleSin=twiddleSin*stepCos+twiddleCos*stepSin;
+   twiddleCos=nextCos;
+   if(((j+1)&1023)===0){
+    const angle=step*(j+1);
+    twiddleCos=Math.cos(angle);twiddleSin=Math.sin(angle);
    }
   }
  }
@@ -41,7 +51,19 @@ export function detectSharedCandidates(channels,sr,{maxCandidates=14}={}){
  for(const center of [.23,.5,.77]){
   const start=Math.max(0,Math.min(L-N,Math.round(L*center-N/2)));
   const re=new Float64Array(N),im=new Float64Array(N);
-  for(let i=0;i<N;i++)re[i]=guide[start+i]*(.5-.5*Math.cos(TAU*i/(N-1)));
+  const windowStep=TAU/(N-1),windowStepCos=Math.cos(windowStep),
+    windowStepSin=Math.sin(windowStep);
+  let windowCos=1,windowSin=0;
+  for(let i=0;i<N;i++){
+   re[i]=guide[start+i]*(.5-.5*windowCos);
+   const nextWindowCos=windowCos*windowStepCos-windowSin*windowStepSin;
+   windowSin=windowSin*windowStepCos+windowCos*windowStepSin;
+   windowCos=nextWindowCos;
+   if((i&1023)===1023){
+    const angle=windowStep*(i+1);
+    windowCos=Math.cos(angle);windowSin=Math.sin(angle);
+   }
+  }
   fft(re,im);
   const spectrum=new Float64Array(N/2);
   for(let k=0;k<N/2;k++)spectrum[k]=re[k]*re[k]+im[k]*im[k];
@@ -66,14 +88,35 @@ export function detectSharedCandidates(channels,sr,{maxCandidates=14}={}){
 function observationFit(signal,sr,f,centers,K){
  let cc=0,cs=0,ss=0,yc=0,ys=0,energy=0;
  const half=theoreticalWindow(f,K)/2;
+ const phaseStep=TAU*f/sr,stepCos=Math.cos(phaseStep),stepSin=Math.sin(phaseStep);
+ const windowStep=Math.PI/(sr*half),windowStepCos=Math.cos(windowStep),
+  windowStepSin=Math.sin(windowStep);
  for(const center of centers){
   const {firstSample,endSample}=sampleInterval(center,f,sr,K);
+  const loopStart=Math.max(0,firstSample);
+  let x=Math.cos(phaseStep*loopStart),y=Math.sin(phaseStep*loopStart);
+  const firstPosition=(loopStart/sr-center)/half;
+  let windowCos=Math.cos(Math.PI*firstPosition),windowSin=Math.sin(Math.PI*firstPosition);
   for(let i=Math.max(0,firstSample);i<Math.min(signal.length,endSample);i++){
    const t=i/sr,position=(t-center)/half;
-   if(Math.abs(position)>=1)continue;
-   const w=.5+.5*Math.cos(Math.PI*position),p=TAU*f*t;
-   const a=Math.cos(p),b=Math.sin(p),y=signal[i];
-   cc+=w*a*a;cs+=w*a*b;ss+=w*b*b;yc+=w*y*a;ys+=w*y*b;energy+=w*y*y;
+   if(Math.abs(position)<1){
+    const w=.5+.5*windowCos,sample=signal[i];
+    cc+=w*x*x;cs+=w*x*y;ss+=w*y*y;yc+=w*sample*x;ys+=w*sample*y;
+    energy+=w*sample*sample;
+   }
+   const nextWindowCos=windowCos*windowStepCos-windowSin*windowStepSin;
+   windowSin=windowSin*windowStepCos+windowCos*windowStepSin;
+   windowCos=nextWindowCos;
+   const nextX=x*stepCos-y*stepSin;
+   y=y*stepCos+x*stepSin;x=nextX;
+   if(((i-loopStart)&1023)===1023){
+    const nextPosition=((i+1)/sr-center)/half;
+    windowCos=Math.cos(Math.PI*nextPosition);
+    windowSin=Math.sin(Math.PI*nextPosition);
+   }
+   if((i&4095)===4095){
+    x=Math.cos(phaseStep*(i+1));y=Math.sin(phaseStep*(i+1));
+   }
   }
  }
  const det=cc*ss-cs*cs;
@@ -87,10 +130,17 @@ function scoreSource(signal,sr,f,params){
  // independent physical measurements.
  let projection=0,energy=0,error=0;
  const stride=Math.max(1,Math.floor(sr/12000));
+ const phaseStep=TAU*f*stride/sr,stepCos=Math.cos(phaseStep),stepSin=Math.sin(phaseStep);
+ let x=1,y=0,count=0;
  for(let i=0;i<signal.length;i+=stride){
-  const y=signal[i],p=TAU*f*i/sr;
-  const predicted=params.a*Math.cos(p)+params.b*Math.sin(p);
-  projection+=predicted*predicted;energy+=y*y;error+=(y-predicted)**2;
+  const sample=signal[i],predicted=params.a*x+params.b*y;
+  projection+=predicted*predicted;energy+=sample*sample;error+=(sample-predicted)**2;
+  const nextX=x*stepCos-y*stepSin;
+  y=y*stepCos+x*stepSin;x=nextX;
+  if((++count&1023)===0){
+   const nextIndex=i+stride,phase=TAU*f*nextIndex/sr;
+   x=Math.cos(phase);y=Math.sin(phase);
+  }
  }
  return {explained:energy>1e-12?Math.max(-1,1-error/energy):1,projection,energy};
 }
@@ -248,18 +298,33 @@ function sourceJointFit(channels,sr,freqs,stride){
  const gram=Array.from({length:dimension},()=>new Float64Array(dimension));
  const targets=channels.map(()=>new Float64Array(dimension));
  const phases=freqs.map(f=>TAU*f/sr);
+ const stepCos=freqs.map(f=>Math.cos(TAU*f*stride/sr));
+ const stepSin=freqs.map(f=>Math.sin(TAU*f*stride/sr));
+ const oscillatorCos=new Float64Array(freqs.length).fill(1);
+ const oscillatorSin=new Float64Array(freqs.length);
  const basis=new Float64Array(dimension);
- let energy=0;
+ let energy=0,sampleIndex=0;
  for(let i=0;i<length;i+=stride){
   for(let k=0;k<freqs.length;k++){
-   const phase=phases[k]*i;
-   basis[2*k]=Math.cos(phase);basis[2*k+1]=Math.sin(phase);
+   basis[2*k]=oscillatorCos[k];basis[2*k+1]=oscillatorSin[k];
   }
   for(let c=0;c<channels.length;c++){
    const y=channels[c][i];energy+=y*y;
    for(let k=0;k<dimension;k++)targets[c][k]+=basis[k]*y;
   }
   for(let k=0;k<dimension;k++)for(let j=0;j<=k;j++)gram[k][j]+=basis[k]*basis[j];
+  const nextSourceIndex=i+stride;
+  sampleIndex++;
+  for(let k=0;k<freqs.length;k++){
+   if((sampleIndex&1023)===0){
+    const phase=phases[k]*nextSourceIndex;
+    oscillatorCos[k]=Math.cos(phase);oscillatorSin[k]=Math.sin(phase);
+   }else{
+    const nextCos=oscillatorCos[k]*stepCos[k]-oscillatorSin[k]*stepSin[k];
+    oscillatorSin[k]=oscillatorSin[k]*stepCos[k]+oscillatorCos[k]*stepSin[k];
+    oscillatorCos[k]=nextCos;
+   }
+  }
  }
  for(let k=0;k<dimension;k++)for(let j=k+1;j<dimension;j++)gram[k][j]=gram[j][k];
  const coefficients=targets.map(t=>solveDense(gram,t));
@@ -289,13 +354,27 @@ function refineOriginalWaveform(channels,sr,partials){
    const isolated=channels.map((ch,c)=>{
     const residual=new Float64Array(Math.ceil(ch.length/stride));
     const coeff=current.coefficients[c];
+    const oscillatorCos=new Float64Array(count).fill(1);
+    const oscillatorSin=new Float64Array(count);
+    const stepCos=freqs.map(f=>Math.cos(TAU*f*stride/sr));
+    const stepSin=freqs.map(f=>Math.sin(TAU*f*stride/sr));
     for(let i=0,n=0;i<ch.length;i+=stride,n++){
      let other=0;
      for(let j=0;j<count;j++)if(j!==k){
-      const phase=TAU*freqs[j]*i/sr;
-      other+=coeff[2*j]*Math.cos(phase)+coeff[2*j+1]*Math.sin(phase);
+      other+=coeff[2*j]*oscillatorCos[j]+coeff[2*j+1]*oscillatorSin[j];
      }
      residual[n]=ch[i]-other;
+     const nextSourceIndex=i+stride;
+     for(let j=0;j<count;j++){
+      if(((n+1)&1023)===0){
+       const phase=TAU*freqs[j]*nextSourceIndex/sr;
+       oscillatorCos[j]=Math.cos(phase);oscillatorSin[j]=Math.sin(phase);
+      }else{
+       const nextCos=oscillatorCos[j]*stepCos[j]-oscillatorSin[j]*stepSin[j];
+       oscillatorSin[j]=oscillatorSin[j]*stepCos[j]+oscillatorCos[j]*stepSin[j];
+       oscillatorCos[j]=nextCos;
+      }
+     }
     }
     return residual;
    });

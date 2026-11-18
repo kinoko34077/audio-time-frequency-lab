@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {spawn} from "node:child_process";
 import path from "node:path";
 import puppeteer from "puppeteer-core";
+import {cleanupTestProcesses} from "./test-process-cleanup.mjs";
 
 test("R3 opt-in real page applies precise signed speed/pitch without replacing the AudioWorklet",async()=>{
   const port=18746;
@@ -14,7 +15,7 @@ test("R3 opt-in real page applies precise signed speed/pitch without replacing t
     browser=await puppeteer.launch({
       executablePath:process.env.CHROME_BIN||"/usr/bin/google-chrome",
       headless:true,args:["--no-sandbox","--disable-dev-shm-usage",
-        "--autoplay-policy=no-user-gesture-required"]
+        "--autoplay-policy=no-user-gesture-required", "--mute-audio"]
     });
     const page=await browser.newPage(),errors=[];
     page.on("pageerror",e=>errors.push(e.message));
@@ -235,6 +236,6 @@ test("R3 opt-in real page applies precise signed speed/pitch without replacing t
       ?.dataset.pcmTransport,{timeout:10000});
     assert.deepEqual(errors,[]);
   }finally{
-    await browser?.close();server.kill();
+    await cleanupTestProcesses(browser,[server],"granular player HTTP server");
   }
 });

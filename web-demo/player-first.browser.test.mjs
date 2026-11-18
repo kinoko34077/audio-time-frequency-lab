@@ -3,22 +3,24 @@ import assert from "node:assert/strict";
 import {spawn} from "node:child_process";
 import path from "node:path";
 import puppeteer from "puppeteer-core";
+import {cleanupTestProcesses} from "./test-process-cleanup.mjs";
 
 const recording=path.resolve("web-demo/test-fixtures/meta-piano-a0-cc0-3s-48khz.wav");
+const siteRoot=path.resolve(process.env.AUDIO_LAB_TEST_SITE||"_site");
 const python=process.env.PYTHON_BIN||
   (process.platform==="win32"?"python":"python3");
 
 test("R4 default page: play recorded song, set precise A/B and speed/pitch, switch tabs without reset",async()=>{
   const port=18771;
   const server=spawn(python,["-m","http.server",String(port),"--bind","127.0.0.1"],{
-    cwd:path.resolve("_site"),stdio:"ignore"
+    cwd:siteRoot,stdio:"ignore"
   });
   let browser;
   try{
     browser=await puppeteer.launch({
       executablePath:process.env.CHROME_BIN||"/usr/bin/google-chrome",
       headless:true,args:["--no-sandbox","--disable-dev-shm-usage",
-        "--autoplay-policy=no-user-gesture-required"]
+        "--autoplay-policy=no-user-gesture-required", "--mute-audio"]
     });
     const page=await browser.newPage(),errors=[];
     page.on("pageerror",err=>errors.push(err.message));
@@ -221,12 +223,37 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, swit
     },{x:bHandle.x,y:editingWave.y+editingWave.height*.5});
     assert.equal(bTarget.id,"wave-detail",
       "physical B drag must hit the editable waveform, not an overlapping panel: "+JSON.stringify(bTarget));
+    await page.evaluate(()=>{
+      window.__r4PointerTrace=[];
+      const wave=document.querySelector("#wave-detail");
+      for(const type of ["pointerdown","pointermove","pointerup"])
+        wave.addEventListener(type,event=>window.__r4PointerTrace.push({
+          type,target:event.target?.id,x:event.clientX,y:event.clientY,
+          buttons:event.buttons,pointerId:event.pointerId,
+          captured:wave.hasPointerCapture(event.pointerId)
+        }),true);
+    });
     await page.mouse.move(bHandle.x,editingWave.y+editingWave.height*.5);
     await page.mouse.down();
     await page.mouse.move(bHandle.x+55,editingWave.y+editingWave.height*.5,{steps:6});
     await page.mouse.up();
-    await page.waitForFunction(()=>Number(document.querySelector("#player-loop-b").value)>12000,
-      {timeout:15000});
+    try{
+      await page.waitForFunction(()=>Number(document.querySelector("#player-loop-b").value)>12000,
+        {timeout:15000});
+    }catch(error){
+      const diagnostic=await page.evaluate(({x,y})=>{
+        const handle=document.querySelector("#wave-b-marker"),rect=handle.getBoundingClientRect();
+        const target=document.elementFromPoint(x,y);
+        return {loopA:document.querySelector("#player-loop-a").value,
+          loopB:document.querySelector("#player-loop-b").value,
+          handle:{hidden:handle.hidden,left:rect.left,right:rect.right,top:rect.top,bottom:rect.bottom},
+          releaseTarget:{id:target?.id,tag:target?.tagName,className:target?.className},
+          pointerTrace:window.__r4PointerTrace};
+      },{x:bHandle.x+55,y:editingWave.y+editingWave.height*.5});
+      console.log("R4_AB_DRAG_DIAGNOSTIC",JSON.stringify(diagnostic));
+      throw Error("B handle drag did not update the endpoint: "+JSON.stringify(diagnostic)+
+        " / "+error.message);
+    }
     const draggedB=Number(await page.$eval("#player-loop-b",el=>el.value));
     assert.ok(draggedB>12000);
     // Move the waveform under the fixed head (as opposed to moving a head
@@ -472,38 +499,82 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, swit
       note:"browser functional route; no iPhone / subjective audio fidelity proof"
     }));
   }finally{
-    await browser?.close();server.kill();
+    await cleanupTestProcesses(browser,[server],"player-first R4 HTTP server");
   }
 });
 test("U1/U5 primary Play routes to REAL selected live/PV/Granular engines and one speed/pitch state",async()=>{
   const port=18772;
   const server=spawn(python,["-m","http.server",String(port),"--bind","127.0.0.1"],{
-    cwd:path.resolve("_site"),stdio:"ignore"
+    cwd:siteRoot,stdio:"ignore"
   });
   let browser;
   try{
     browser=await puppeteer.launch({
       executablePath:process.env.CHROME_BIN||"/usr/bin/google-chrome",
       headless:true,args:["--no-sandbox","--disable-dev-shm-usage",
-        "--autoplay-policy=no-user-gesture-required"]
+        "--autoplay-policy=no-user-gesture-required", "--mute-audio"]
     });
     const page=await browser.newPage(),errors=[];
     page.on("pageerror",err=>errors.push(err.message));
     await page.evaluateOnNewDocument(()=>{
       const Worklet=window.AudioWorkletNode,NativeWorker=window.Worker;
       window.__engineCreations=[];
+      window.__workerMessages=[];
+      window.__workerResponses=[];
+      window.__workletFrames=[];
+      window.__lastPcmWorkletId=0;
       window.AudioWorkletNode=class extends Worklet{
         constructor(ctx,name,opts){
           super(ctx,name,opts);
-          window.__engineCreations.push({kind:"worklet",name});
+          const id=window.__engineCreations.length+1;
+          window.__engineCreations.push({kind:"worklet",name,id});
+          if(name==="audio-lab-source-pcm")window.__lastPcmWorkletId=id;
+          this.port.addEventListener("message",event=>{
+            if(Number.isSafeInteger(event.data?.sourceFrame))
+              window.__workletFrames.push({id,type:event.data.type,
+                sourceFrame:event.data.sourceFrame,
+                generation:event.data.generation});
+          });
         }
       };
       window.Worker=class extends NativeWorker{
         constructor(url,options){
           super(url,options);
-          window.__engineCreations.push({kind:"worker",name:String(url)});
+          this.__labName=String(url);
+          this.__labCreation={kind:"worker",name:String(url),terminated:false};
+          window.__engineCreations.push(this.__labCreation);
+          this.addEventListener("message",event=>{
+            if(!String(this.__labName).includes("lab-processor.worker.mjs"))return;
+            const data=event.data||{};
+            window.__workerResponses.push({job:data.job,
+              generation:data.generation,ok:data.ok});
+          });
+        }
+        terminate(){
+          if(this.__labCreation)this.__labCreation.terminated=true;
+          return super.terminate();
+        }
+        postMessage(message,transfer){
+          if(String(this.__labName||"").includes("lab-processor.worker.mjs")){
+            window.__workerMessages.push({job:message?.job,
+              generation:message?.generation,startFrame:message?.plan?.start});
+          }
+          return super.postMessage(message,transfer);
         }
       };
+      document.addEventListener("keydown",event=>{
+        if(event.target?.id!=="wave"||event.key!=="ArrowRight")return;
+        const id=window.__lastPcmWorkletId;
+        const current=[...window.__workletFrames].reverse().find(x=>
+          x.id===id&&Number.isSafeInteger(x.sourceFrame));
+        const canvas=document.getElementById("wave-detail");
+        const fileMeta=document.getElementById("file-meta")?.textContent||"";
+        const rate=Number(fileMeta.match(/(\d+)Hz/)?.[1]);
+        const totalFrames=Number(canvas?.getAttribute("aria-valuemax"))+1;
+        if(!current||!(rate>0&&totalFrames>1))return;
+        window.__expectedSeekFrame=Math.round(Math.min(
+          totalFrames/rate-.01,current.sourceFrame/rate+2)*rate);
+      },true);
     });
     await page.goto("http://127.0.0.1:"+port+"/?model=granular",{
       waitUntil:"domcontentloaded",timeout:20000
@@ -679,19 +750,73 @@ test("U1/U5 primary Play routes to REAL selected live/PV/Granular engines and on
     await set("granular-speed-value","0");
     await page.waitForFunction(()=>document.querySelector("#lab-status")
       ?.textContent.includes("適用待ち"),{timeout:10000});
-    const beforeSeekWorker=await page.evaluate(()=>window.__engineCreations
-      .filter(x=>x.kind==="worker"&&x.name.includes("lab-processor.worker.mjs")).length);
+    const beforeSeekWorkers=await page.evaluate(()=>{
+      const workers=window.__engineCreations.filter(x=>x.kind==="worker"&&
+        x.name.includes("lab-processor.worker.mjs"));
+      return {created:workers.length,active:workers.filter(x=>!x.terminated).length};
+    });
+    assert.equal(beforeSeekWorkers.active,1,
+      "exactly one primary Worker is active before seek");
+    const beforeSeekGeneration=await page.evaluate(()=>Math.max(-1,...window.__workerMessages
+      .filter(x=>Number.isSafeInteger(x.generation)).map(x=>x.generation)));
     await page.focus("#wave");
     await page.keyboard.press("ArrowRight");
-    await page.waitForFunction(before=>window.__engineCreations
-      .filter(x=>x.kind==="worker"&&x.name.includes("lab-processor.worker.mjs")).length>before,
-      {timeout:20000},beforeSeekWorker);
+    await page.waitForFunction(generation=>window.__workerMessages.some(x=>
+      Number.isSafeInteger(x.generation)&&x.generation>generation),
+      {timeout:20000},beforeSeekGeneration);
+    const expectedSeekFrame=await page.evaluate(()=>window.__expectedSeekFrame);
+    try{
+      await page.waitForFunction(generation=>{
+        const workers=window.__engineCreations.filter(x=>x.kind==="worker"&&
+          x.name.includes("lab-processor.worker.mjs"));
+        return window.__workerResponses.some(x=>x.generation>generation&&x.ok===true)&&
+          window.__workletFrames.some(x=>x.type==="worker-state-activated"&&
+            x.generation>generation)&&
+          workers.filter(x=>!x.terminated).length===1;
+      },{timeout:20000},beforeSeekGeneration);
+    }catch(error){
+      const diagnostic=await page.evaluate(generation=>{
+        const workers=window.__engineCreations.filter(x=>x.kind==="worker"&&
+          x.name.includes("lab-processor.worker.mjs"));
+        return {workers:workers.map(x=>({terminated:x.terminated,name:x.name})),
+          messages:window.__workerMessages.filter(x=>x.generation>generation),
+          responses:window.__workerResponses.filter(x=>x.generation>generation),
+          workletEvents:window.__workletFrames.slice(-20),
+          workletEventTypes:[...new Set(window.__workletFrames.map(x=>x.type))]};
+      },beforeSeekGeneration);
+      throw Error("seek handoff lifecycle did not settle: "+JSON.stringify(diagnostic)+
+        " / "+error.message);
+    }
+    const seekRender=await page.evaluate(generation=>({
+      workers:window.__engineCreations.filter(x=>x.kind==="worker"&&
+        x.name.includes("lab-processor.worker.mjs")),
+      messages:window.__workerMessages.filter(x=>x.generation>generation),
+      responses:window.__workerResponses.filter(x=>x.generation>generation),
+      activations:window.__workletFrames.filter(x=>
+        x.type==="worker-state-activated"&&x.generation>generation)
+    }),beforeSeekGeneration);
+    assert.equal(seekRender.workers.length,beforeSeekWorkers.created+1,
+      "seek creates one temporary handoff Worker");
+    assert.equal(seekRender.workers.filter(x=>!x.terminated).length,
+      beforeSeekWorkers.active,
+      "seek retires its handoff Worker after the existing source-clock route activates");
+    assert.ok(seekRender.responses.some(x=>x.ok===true),
+      "seek handoff Worker must return rendered PCM");
+    assert.ok(seekRender.activations.length>0,
+      "seek PCM must activate in the existing shared Worklet");
+    assert.ok(Number.isSafeInteger(expectedSeekFrame),
+      "keyboard event must observe the shared source-frame cursor before seeking");
+    assert.ok(seekRender.messages.some(x=>x.startFrame===expectedSeekFrame),
+      "ArrowRight must submit a real Worker render from the clamped source frame: "+
+      JSON.stringify({expectedSeekFrame,messages:seekRender.messages}));
     await page.waitForFunction(()=>{
       const text=document.querySelector("#rt-indicator")?.textContent||"";
       return text.includes("モデル再生中")&&text.includes("PV");
     },{timeout:20000});
     assert.equal(await page.$eval("#granular-speed-value",el=>el.value),"0");
     assert.match(await page.$eval("#lab-status",el=>el.textContent),/適用待ち/);
+    assert.match(await page.$eval("#rt-telemetry",el=>el.textContent),/Worker/,
+      "active Worker status remains visible beside the unapplied speed request");
     assert.equal(await page.$eval("#stop",el=>el.disabled),false);
     assert.deepEqual(errors,[]);
     console.log("U1_U5_REAL_MODEL_ROUTE "+JSON.stringify({
@@ -700,19 +825,20 @@ test("U1/U5 primary Play routes to REAL selected live/PV/Granular engines and on
       rustZero:"audible frozen source cursor and shared-clock seek",
       individualPeriodWorkerZero:"pending without stopping last-good DSP"
     }));
-  }finally{await browser?.close();server.kill("SIGTERM");}
+  }finally{await cleanupTestProcesses(browser,[server],
+    "player-first selected-model HTTP server");}
 });
 
 test("U7 touch tap seeks without autoplay; deliberate drag auditions PCM, paused remains paused",async()=>{
   const port=18775,server=spawn(python,["-m","http.server",String(port),"--bind","127.0.0.1"],{
-    cwd:path.resolve("_site"),stdio:"ignore"
+    cwd:siteRoot,stdio:"ignore"
   });
   let browser;
   try{
     browser=await puppeteer.launch({
       executablePath:process.env.CHROME_BIN||"/usr/bin/google-chrome",
       headless:true,args:["--no-sandbox","--disable-dev-shm-usage",
-        "--autoplay-policy=no-user-gesture-required"]
+        "--autoplay-policy=no-user-gesture-required", "--mute-audio"]
     });
     const page=await browser.newPage(),errors=[];
     page.on("pageerror",e=>errors.push(e.message));
@@ -804,21 +930,22 @@ test("U7 touch tap seeks without autoplay; deliberate drag auditions PCM, paused
       overviewTap,detailTap,detailDrag:started,pausedTap:paused,
       overviewDrag:overviewStarted
     }));
-  }finally{await browser?.close();server.kill("SIGTERM");}
+  }finally{await cleanupTestProcesses(browser,[server],
+    "player-first touch HTTP server");}
 });
 
 
 test("shared A/B updates every realtime model and compact numeric controls stay expanded",async()=>{
   const port=18809;
   const server=spawn(python,["-m","http.server",String(port),"--bind","127.0.0.1"],{
-    cwd:path.resolve("_site"),stdio:"ignore"
+    cwd:siteRoot,stdio:"ignore"
   });
   let browser;
   try{
     browser=await puppeteer.launch({
       executablePath:process.env.CHROME_BIN||"/usr/bin/google-chrome",
       headless:true,args:["--no-sandbox","--disable-dev-shm-usage",
-        "--autoplay-policy=no-user-gesture-required"]
+        "--autoplay-policy=no-user-gesture-required", "--mute-audio"]
     });
     const page=await browser.newPage();
     await page.goto("http://127.0.0.1:"+port+"/",{waitUntil:"domcontentloaded",timeout:20000});
@@ -893,7 +1020,7 @@ test("shared A/B updates every realtime model and compact numeric controls stay 
       "invalid freeform FFT size must not silently change the model");
     assert.equal(await page.$eval("#lab-short-value",el=>el.validity.customError),true);
   }finally{
-    await browser?.close();
-    server.kill("SIGTERM");
+    await cleanupTestProcesses(browser,[server],
+      "player-first settings HTTP server");
   }
 });

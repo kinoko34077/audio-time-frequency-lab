@@ -5,10 +5,15 @@ import {mkdtemp,rm} from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import puppeteer from "puppeteer-core";
+import {cleanupTestProcesses} from "./test-process-cleanup.mjs";
+import {installTestAudioSilenceGuardForPage} from "./test-audio-silence-guard.mjs";
+
+const pythonCommand=process.env.PYTHON||
+  (process.platform==="win32"?"python":"python3");
 
 test("native Chrome experimental source-PCM AudioWorklet renders and loops without recreating its node",async()=>{
   const port=18743;
-  const server=spawn("python3",["-m","http.server",String(port),"--bind","127.0.0.1"],{
+  const server=spawn(pythonCommand,["-m","http.server",String(port),"--bind","127.0.0.1"],{
     cwd:path.resolve("web-demo"),stdio:"ignore"
   });
   let browser;
@@ -16,9 +21,10 @@ test("native Chrome experimental source-PCM AudioWorklet renders and loops witho
     browser=await puppeteer.launch({
       executablePath:process.env.CHROME_BIN||"/usr/bin/google-chrome",
       headless:true,args:["--no-sandbox","--disable-dev-shm-usage",
-        "--autoplay-policy=no-user-gesture-required"]
+        "--autoplay-policy=no-user-gesture-required", "--mute-audio"]
     });
     const page=await browser.newPage();
+    await installTestAudioSilenceGuardForPage(page);
     const pageErrors=[];
     page.on("pageerror",e=>pageErrors.push(e.message));
     await page.goto("http://127.0.0.1:"+port+"/source-pcm-smoke.html",{
@@ -64,33 +70,40 @@ test("native Chrome experimental source-PCM AudioWorklet renders and loops witho
         }
       });
       rust.connect(analyser);
+      analyser.fftSize=4096;
+      const measureRustPCM=()=>{
+        const pcm=new Float32Array(analyser.fftSize);
+        analyser.getFloatTimeDomainData(pcm);
+        let power=0,peak=0,frequency=0;
+        for(const sample of pcm)power+=sample*sample;
+        for(let hz=850;hz<=910;hz++){
+          let re=0,im=0;
+          for(let i=0;i<pcm.length;i++){
+            const phase=2*Math.PI*hz*i/ctx.sampleRate;
+            re+=pcm[i]*Math.cos(phase);im-=pcm[i]*Math.sin(phase);
+          }
+          const magnitude=Math.hypot(re,im);
+          if(magnitude>peak){peak=magnitude;frequency=hz;}
+        }
+        return {rms:Math.sqrt(power/pcm.length),frequency};
+      };
       await rust.play();
       await new Promise(resolve=>setTimeout(resolve,280));
       const rustFreeze=rust.latest;
-      const rustPcm=new Float32Array(4096);
-      analyser.getFloatTimeDomainData(rustPcm);
-      const rustRms=Math.sqrt(rustPcm.reduce((sum,v)=>sum+v*v,0)/rustPcm.length);
-      let rustPeak=0,rustFrequency=0;
-      for(let hz=850;hz<=910;hz++){
-        let re=0,im=0;
-        for(let i=0;i<rustPcm.length;i++){
-          const phase=2*Math.PI*hz*i/ctx.sampleRate;
-          re+=rustPcm[i]*Math.cos(phase);im-=rustPcm[i]*Math.sin(phase);
-        }
-        const magnitude=Math.hypot(re,im);
-        if(magnitude>rustPeak){rustPeak=magnitude;rustFrequency=hz;}
-      }
+      const rustFreezePCM=measureRustPCM();
       await rust.setSpeed(8);
       await rust.setLoopBounds(12000,36000);
       await rust.setLoopEnabled(true);
       await new Promise(resolve=>setTimeout(resolve,140));
       const rustLoop=rust.latest;
+      const rustForwardPCM=measureRustPCM();
       await rust.setLoopEnabled(false);
       await rust.setSpeed(0);
       await rust.seek(42000);
       await rust.setSpeed(-8);
-      await new Promise(resolve=>setTimeout(resolve,60));
+      await new Promise(resolve=>setTimeout(resolve,100));
       const rustReverse=rust.latest;
+      const rustReversePCM=measureRustPCM();
       await rust.scrub(22000,0);
       await new Promise(resolve=>setTimeout(resolve,60));
       const rustScrub=rust.latest;
@@ -200,8 +213,10 @@ test("native Chrome experimental source-PCM AudioWorklet renders and loops witho
       await ctx.close();
       return {
         first,loop,rms,stable,loopMissing,transitions,afterDispose,
-        rust:{freeze:rustFreeze,rms:rustRms,loop:rustLoop,
-          frequency:rustFrequency,reverse:rustReverse,scrub:rustScrub,
+        rust:{freeze:rustFreeze,freezePCM:rustFreezePCM,rms:rustFreezePCM.rms,loop:rustLoop,
+          frequency:rustFreezePCM.frequency,freezeRms:rustFreezePCM.rms,
+          forwardPCM:rustForwardPCM,reverse:rustReverse,
+          reversePCM:rustReversePCM,scrub:rustScrub,
           errors:rustEvents},
         oldInFlightReceipts,
         failureRecovery:{crashRejected,fatalCount,afterCrashRejected,
@@ -218,19 +233,35 @@ test("native Chrome experimental source-PCM AudioWorklet renders and loops witho
         }
       };
     });
+    const outputIsolation=await page.evaluate(()=>window.__audioSilenceAudit);
+    console.log("TEST_AUDIO_ISOLATION "+JSON.stringify(outputIsolation));
+    console.log("RUST_SIGNED_SPEED_PCM "+JSON.stringify({sampleRate:48000,
+      pitchSemitones:12,freeze:evidence.rust.freezePCM,
+      positive8x:evidence.rust.forwardPCM,negative8x:evidence.rust.reversePCM}));
+    assert.ok(outputIsolation.mutedOutputRoutes>0,outputIsolation);
+    assert.ok(outputIsolation.audioOutputMuteGains.length>0,outputIsolation);
+    assert.ok(outputIsolation.audioOutputMuteGains.every(gain=>gain===0),outputIsolation);
     assert.deepEqual(pageErrors,[]);
     assert.deepEqual(evidence.errors,[]);
     assert.deepEqual(evidence.rust.errors,[]);
     assert.equal(evidence.rust.freeze?.sourceFrame,24000,evidence.rust);
     assert.equal(evidence.rust.freeze?.pitchSemitones,12,evidence.rust);
     assert.equal(evidence.rust.freeze?.running,true,evidence.rust);
-    assert.ok(evidence.rust.rms>.02,evidence.rust);
+    assert.ok(evidence.rust.freezeRms>.02,evidence.rust);
     assert.ok(Math.abs(evidence.rust.frequency-880)<=4,evidence.rust);
+    assert.ok(evidence.rust.forwardPCM.rms>.01,evidence.rust,
+      "Rust +8x must emit measured non-silent PCM");
+    assert.ok(Math.abs(evidence.rust.forwardPCM.frequency-880)<=4,evidence.rust,
+      "Rust +8x must keep the independently selected octave pitch");
     assert.ok(evidence.rust.loop?.sourceFrame>=12000&&
       evidence.rust.loop?.sourceFrame<36000,evidence.rust);
     assert.equal(evidence.rust.loop?.loopEnabled,true,evidence.rust);
     assert.ok(evidence.rust.reverse?.sourceFrame<42000,evidence.rust);
     assert.ok(evidence.rust.reverse?.sourceFrame>0,evidence.rust);
+    assert.ok(evidence.rust.reversePCM.rms>.01,evidence.rust,
+      "Rust -8x must emit measured non-silent PCM");
+    assert.ok(Math.abs(evidence.rust.reversePCM.frequency-880)<=4,evidence.rust,
+      "Rust -8x must keep the independently selected octave pitch");
     assert.equal(evidence.rust.scrub?.sourceFrame,22000,evidence.rust);
     assert.equal(evidence.rust.scrub?.speed,0,evidence.rust);
     assert.ok(evidence.first?.renderedFrames>=1024,evidence);
@@ -265,7 +296,6 @@ test("native Chrome experimental source-PCM AudioWorklet renders and loops witho
     assert.equal(evidence.farSeek.afterMissing,evidence.farSeek.beforeMissing,
       "far seek source cache should be ready without missing output frames");
   }finally{
-    await browser?.close();
-    server.kill();
+    await cleanupTestProcesses(browser,[server],"PCM Worklet HTTP server");
   }
 });

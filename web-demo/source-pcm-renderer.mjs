@@ -2,10 +2,11 @@
  * Owns only source sample reads/interpolation and underrun measurement.
  * Transport decisions live in source-timeline.mjs.
  */
-import {createSourceTimeline,nextSourceSampleIndex} from "./source-timeline.mjs";
+import {createSourceTimeline,loopSourcePosition,nextSourceSampleIndex} from "./source-timeline.mjs";
 
 export const SOURCE_WINDOW_FRAMES=65536;
 export const SOURCE_WINDOW_SLOTS=4;
+export const RENDERED_CHUNK_SLOTS=4;
 
 export function chooseSourceWindowStart(frame,sourceFrames,windowFrames=SOURCE_WINDOW_FRAMES,speed=1){
   if(!Number.isSafeInteger(sourceFrames)||sourceFrames<1 ||
@@ -35,7 +36,13 @@ export function createSourcePCMRenderer({
     loopStartFrame,loopEndFrame,loopEnabled
   });
   const windows=[];
+  const renderedChunks=[];
   let missingFrames=0,renderedFrames=0,firstMissingFrame=null;
+  let renderedGeneration=0,previousRendered=null,workerMode=false;
+  let nextRenderedSequence=0;
+  let stagedWorkerState=null,workerActivation=null;
+  let workerState={generation:0,speed,pitchSemitones:0};
+  let workerTransitionLeft=0;
   const find=(index)=>{
     for(let i=windows.length-1;i>=0;i--){
       const w=windows[i];
@@ -61,13 +68,22 @@ export function createSourcePCMRenderer({
     if(last<0)return;
     for(let ch=0;ch<channelCount;ch++)lastAudible[ch]=output[ch][last];
   }
-  function beginOutputTransition(){
+  function beginOutputTransition(output=null,frameIndex=0){
     // The synth has its own smoothing, but the neutral PCM identity path
     // bypasses that synth. Keep transport discontinuities click-free without
     // adding a parallel audio node or resetting the source clock.
-    if(renderedFrames===0||!(neutralBlend>0))return;
-    transitionOrigin.set(lastAudible);
-    transitionLeft=TRANSITION_FRAMES;
+    if(renderedFrames===0)return;
+    const priorOutput=output&&frameIndex>0?output:null;
+    if(neutralBlend>0){
+      for(let ch=0;ch<channelCount;ch++)
+        transitionOrigin[ch]=priorOutput?priorOutput[ch][frameIndex-1]:lastAudible[ch];
+      transitionLeft=TRANSITION_FRAMES;
+    }
+    if(workerMode){
+      for(let ch=0;ch<channelCount;ch++)
+        transitionOrigin[ch]=priorOutput?priorOutput[ch][frameIndex-1]:lastAudible[ch];
+      workerTransitionLeft=TRANSITION_FRAMES;
+    }
   }
   function blendNeutralPCM(output,state,pitch){
     // Tiny A/B intervals deliberately retain a synthesis context: directly
@@ -116,8 +132,15 @@ export function createSourcePCMRenderer({
   const api={
     timeline,beginOutputTransition,
     get firstMissingFrame(){return firstMissingFrame;},
+    get workerState(){return {...workerState};},
+    takeWorkerActivation(){
+      const activated=workerActivation;workerActivation=null;return activated;
+    },
     get statistics(){return Object.freeze({
-      missingFrames,renderedFrames,windowCount:windows.length
+      missingFrames,renderedFrames,windowCount:windows.length,
+      renderedChunkCount:renderedChunks.length+
+        (stagedWorkerState?.kind==="seek"?
+          stagedWorkerState.preparedChunks.length:0)
     });},
     hasFrame(index){return Number.isInteger(index)&&!!find(index);},
     installWindow(start,channels,pin=null,intent="prefetch"){
@@ -220,6 +243,366 @@ export function createSourcePCMRenderer({
         for(const w of windows)w.pin=null;
       }
       return timeline.state;
+    },
+    /**
+     * Install one bounded Worker-rendered model segment. The Worker owns the
+     * selected legacy DSP; this renderer owns the only audible source clock.
+     * A stale generation is ignored, never replayed after emitted output.
+     */
+    installRenderedChunk({generation,sequence,startFrame,endFrame,speed,coreFrames,channels}={}){
+      if(!Number.isSafeInteger(generation)||generation<0||
+         !Number.isSafeInteger(startFrame)||!Number.isSafeInteger(endFrame)||
+         startFrame<0||startFrame>=endFrame||endFrame>sourceFrames||
+         !Number.isFinite(speed)||speed<.5||speed>2||
+         !Number.isSafeInteger(coreFrames)||coreFrames<1||
+         !Array.isArray(channels)||channels.length!==channelCount||
+         channels.some(ch=>!(ch instanceof Float32Array)||
+           ch.length<coreFrames||ch.length>14_000_000/channelCount))
+        throw RangeError("invalid rendered PCM chunk");
+      const active=generation===renderedGeneration;
+      const staged=stagedWorkerState?.generation===generation?
+        stagedWorkerState:null;
+      if(!active&&!staged)return false;
+      const queueSequence=sequence??(staged&&!staged.firstChunkAccepted?
+        staged.sequence:nextRenderedSequence);
+      if(!Number.isSafeInteger(queueSequence)||queueSequence<0)
+        throw RangeError("invalid rendered PCM queue sequence");
+      const seeking=stagedWorkerState?.kind==="seek"?stagedWorkerState:null;
+      if(active&&seeking&&renderedChunks.length>=seeking.retainedLimit)return false;
+      if(active&&!seeking&&stagedWorkerState?.firstChunkAccepted&&
+         queueSequence>stagedWorkerState.sequence)return false;
+      const expectedSpeed=active?timeline.state.speed:staged.speed;
+      if(speed!==expectedSpeed)
+        throw RangeError("rendered PCM speed does not match source clock");
+      if(staged&&!staged.firstChunkAccepted&&startFrame!==staged.frame)
+        throw RangeError("staged PCM must begin at the staged source boundary");
+      if(staged?.kind==="seek"){
+        const previous=staged.preparedChunks.at(-1)||null;
+        const expectedSequence=previous?previous.sequence+1:staged.sequence;
+        const expectedStart=previous?
+          (previous.endFrame>=sourceFrames?0:previous.endFrame):staged.frame;
+        if(renderedChunks.length+staged.preparedChunks.length>=
+           RENDERED_CHUNK_SLOTS)return false;
+        if(queueSequence!==expectedSequence||startFrame!==expectedStart)
+          throw RangeError("prepared seek PCM queue is not source-contiguous");
+        staged.preparedChunks.push({generation,sequence:queueSequence,startFrame,
+          endFrame,speed,coreFrames,channels});
+        staged.firstChunkAccepted=true;
+        workerMode=true;
+        return renderedChunks.length+staged.preparedChunks.length;
+      }
+      const replacementIndex=staged&&!staged.firstChunkAccepted?
+        renderedChunks.findIndex(segment=>
+          segment.generation===renderedGeneration&&
+          segment.sequence===staged.sequence):-1;
+      if(replacementIndex>=0){
+        if(timeline.state.sourceFrame>=renderedChunks[replacementIndex].endFrame)
+          return false;
+        renderedChunks[replacementIndex]={generation,sequence:queueSequence,
+          startFrame,endFrame,speed,coreFrames,channels};
+        renderedChunks.splice(replacementIndex+1);
+        nextRenderedSequence=queueSequence+1;
+        staged.firstChunkAccepted=true;
+        workerMode=true;
+        return renderedChunks.length;
+      }
+      if(staged&&!staged.firstChunkAccepted&&
+         queueSequence!==staged.sequence)
+        throw RangeError("staged PCM queue sequence does not match its boundary");
+      if(renderedChunks.some(segment=>segment.sequence===queueSequence))
+        return false;
+      if(renderedChunks.length>=RENDERED_CHUNK_SLOTS)
+        throw RangeError("rendered PCM chunk queue full");
+      const previous=renderedChunks.at(-1)||previousRendered;
+      const lateHandoffResult=
+        (active&&stagedWorkerState&&stagedWorkerState.kind!=="seek"&&
+          queueSequence>stagedWorkerState.sequence)||
+        (staged&&!staged.firstChunkAccepted&&
+          queueSequence===staged.sequence);
+      if(previous){
+        const expected=previous.endFrame>=sourceFrames?0:previous.endFrame;
+        if(startFrame!==expected||queueSequence!==previous.sequence+1){
+          if(lateHandoffResult)return false;
+          throw RangeError("rendered PCM chunks are not source-contiguous");
+        }
+      }else if(queueSequence!==nextRenderedSequence){
+        if(lateHandoffResult)return false;
+        throw RangeError("rendered PCM queue sequence is not contiguous");
+      }
+      workerMode=true;
+      if(renderedFrames>0&&renderedChunks.length===0)
+        workerTransitionLeft=TRANSITION_FRAMES;
+      renderedChunks.push({generation,sequence:queueSequence,startFrame,endFrame,
+        speed,coreFrames,channels});
+      nextRenderedSequence=queueSequence+1;
+      if(staged)stagedWorkerState.firstChunkAccepted=true;
+      return renderedChunks.length;
+    },
+    /** Stage a new Worker configuration after the currently audible chunk. */
+    stageRenderedState({generation,speed,pitchSemitones}={}){
+      if(!Number.isSafeInteger(generation)||generation<=renderedGeneration||
+         !Number.isFinite(speed)||speed<.5||speed>2||
+         !Number.isFinite(pitchSemitones)||pitchSemitones<-12||pitchSemitones>12)
+        throw RangeError("invalid staged Worker playback state");
+      const state=timeline.state;
+      const position=state.sourceFrame;
+      const activeChunks=renderedChunks.filter(segment=>
+        segment.generation===renderedGeneration);
+      const current=activeChunks.find(segment=>
+        (position>=segment.startFrame&&position<segment.endFrame)||
+        (state.loopEnabled&&segment.endFrame===sourceFrames&&
+          position<segment.startFrame))||
+        activeChunks.find(segment=>position===segment.endFrame)||
+        activeChunks.find(segment=>position<segment.startFrame)||null;
+      let frame,sequence;
+      if(current){
+        const currentIndex=activeChunks.indexOf(current);
+        const retained=activeChunks.slice(currentIndex,currentIndex+2);
+        frame=current.endFrame>=sourceFrames?0:current.endFrame;
+        sequence=current.sequence+1;
+        renderedChunks.splice(0,renderedChunks.length,...retained);
+      }else if(activeChunks.length&&
+          position>=activeChunks.at(-1).endFrame){
+        const consumed=activeChunks.at(-1);
+        frame=Math.floor(position);
+        sequence=consumed.sequence+1;
+        renderedChunks.length=0;
+        previousRendered=null;
+      }else{
+        frame=Math.floor(position);
+        sequence=nextRenderedSequence;
+        renderedChunks.length=0;
+        previousRendered=null;
+      }
+      nextRenderedSequence=sequence;
+      stagedWorkerState={generation,frame,sequence,speed,pitchSemitones,
+        firstChunkAccepted:false};
+      workerMode=true;
+      return {sourceFrame:frame,sequence,
+        bufferedSegments:renderedChunks.length};
+    },
+    /** Prepare a seek while the active source clock keeps consuming old PCM. */
+    stageRenderedSeekState({generation,frame,speed,pitchSemitones,
+      requiredChunks=1,reuseCompatible=false,reuseGeneration=null}={}){
+      if(!Number.isSafeInteger(generation)||generation<=renderedGeneration||
+         !Number.isSafeInteger(frame)||frame<0||frame>=sourceFrames||
+         !Number.isFinite(speed)||speed<.5||speed>2||
+         !Number.isFinite(pitchSemitones)||pitchSemitones<-12||pitchSemitones>12||
+         !Number.isSafeInteger(requiredChunks)||requiredChunks<1||
+         requiredChunks>RENDERED_CHUNK_SLOTS||
+         typeof reuseCompatible!=="boolean"||
+         reuseGeneration!==null&&
+           (!Number.isSafeInteger(reuseGeneration)||reuseGeneration<0)||
+         reuseCompatible&&reuseGeneration===null)
+        throw RangeError("invalid staged Worker seek state");
+      const state=timeline.state,position=state.sourceFrame;
+      const activeChunks=renderedChunks.filter(segment=>
+        segment.generation===renderedGeneration);
+      let reusableChunks=[];
+      if(reuseCompatible&&reuseGeneration===renderedGeneration){
+        const first=activeChunks.findIndex(segment=>segment.speed===speed&&
+          frame>=segment.startFrame&&frame<segment.endFrame);
+        if(first>=0){
+          for(let offset=0;offset<requiredChunks;offset++){
+            const segment=activeChunks[first+offset];
+            if(!segment||segment.speed!==speed)break;
+            if(offset){
+              const previous=reusableChunks.at(-1);
+              const expected=previous.endFrame>=sourceFrames?0:previous.endFrame;
+              if(segment.startFrame!==expected)break;
+            }
+            reusableChunks.push({...segment,generation,sequence:offset});
+          }
+          if(reusableChunks.length!==requiredChunks)reusableChunks=[];
+        }
+      }
+      const current=activeChunks.find(segment=>
+        (position>=segment.startFrame&&position<segment.endFrame)||
+        (state.loopEnabled&&segment.endFrame===sourceFrames&&
+          position<segment.startFrame))||activeChunks[0]||null;
+      const currentIndex=current?activeChunks.indexOf(current):0;
+      const retainedLimit=RENDERED_CHUNK_SLOTS-requiredChunks;
+      const retained=current?
+        activeChunks.slice(currentIndex,currentIndex+retainedLimit):
+        activeChunks.slice(0,retainedLimit);
+      renderedChunks.splice(0,renderedChunks.length,...retained);
+      stagedWorkerState={generation,frame,sequence:0,speed,pitchSemitones,
+        kind:"seek",requiredChunks,retainedLimit,
+        preparedChunks:reusableChunks,reusedChunks:reusableChunks.length,
+        firstChunkAccepted:reusableChunks.length>0};
+      workerMode=true;
+      const lastReusable=reusableChunks.at(-1);
+      return {sourceFrame:frame,sequence:0,
+        nextFrame:lastReusable?
+          (lastReusable.endFrame>=sourceFrames?0:lastReusable.endFrame):frame,
+        nextSequence:reusableChunks.length,
+        bufferedSegments:renderedChunks.length+reusableChunks.length,
+        reusedChunks:reusableChunks.length};
+    },
+    /** Invalidate queued output after a seek or model-setting change. */
+    resetRenderedChunks(generation,state={}){
+      if(!Number.isSafeInteger(generation)||generation<=renderedGeneration)
+        throw RangeError("rendered PCM generation must advance");
+      renderedGeneration=generation;
+      renderedChunks.length=0;
+      previousRendered=null;
+      nextRenderedSequence=0;
+      stagedWorkerState=null;workerActivation=null;
+      workerState={generation,speed:state.speed??timeline.state.speed,
+        pitchSemitones:state.pitchSemitones??workerState.pitchSemitones};
+      workerMode=true;
+      workerTransitionLeft=0;
+      return renderedGeneration;
+    },
+    /** Render Worker output through the existing source timeline exactly once. */
+    renderBuffered(output){
+      if(!Array.isArray(output)||output.length!==channelCount||
+         output.some(ch=>!(ch instanceof Float32Array)||
+           ch.length!==output[0].length))
+        throw RangeError("invalid output PCM block");
+      const len=output[0].length;
+      let state=timeline.state;
+      let missing=0;firstMissingFrame=null;
+      const read=(channel,segment,index,wrapDepth=0)=>{
+        const samples=segment.channels[channel];
+        if(!Number.isFinite(index)||index<0||index>=samples.length)return NaN;
+        const at=Math.floor(index),fraction=index-at,a=samples[at];
+        if(!Number.isFinite(a))return NaN;
+        if(fraction===0)return a;
+        let b=samples[at+1];
+        if(!Number.isFinite(b)&&wrapDepth===0&&state.loopEnabled&&
+           segment.endFrame===sourceFrames){
+          // A fractional source position just before the full-track loop end
+          // needs the next rendered output sample, which belongs to the chunk
+          // queued at the loop start. Without this bridge the shared clock
+          // freezes on the final fractional frame forever.
+          const nextOutputSourceFrame=segment.startFrame+
+            (at+1)*segment.speed;
+          const wrappedFrame=loopSourcePosition(nextOutputSourceFrame,state);
+          const nextSegment=renderedChunks.find(candidate=>
+            candidate.generation===renderedGeneration&&
+            candidate.speed===state.speed&&
+            wrappedFrame>=candidate.startFrame&&
+            wrappedFrame<candidate.endFrame);
+          if(nextSegment)
+            b=read(channel,nextSegment,
+              (wrappedFrame-nextSegment.startFrame)/nextSegment.speed,1);
+        }
+        return Number.isFinite(b)?a+(b-a)*fraction:NaN;
+      };
+      const fadeFrames=Math.max(1,Math.round(.018*outputSampleRate));
+      for(let i=0;i<len;i++){
+        state=timeline.state;
+        let position=timeline.sourceFrameAt(0);
+        if(position===null){for(const ch of output)ch[i]=0;continue;}
+        const seek=stagedWorkerState?.kind==="seek"&&
+          stagedWorkerState.preparedChunks.length>=
+            stagedWorkerState.requiredChunks?stagedWorkerState:null;
+        if(seek){
+          beginOutputTransition(output,i);
+          const activated=timeline.scrub(seek.frame,seek.speed);
+          const prepared=seek.preparedChunks;
+          renderedChunks.splice(0,renderedChunks.length,...prepared);
+          previousRendered=null;
+          renderedGeneration=seek.generation;
+          workerState={generation:seek.generation,speed:seek.speed,
+            pitchSemitones:seek.pitchSemitones};
+          nextRenderedSequence=seek.sequence+prepared.length;
+          stagedWorkerState=null;
+          workerActivation={...workerState,sourceFrame:activated.sourceFrame,
+            revision:activated.revision,sampleOffset:i,
+            reusedChunks:seek.reusedChunks||0};
+          state=timeline.state;
+          position=timeline.sourceFrameAt(0);
+        }
+        while(renderedChunks.length){
+          const head=renderedChunks[0];
+          const wrapped=state.loopEnabled&&head.endFrame===sourceFrames&&
+            position<head.startFrame;
+          if(position>=head.endFrame||wrapped){
+            if(head.generation!==renderedGeneration)break;
+            previousRendered=renderedChunks.shift();
+            continue;
+          }
+          break;
+        }
+        let segment=renderedChunks[0];
+        if(segment&&segment.generation!==renderedGeneration&&
+           stagedWorkerState?.generation===segment.generation&&
+           segment.sequence===stagedWorkerState.sequence){
+          const staged=stagedWorkerState;
+          const activationFrame=position>=segment.startFrame&&
+            position<segment.endFrame?position:segment.startFrame;
+          beginOutputTransition(output,i);
+          // A staged edit often arrives after the source clock has crossed
+          // its boundary. Preserve its fractional sample position when it is
+          // already inside the replacement chunk; scrub() is intentionally
+          // integer-frame-only for user seeks and would throw here.
+          const activated=activationFrame===position?
+            timeline.setSpeed(staged.speed):
+            timeline.scrub(activationFrame,staged.speed);
+          state=timeline.state;
+          position=activated.sourceFrame;
+          renderedGeneration=staged.generation;
+          workerState={generation:staged.generation,speed:staged.speed,
+            pitchSemitones:staged.pitchSemitones};
+          stagedWorkerState=null;
+          workerActivation={...workerState,sourceFrame:position,
+            revision:activated.revision,sampleOffset:i};
+        }
+        segment=renderedChunks[0];
+        let invalid=!segment||position<segment.startFrame||
+          position>=segment.endFrame||segment.generation!==renderedGeneration||
+          segment.speed!==state.speed;
+        const segmentIndex=segment?
+          (position-segment.startFrame)/segment.speed:NaN;
+        let value0=NaN,value1=NaN;
+        if(!invalid){
+          value0=read(0,segment,segmentIndex);
+          if(!Number.isFinite(value0))invalid=true;
+          if(channelCount===2){
+            value1=read(1,segment,segmentIndex);
+            if(!Number.isFinite(value1))invalid=true;
+          }
+        }
+        if(invalid){
+          if(firstMissingFrame===null)firstMissingFrame=Math.floor(position);
+          missing++;
+          for(const ch of output)ch[i]=0;
+          continue;
+        }
+        const prior=previousRendered;
+        const adjacent=prior&&prior.endFrame===segment.startFrame&&
+          segment.startFrame>0;
+        const elapsedOutput=adjacent?
+          (position-segment.startFrame)*outputSampleRate/
+            (segment.speed*sourceSampleRate):Infinity;
+        const mix=adjacent?Math.max(0,Math.min(1,elapsedOutput/fadeFrames)):1;
+        const priorIndex=adjacent?
+          prior.coreFrames+(position-segment.startFrame)/segment.speed:NaN;
+        const transition=workerTransitionLeft>0?
+          1-workerTransitionLeft/TRANSITION_FRAMES:1;
+        if(adjacent&&mix<1){
+          const tail0=read(0,prior,priorIndex);
+          if(Number.isFinite(tail0))value0=tail0*(1-mix)+value0*mix;
+          if(channelCount===2){
+            const tail1=read(1,prior,priorIndex);
+            if(Number.isFinite(tail1))value1=tail1*(1-mix)+value1*mix;
+          }
+        }
+        output[0][i]=transitionOrigin[0]*(1-transition)+value0*transition;
+        if(channelCount===2)
+          output[1][i]=transitionOrigin[1]*(1-transition)+value1*transition;
+        if(workerTransitionLeft>0)workerTransitionLeft--;
+        if(adjacent&&mix>=1)previousRendered=null;
+        timeline.advance(1);
+      }
+      missingFrames+=missing;
+      renderedFrames+=len;
+      // Worker PCM can arrive later than one output quantum. The clock advances
+      // once for each emitted sample and holds at the first missing frame.
+      rememberLastAudible(output);
+      return missing;
     },
     /**
      * Render exactly one output block, no new worklet/node per loop.
