@@ -254,7 +254,7 @@ test("individual-period Worker plays through one shared PCM Worklet in Chrome",a
       individual.checked=true;
       individual.dispatchEvent(new Event("change",{bubbles:true}));
       await new Promise(resolve=>setTimeout(resolve,40));
-      const sampleRate=48000,frames=sampleRate*6;
+      const sampleRate=48000,frames=sampleRate*30;
       const bytes=new ArrayBuffer(44+frames*2),view=new DataView(bytes);
       view.setUint32(0,0x46464952,true);view.setUint32(4,bytes.byteLength-8,true);
       view.setUint32(8,0x45564157,true);view.setUint32(12,0x20746d66,true);
@@ -590,7 +590,16 @@ test("individual-period Worker plays through one shared PCM Worklet in Chrome",a
       const totalFrames=progress?.loopEndFrame;
       if(!Number.isSafeInteger(totalFrames)||totalFrames<2)
         throw Error("Worker source-frame extent is unavailable");
-      return {totalFrames,seek:Math.round(totalFrames*.75),nearEnd:Math.round(totalFrames*.98)};
+      const currentChunk=window.__labAudit.messages.findLast(message=>
+        message.type==="rendered-chunk-accepted"&&
+        message.generation===progress.workerGeneration&&!message.stale&&
+        progress.sourceFrame>=message.startFrame&&
+        progress.sourceFrame<message.endFrame);
+      if(!currentChunk)
+        throw Error("A currently audible rendered chunk is unavailable for a warm seek");
+      return {totalFrames,seek:Math.round(Math.max(currentChunk.startFrame,
+        Math.min(progress.sourceFrame,currentChunk.endFrame-1))),
+        coldSeek:Math.round(totalFrames*.75),nearEnd:Math.round(totalFrames*.98)};
     });
     const missingBeforeSeek=await page.evaluate(()=>window.__labAudit.messages
       .filter(message=>message.type==="progress"&&
@@ -599,7 +608,8 @@ test("individual-period Worker plays through one shared PCM Worklet in Chrome",a
       const rect=canvas.getBoundingClientRect();
       return {x:rect.x,y:rect.y,width:rect.width,height:rect.height};
     });
-    const seekPoint={x:wave.x+wave.width*.75,y:wave.y+wave.height/2};
+    const seekPoint={x:wave.x+wave.width*targetFrames.seek/targetFrames.totalFrames,
+      y:wave.y+wave.height/2};
     const seekGenerationBefore=await page.evaluate(()=>window.__labAudit.messages
       .filter(message=>message.type==="worker-state-activated").at(-1)?.generation??0);
     const seekRequest=await page.evaluate(()=>({
@@ -701,6 +711,66 @@ test("individual-period Worker plays through one shared PCM Worklet in Chrome",a
         JSON.stringify({seekResult,seekPcmEvidence,missingBeforeSeek}));
     const seekPostActivationMissingFrames=
       seekPcmEvidence.missingFrames-seekTransitionMissingFrames;
+
+    const missingBeforeColdSeek=await page.evaluate(()=>window.__labAudit.messages
+      .filter(message=>message.type==="progress"&&
+        message.processingMode==="worker").at(-1)?.missingFrames||0);
+    const coldSeekGenerationBefore=await page.evaluate(()=>window.__labAudit.messages
+      .filter(message=>message.type==="worker-state-activated").at(-1)?.generation??0);
+    const coldSeekRequest=await page.evaluate(()=>(
+      {performanceTime:performance.now(),audioTime:window.__labAudit.audioContext.currentTime}));
+    const coldSeekPoint={x:wave.x+wave.width*targetFrames.coldSeek/targetFrames.totalFrames,
+      y:wave.y+wave.height/2};
+    await page.mouse.click(coldSeekPoint.x,coldSeekPoint.y);
+    await page.waitForFunction(({generation,target})=>window.__labAudit.messages.some(message=>
+      message.type==="worker-state-activated"&&message.generation>generation&&
+      Math.abs(message.sourceFrame-target)<=100),{timeout:10000},
+      {generation:coldSeekGenerationBefore,target:targetFrames.coldSeek});
+    const coldSeekResult=await page.evaluate(({target,generation,startedAt})=>{
+      const audit=window.__labAudit;
+      const activated=audit.messages.filter(message=>
+        message.type==="worker-state-activated"&&message.generation>generation&&
+        Math.abs(message.sourceFrame-target)<=100).at(-1);
+      const staged=audit.messages.findLast(message=>
+        message.type==="worker-state-staged"&&
+        message.generation===activated?.generation);
+      const targetJobs=audit.jobs.filter(item=>
+        item.generation===activated?.generation&&
+        item.planStart===staged?.sourceFrame);
+      const job=targetJobs[0];
+      const result=job&&audit.workerResults.findLast(item=>
+        item.job===job.job&&item.generation===activated?.generation);
+      const installed=job&&audit.messages.findLast(message=>
+        message.type==="rendered-chunk-accepted"&&
+        message.generation===activated?.generation&&
+        message.startFrame===job.planStart&&message.endFrame===job.planEnd&&
+        !message.stale);
+      return {generation:activated?.generation,
+        activationLatencyMs:activated?.receivedAt-startedAt,
+        sourceFrame:activated?.sourceFrame,
+        reusedChunks:staged?.reusedChunks||0,
+        workerJobsForTarget:targetJobs.length,
+        workerElapsedMs:result?.workerElapsedMs??null,
+        renderedChunkAccepted:!!installed,
+        missingFramesAtActivation:activated?.missingFrames};
+    },{target:targetFrames.coldSeek,generation:coldSeekGenerationBefore,
+      startedAt:coldSeekRequest.performanceTime});
+    assert.equal(coldSeekResult.reusedChunks,0,JSON.stringify(coldSeekResult));
+    assert.ok(coldSeekResult.workerJobsForTarget>=1,JSON.stringify(coldSeekResult));
+    assert.ok(Number.isFinite(coldSeekResult.workerElapsedMs),
+      JSON.stringify(coldSeekResult));
+    assert.ok(coldSeekResult.renderedChunkAccepted,JSON.stringify(coldSeekResult));
+    const coldSeekPcmEvidence=await waitForWorkerPCM(page,{
+      generation:coldSeekResult.generation,
+      missingBeforeFrames:missingBeforeColdSeek
+    });
+    const coldSeekTransitionMissingFrames=Math.max(0,
+      (coldSeekResult.missingFramesAtActivation||0)-missingBeforeColdSeek);
+    assert.equal(coldSeekPcmEvidence.missingFrames,0,
+      "cold-cache seek must deliver Worker PCM without missing output: "+
+        JSON.stringify({coldSeekResult,coldSeekPcmEvidence,missingBeforeColdSeek}));
+    const coldSeekPostActivationMissingFrames=
+      coldSeekPcmEvidence.missingFrames-coldSeekTransitionMissingFrames;
     const missingBeforeLoop=await page.evaluate(()=>window.__labAudit.messages
       .filter(message=>message.type==="progress"&&
         message.processingMode==="worker").at(-1)?.missingFrames||0);
@@ -712,7 +782,7 @@ test("individual-period Worker plays through one shared PCM Worklet in Chrome",a
     await page.waitForFunction(({generation,target})=>window.__labAudit.messages.some(message=>
       message.type==="worker-state-activated"&&message.generation>generation&&
       Math.abs(message.sourceFrame-target)<=100),
-      {timeout:10000},{generation:seekGeneration,target:targetFrames.nearEnd});
+      {timeout:10000},{generation:coldSeekResult.generation,target:targetFrames.nearEnd});
     const loopSeekResult=await page.evaluate(({target,startedAt,
       startedAudioTime,generation})=>{
       const activated=window.__labAudit.messages
@@ -873,6 +943,11 @@ test("individual-period Worker plays through one shared PCM Worklet in Chrome",a
       seekWorkerJobsForTarget:seekResult.workerJobsForTarget,
       seekTransitionMissingFrames,seekPostActivationMissingFrames,
       loopSeekActivationLatencyMs:loopSeekResult.activationLatencyMs,
+      coldSeekActivationLatencyMs:coldSeekResult.activationLatencyMs,
+      coldSeekWorkerElapsedMs:coldSeekResult.workerElapsedMs,
+      coldSeekReusedChunks:coldSeekResult.reusedChunks,
+      coldSeekWorkerJobsForTarget:coldSeekResult.workerJobsForTarget,
+      coldSeekTransitionMissingFrames,coldSeekPostActivationMissingFrames,
       loopSeekLatencyBreakdown:loopSeekResult.latencyBreakdown,
       loopSeekReusedChunks:loopSeekResult.reusedChunks,
       loopSeekWorkerJobsForTarget:loopSeekResult.workerJobsForTarget,
