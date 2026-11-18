@@ -63,5 +63,5 @@ test('UI model selection and worker handoff are separated from individual checkb
  assert.match(app,/labModel.disabled=false/);
  assert.match(app,/const nextIndividual=labIndividual.checked/);
  assert.match(app,/jointBackend:applied.individual\?applied.mode:null/);
- assert.match(worker,/sourceStartSeconds:plan.from\/sampleRate,periodCycles,jointBackend/);
+ assert.match(worker,/sourceStartSeconds:plan\.sourceStartFrame\/sampleRate,\s*periodCycles,jointBackend/);
 });
