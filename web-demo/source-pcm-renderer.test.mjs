@@ -201,6 +201,53 @@ test("staged Worker A/B settings activate at the next chunk and repeat the selec
   assert.equal(p.statistics.missingFrames,0);
 });
 
+test("extending a short active Worker loop retires its old loop body at the boundary",()=>{
+  const p=createSourcePCMRenderer({sourceFrames:32,sourceSampleRate:8,
+    outputSampleRate:8,channelCount:1,speed:1,startFrame:6,
+    loopStartFrame:4,loopEndFrame:8,loopEnabled:true});
+  const chunk=(generation,sequence,startFrame,endFrame,value)=>({generation,
+    sequence,startFrame,endFrame,speed:1,coreFrames:endFrame-startFrame,
+    channels:[new Float32Array(endFrame-startFrame).fill(value)]});
+  p.resetRenderedChunks(1,{speed:1,pitchSemitones:0});
+  p.installRenderedChunk(chunk(1,0,4,8,1));
+
+  const staged=p.stageRenderedState({generation:2,speed:1,pitchSemitones:0,
+    loopStartFrame:4,loopEndFrame:12,loopEnabled:true});
+  assert.equal(staged.sourceFrame,8,
+    "the replacement continues from old B when that frame is inside the new loop");
+  assert.equal(p.installRenderedChunk(chunk(2,1,8,12,2)),2);
+  const output=[new Float32Array(5)];
+  assert.equal(p.renderBuffered(output),0);
+  assert.equal(p.workerState.generation,2,
+    "the old one-chunk loop cannot keep cycling ahead of the replacement");
+  assert.equal(p.timeline.state.loopEndFrame,12);
+  assert.equal(p.timeline.state.sourceFrame,11);
+  assert.equal(p.statistics.missingFrames,0);
+});
+
+test("changing A stages the replacement inside the new loop instead of old A",()=>{
+  const p=createSourcePCMRenderer({sourceFrames:32,sourceSampleRate:8,
+    outputSampleRate:8,channelCount:1,speed:1,startFrame:7,
+    loopStartFrame:4,loopEndFrame:8,loopEnabled:true});
+  const chunk=(generation,sequence,startFrame,endFrame,value)=>({generation,
+    sequence,startFrame,endFrame,speed:1,coreFrames:endFrame-startFrame,
+    channels:[new Float32Array(endFrame-startFrame).fill(value)]});
+  p.resetRenderedChunks(1,{speed:1,pitchSemitones:0});
+  p.installRenderedChunk(chunk(1,0,4,8,1));
+
+  const staged=p.stageRenderedState({generation:2,speed:1,pitchSemitones:0,
+    loopStartFrame:6,loopEndFrame:12,loopEnabled:true});
+  assert.equal(staged.sourceFrame,8,
+    "the next old-loop boundary is a valid source frame in the new interval");
+  assert.doesNotThrow(()=>p.installRenderedChunk(chunk(2,1,8,12,2)));
+  const output=[new Float32Array(4)];
+  assert.equal(p.renderBuffered(output),0);
+  assert.equal(p.workerState.generation,2);
+  assert.equal(p.timeline.state.loopStartFrame,6);
+  assert.equal(p.timeline.state.loopEndFrame,12);
+  assert.equal(p.statistics.missingFrames,0);
+});
+
 test("disabling a Worker A/B loop exits at B without restarting the Worklet clock",()=>{
   const p=createSourcePCMRenderer({sourceFrames:32,sourceSampleRate:8,
     outputSampleRate:8,channelCount:1,speed:1,startFrame:4,

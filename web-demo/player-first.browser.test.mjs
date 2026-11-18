@@ -765,6 +765,16 @@ test("U1/U5 primary Play routes to REAL selected live/PV/Granular engines and on
       Number.isSafeInteger(x.generation)&&x.generation>generation),
       {timeout:20000},beforeSeekGeneration);
     const expectedSeekFrame=await page.evaluate(()=>window.__expectedSeekFrame);
+    const loopTarget=await page.evaluate(()=>({
+      start:Number(document.querySelector("#player-loop-a")?.value),
+      end:Number(document.querySelector("#player-loop-b")?.value),
+      enabled:document.querySelector("#player-loop-enabled")?.checked
+    }));
+    const loopLength=loopTarget.end-loopTarget.start;
+    const normalizedSeekFrame=loopTarget.enabled&&
+      (expectedSeekFrame<loopTarget.start||expectedSeekFrame>=loopTarget.end)?
+      loopTarget.start+((expectedSeekFrame-loopTarget.start)%loopLength+
+        loopLength)%loopLength:expectedSeekFrame;
     try{
       await page.waitForFunction(generation=>{
         const workers=window.__engineCreations.filter(x=>x.kind==="worker"&&
@@ -806,9 +816,15 @@ test("U1/U5 primary Play routes to REAL selected live/PV/Granular engines and on
       "seek PCM must activate in the existing shared Worklet");
     assert.ok(Number.isSafeInteger(expectedSeekFrame),
       "keyboard event must observe the shared source-frame cursor before seeking");
-    assert.ok(seekRender.messages.some(x=>x.startFrame===expectedSeekFrame),
-      "ArrowRight must submit a real Worker render from the clamped source frame: "+
-      JSON.stringify({expectedSeekFrame,messages:seekRender.messages}));
+    assert.ok(seekRender.messages.some(x=>x.startFrame===normalizedSeekFrame),
+      "ArrowRight must render from the A/B-normalized source frame: "+
+      JSON.stringify({expectedSeekFrame,normalizedSeekFrame,loopTarget,
+        messages:seekRender.messages}));
+    assert.ok(seekRender.activations.some(x=>
+      x.sourceFrame>=loopTarget.start&&x.sourceFrame<loopTarget.end),
+      "the shared clock must activate inside the selected A/B interval: "+
+      JSON.stringify({normalizedSeekFrame,loopTarget,
+        activations:seekRender.activations}));
     await page.waitForFunction(()=>{
       const text=document.querySelector("#rt-indicator")?.textContent||"";
       return text.includes("モデル再生中")&&text.includes("PV");

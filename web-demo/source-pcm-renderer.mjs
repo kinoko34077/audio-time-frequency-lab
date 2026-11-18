@@ -380,9 +380,23 @@ export function createSourcePCMRenderer({
           frame=loopEndFrame<sourceFrames?loopEndFrame:loopStartFrame;
           if(current.startFrame<=state.loopStartFrame)
             current.retireAfterLoop=true;
-        }else frame=loopEnabled&&
-          (position<loopStartFrame||position>=loopEndFrame||
-           boundary>=loopEndFrame)?loopStartFrame:boundary;
+        }else if(loopEnabled){
+          const positionOutsideLoop=position<loopStartFrame||
+            position>=loopEndFrame;
+          const continuesInsideNewLoop=current.endFrame>=loopStartFrame&&
+            current.endFrame<loopEndFrame;
+          frame=positionOutsideLoop?loopStartFrame:
+            continuesInsideNewLoop?current.endFrame:
+            boundary>=loopStartFrame&&boundary<loopEndFrame?
+              boundary:loopStartFrame;
+        }else frame=boundary;
+        const loopChanged=state.loopEnabled!==loopEnabled||
+          state.loopStartFrame!==loopStartFrame||
+          state.loopEndFrame!==loopEndFrame;
+        if(loopChanged&&state.loopEnabled&&loopEnabled&&
+           current.startFrame<=state.loopStartFrame&&
+           current.endFrame>=state.loopEndFrame)
+          current.retireAfterLoop=true;
         if(loopEnabled&&frame===loopStartFrame&&
            current.startFrame===loopStartFrame&&
            current.endFrame>=loopEndFrame)

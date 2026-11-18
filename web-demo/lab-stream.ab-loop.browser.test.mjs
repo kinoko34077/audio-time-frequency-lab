@@ -376,6 +376,95 @@ test("individual-period Worker applies and wraps edited source-frame A/B without
       assert.equal(nearStart.missingFrames,0,JSON.stringify(nearStart));
       assert.equal(nearStart.model,"pv",JSON.stringify(nearStart));
       assert.equal(nearStart.worklets,1,JSON.stringify(nearStart));
+
+      const shiftedA=4096,shortB=12000;
+      await page.evaluate(a=>{
+        const input=document.querySelector("#player-loop-a");
+        input.value=String(a);input.dispatchEvent(new Event("change",
+          {bubbles:true}));
+      },shiftedA);
+      await page.waitForFunction(({a,b})=>{
+        const hint=document.querySelector("#player-loop-hint")?.textContent||"";
+        return hint.includes("反映しました")&&window.__labAudit.messages.some(message=>
+          message.type==="progress"&&message.processingMode==="worker"&&
+          message.loopEnabled&&message.loopStartFrame===a&&
+          message.loopEndFrame===b);
+      },{timeout:20000},{a:shiftedA,b:shortB});
+      await page.waitForFunction(({a,b})=>{
+        const audit=window.__labAudit;
+        const progress=audit.messages.filter(message=>
+          message.type==="progress"&&message.processingMode==="worker"&&
+          message.loopEnabled&&message.loopStartFrame===a&&
+          message.loopEndFrame===b);
+        const generation=progress.at(-1)?.workerGeneration;
+        const job=audit.jobs.findLast(item=>item.generation===generation&&
+          item.loopEnabled&&item.loopStartFrame===a&&item.loopEndFrame===b&&
+          item.start===a);
+        return Boolean(job&&audit.results.some(item=>item.job===job.job&&
+          item.generation===generation&&item.ok===true));
+      },{timeout:15000},{a:shiftedA,b:shortB});
+      const shiftedLoop=await page.evaluate(({a,b})=>{
+        const audit=window.__labAudit;
+        const progress=audit.messages.filter(message=>
+          message.type==="progress"&&message.processingMode==="worker"&&
+          message.loopEnabled&&message.loopStartFrame===a&&
+          message.loopEndFrame===b);
+        const generation=progress.at(-1)?.workerGeneration;
+        const job=audit.jobs.findLast(item=>item.generation===generation&&
+          item.loopEnabled&&item.loopStartFrame===a&&item.loopEndFrame===b&&
+          item.start===a);
+        const result=job&&audit.results.findLast(item=>item.job===job.job&&
+          item.generation===generation);
+        return {generation,sourceFrame:progress.at(-1)?.sourceFrame,
+          missingFrames:progress.at(-1)?.missingFrames||0,job,result,
+          worklets:audit.worklets.length};
+      },{a:shiftedA,b:shortB});
+      assert.equal(shiftedLoop.result?.ok,true,JSON.stringify(shiftedLoop));
+      assert.ok(shiftedLoop.sourceFrame>=shiftedA&&
+        shiftedLoop.sourceFrame<shortB,JSON.stringify(shiftedLoop));
+      assert.equal(shiftedLoop.missingFrames,0,JSON.stringify(shiftedLoop));
+      assert.equal(shiftedLoop.worklets,1,JSON.stringify(shiftedLoop));
+
+      const extendedB=20000;
+      await page.evaluate(b=>{
+        const input=document.querySelector("#player-loop-b");
+        input.value=String(b);input.dispatchEvent(new Event("change",
+          {bubbles:true}));
+      },extendedB);
+      await page.waitForFunction(({a,b})=>{
+        const hint=document.querySelector("#player-loop-hint")?.textContent||"";
+        return hint.includes("反映しました")&&window.__labAudit.messages.some(message=>
+          message.type==="progress"&&message.processingMode==="worker"&&
+          message.loopEnabled&&message.loopStartFrame===a&&
+          message.loopEndFrame===b);
+      },{timeout:20000},{a:shiftedA,b:extendedB});
+      const extendedLoop=await page.evaluate(({a,b})=>{
+        const audit=window.__labAudit;
+        const progress=audit.messages.filter(message=>
+          message.type==="progress"&&message.processingMode==="worker"&&
+          message.loopEnabled&&message.loopStartFrame===a&&
+          message.loopEndFrame===b);
+        const generation=progress.at(-1)?.workerGeneration;
+        const job=audit.jobs.findLast(item=>item.generation===generation&&
+          item.loopEnabled&&item.loopStartFrame===a&&item.loopEndFrame===b&&
+          item.start===12000&&item.end===b);
+        return {generation,sourceFrame:progress.at(-1)?.sourceFrame,
+          missingFrames:progress.at(-1)?.missingFrames||0,job,
+          worklets:audit.worklets.length};
+      },{a:shiftedA,b:extendedB});
+      assert.ok(extendedLoop.job,JSON.stringify(extendedLoop));
+      assert.equal(extendedLoop.missingFrames,0,JSON.stringify(extendedLoop));
+      assert.equal(extendedLoop.worklets,1,JSON.stringify(extendedLoop));
+      await page.waitForFunction(({a,b,generation})=>{
+        const progress=window.__labAudit.messages.filter(message=>
+          message.type==="progress"&&message.processingMode==="worker"&&
+          message.workerGeneration===generation&&message.loopEnabled&&
+          message.loopStartFrame===a&&message.loopEndFrame===b);
+        return progress.some((message,index)=>index>0&&
+          message.sourceFrame<a+4096&&progress[index-1].sourceFrame>b-4096);
+      },{timeout:15000},{a:shiftedA,b:extendedB,
+        generation:extendedLoop.generation});
+
       assert.deepEqual(errors,[]);
       await page.evaluate(()=>document.querySelector("#stop").click());
     }finally{
