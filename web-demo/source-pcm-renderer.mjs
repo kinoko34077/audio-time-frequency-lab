@@ -281,7 +281,8 @@ export function createSourcePCMRenderer({
         const expectedSequence=previous?previous.sequence+1:staged.sequence;
         const expectedStart=previous?
           (previous.endFrame>=sourceFrames?0:previous.endFrame):staged.frame;
-        if(staged.preparedChunks.length>=staged.requiredChunks)return false;
+        if(renderedChunks.length+staged.preparedChunks.length>=
+           RENDERED_CHUNK_SLOTS)return false;
         if(queueSequence!==expectedSequence||startFrame!==expectedStart)
           throw RangeError("prepared seek PCM queue is not source-contiguous");
         staged.preparedChunks.push({generation,sequence:queueSequence,startFrame,
@@ -382,20 +383,23 @@ export function createSourcePCMRenderer({
     },
     /** Prepare a seek while the active source clock keeps consuming old PCM. */
     stageRenderedSeekState({generation,frame,speed,pitchSemitones,
-      requiredChunks=1,reuseCompatible=false}={}){
+      requiredChunks=1,reuseCompatible=false,reuseGeneration=null}={}){
       if(!Number.isSafeInteger(generation)||generation<=renderedGeneration||
          !Number.isSafeInteger(frame)||frame<0||frame>=sourceFrames||
          !Number.isFinite(speed)||speed<.5||speed>2||
          !Number.isFinite(pitchSemitones)||pitchSemitones<-12||pitchSemitones>12||
          !Number.isSafeInteger(requiredChunks)||requiredChunks<1||
          requiredChunks>RENDERED_CHUNK_SLOTS||
-         typeof reuseCompatible!=="boolean")
+         typeof reuseCompatible!=="boolean"||
+         reuseGeneration!==null&&
+           (!Number.isSafeInteger(reuseGeneration)||reuseGeneration<0)||
+         reuseCompatible&&reuseGeneration===null)
         throw RangeError("invalid staged Worker seek state");
       const state=timeline.state,position=state.sourceFrame;
       const activeChunks=renderedChunks.filter(segment=>
         segment.generation===renderedGeneration);
       let reusableChunks=[];
-      if(reuseCompatible){
+      if(reuseCompatible&&reuseGeneration===renderedGeneration){
         const first=activeChunks.findIndex(segment=>segment.speed===speed&&
           frame>=segment.startFrame&&frame<segment.endFrame);
         if(first>=0){
@@ -432,7 +436,7 @@ export function createSourcePCMRenderer({
         nextFrame:lastReusable?
           (lastReusable.endFrame>=sourceFrames?0:lastReusable.endFrame):frame,
         nextSequence:reusableChunks.length,
-        bufferedSegments:renderedChunks.length,
+        bufferedSegments:renderedChunks.length+reusableChunks.length,
         reusedChunks:reusableChunks.length};
     },
     /** Invalidate queued output after a seek or model-setting change. */

@@ -371,8 +371,11 @@ test("same-settings seek reuses a fully buffered PCM range",()=>{
   p.installRenderedChunk(chunk(0,1,8,16,2));
 
   const staged=p.stageRenderedSeekState({generation:1,frame:4,speed:1,
-    pitchSemitones:0,requiredChunks:1,reuseCompatible:true});
+    pitchSemitones:0,requiredChunks:1,reuseCompatible:true,
+    reuseGeneration:0});
   assert.equal(staged.reusedChunks,1);
+  assert.equal(staged.bufferedSegments,3,
+    "buffer count includes both retained fallback and prepared seek PCM");
 
   const output=[new Float32Array(2)];
   assert.equal(p.renderBuffered(output),0);
@@ -382,6 +385,49 @@ test("same-settings seek reuses a fully buffered PCM range",()=>{
   assert.equal(activation.reusedChunks,1);
   assert.equal(p.timeline.state.sourceFrame,6);
   assert.equal(p.statistics.missingFrames,0);
+});
+
+test("seek does not reuse PCM when its expected active generation is stale",()=>{
+  const p=createSourcePCMRenderer({sourceFrames:16,sourceSampleRate:8,
+    outputSampleRate:8,channelCount:1,speed:1,startFrame:0});
+  const chunk=(generation,sequence,startFrame,endFrame,value)=>({generation,
+    sequence,startFrame,endFrame,speed:1,coreFrames:endFrame-startFrame,
+    channels:[new Float32Array(endFrame-startFrame).fill(value)]});
+  p.resetRenderedChunks(1,{speed:1,pitchSemitones:2});
+  p.installRenderedChunk(chunk(1,0,0,8,2));
+
+  const staged=p.stageRenderedSeekState({generation:2,frame:4,speed:1,
+    pitchSemitones:0,requiredChunks:1,reuseCompatible:true,
+    reuseGeneration:0});
+
+  assert.equal(staged.reusedChunks,0,
+    "a stale main-thread generation must not relabel another model's PCM");
+  assert.equal(staged.nextFrame,4);
+  assert.equal(staged.nextSequence,0);
+});
+
+test("seek accepts contiguous refill PCM after its activation threshold is met",()=>{
+  const p=createSourcePCMRenderer({sourceFrames:32,sourceSampleRate:4,
+    outputSampleRate:4,channelCount:1,speed:1,startFrame:0});
+  const chunk=(generation,sequence,startFrame,endFrame,value)=>({generation,
+    sequence,startFrame,endFrame,speed:1,coreFrames:endFrame-startFrame,
+    channels:[new Float32Array(endFrame-startFrame).fill(value)]});
+  p.installRenderedChunk(chunk(0,0,0,4,1));
+  p.installRenderedChunk(chunk(0,1,4,8,1));
+  p.stageRenderedSeekState({generation:1,frame:20,speed:1,
+    pitchSemitones:0,requiredChunks:1});
+  assert.equal(p.installRenderedChunk(chunk(1,0,20,24,9)),3);
+
+  const refill=p.installRenderedChunk(chunk(1,1,24,28,11));
+  assert.equal(refill,4,
+    "a ready seek must accept bounded contiguous refill before the next render quantum");
+
+  const output=[new Float32Array(8)];
+  assert.equal(p.renderBuffered(output),0);
+  assert.equal(p.takeWorkerActivation().generation,1);
+  assert.equal(p.timeline.state.sourceFrame,28);
+  assert.equal(p.statistics.missingFrames,0);
+  assert.ok(output[0].every(Number.isFinite));
 });
 
 test("negative fractional speed wraps 1 frame loop instead of inventing dropped samples",()=>{

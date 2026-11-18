@@ -383,7 +383,8 @@ export async function createModelStream({ctx,sourceChannels,sampleRate,speed,sem
         const staged=await bridge.stageWorkerSeekPlayback({frame,
           speed:next.speed,pitchSemitones:next.semitones,
           generation:requestedGeneration,requiredChunks,
-          reuseCompatible:sameRenderConfig(activeConfig,next)});
+          reuseCompatible:sameRenderConfig(activeConfig,next),
+          reuseGeneration:activeGeneration});
         if(stopped||requestedGeneration!==generation)
           return {stale:true};
         stagedGeneration=requestedGeneration;

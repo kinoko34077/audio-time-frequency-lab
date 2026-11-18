@@ -113,11 +113,17 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
              m.reuseCompatible!==undefined&&
                typeof m.reuseCompatible!=="boolean")
             throw RangeError("invalid staged legacy Worker seek");
+          if(m.reuseGeneration!==undefined&&
+             (!Number.isSafeInteger(m.reuseGeneration)||m.reuseGeneration<0)||
+             m.reuseCompatible===true&&
+               !Number.isSafeInteger(m.reuseGeneration))
+            throw RangeError("invalid expected Worker reuse generation");
           const staged=this.renderer.stageRenderedSeekState({
             generation:m.generation,frame:m.frame,speed:m.speed,
             pitchSemitones:m.pitchSemitones,
             requiredChunks:m.requiredChunks,
-            reuseCompatible:m.reuseCompatible===true
+            reuseCompatible:m.reuseCompatible===true,
+            reuseGeneration:m.reuseGeneration??null
           });
           this.workerSeekRequestId=m.requestId;
           this.port.postMessage({type:"worker-state-staged",
