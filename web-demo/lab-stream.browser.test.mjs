@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {spawn} from "node:child_process";
 import path from "node:path";
 import puppeteer from "puppeteer-core";
+import {closeBrowserTree,stopChildProcess} from "./test-process-cleanup.mjs";
 
 async function waitForWorkerPCM(page,{backend=null,generation=null,
   minimumGeneration=0,missingBeforeFrames=null}={}){
@@ -109,24 +110,6 @@ async function waitForWorkerPCM(page,{backend=null,generation=null,
   return evidence;
 }
 
-async function closeBrowserTree(browser){
-  if(!browser)return;
-  const child=browser.process();
-  if(process.platform==="win32"&&Number.isInteger(child?.pid)){
-    // Puppeteer's Windows child kill can leave Chromium renderer/audio
-    // processes behind. This PID is the isolated browser launched by this
-    // test, so terminate only its process tree after assertions complete.
-    await new Promise(resolve=>{
-      const killer=spawn("taskkill",["/PID",String(child.pid),"/T","/F"],{
-        stdio:"ignore",windowsHide:true
-      });
-      killer.once("error",resolve);
-      killer.once("close",resolve);
-    });
-  }
-  await browser.close().catch(()=>{});
-}
-
 test("individual-period Worker plays through one shared PCM Worklet in Chrome",async()=>{
   const port=18749;
   const server=spawn(process.env.PYTHON||"python3",
@@ -189,7 +172,8 @@ test("individual-period Worker plays through one shared PCM Worklet in Chrome",a
           audit.workers.push(this.__labUrl);
           this.addEventListener("message",event=>audit.workerResults.push({
             receivedAt:performance.now(),job:event.data?.job,
-            generation:event.data?.generation,ok:event.data?.ok
+            generation:event.data?.generation,ok:event.data?.ok,
+            workerElapsedMs:event.data?.workerElapsedMs
           }));
         }
         postMessage(payload,...rest){
@@ -375,10 +359,29 @@ test("individual-period Worker plays through one shared PCM Worklet in Chrome",a
     await page.$eval("#granular-pitch-value",node=>{
       node.value="2";node.dispatchEvent(new Event("change",{bubbles:true}));
     });
-    await page.waitForFunction(generation=>window.__labAudit.messages.some(message=>
-      message.type==="worker-state-activated"&&message.pitchSemitones===2&&
-        message.generation>generation),
-      {timeout:10000},speedGeneration);
+    try{
+      await page.waitForFunction(generation=>window.__labAudit.messages.some(message=>
+        message.type==="worker-state-activated"&&message.pitchSemitones===2&&
+          message.generation>generation),
+        {timeout:10000},speedGeneration);
+    }catch(error){
+      const diagnostic=await page.evaluate(generation=>{
+        const audit=window.__labAudit;
+        const jobs=audit.jobs.filter(item=>item.generation>generation);
+        const jobIds=new Set(jobs.map(item=>item.job));
+        return {status:document.querySelector("#lab-status")?.textContent,
+          stage:audit.messages.filter(item=>item.type==="worker-state-staged"&&
+            item.generation>generation).slice(-4),
+          activations:audit.messages.filter(item=>
+            item.type==="worker-state-activated"&&item.generation>generation).slice(-4),
+          jobs:jobs.slice(-4),results:audit.workerResults.filter(item=>
+            jobIds.has(item.job)).slice(-4),
+          progress:audit.messages.filter(item=>item.type==="progress"&&
+            item.processingMode==="worker").slice(-4)};
+      },speedGeneration);
+      throw Error("Worker pitch activation timed out: "+JSON.stringify(diagnostic),
+        {cause:error});
+    }
     const pitchAccepted=await page.evaluate(generation=>window.__labAudit.messages
       .filter(message=>message.type==="worker-state-activated"&&
         message.pitchSemitones===2&&message.generation>generation).at(-1),
@@ -388,13 +391,23 @@ test("individual-period Worker plays through one shared PCM Worklet in Chrome",a
         message.generation>generation).at(-1),speedGeneration);
     const loopEnd=await page.evaluate(()=>window.__labAudit.messages
       .filter(message=>message.type==="progress").at(-1)?.loopEndFrame);
+    const pitchWorkerTiming=await page.evaluate(generation=>{
+      const job=window.__labAudit.jobs.filter(item=>
+        item.generation>generation&&item.semitones===2).at(-1);
+      const result=job&&window.__labAudit.workerResults.findLast(item=>
+        item.job===job.job);
+      return {jobSentAt:job?.sentAt,resultReceivedAt:result?.receivedAt,
+        workerElapsedMs:result?.workerElapsedMs,
+        browserRoundTripMs:job&&result?result.receivedAt-job.sentAt:null,
+        coreFrames:job?.coreFrames,sourceFrames:job?.sourceFrames};
+    },speedGeneration);
     const expectedDistance=((pitchStage.sourceFrame-fractionalProgress)%loopEnd+
       loopEnd)%loopEnd;
     const actualDistance=((pitchAccepted.sourceFrame-fractionalProgress)%loopEnd+
       loopEnd)%loopEnd;
     assert.ok(Math.abs(actualDistance-expectedDistance)<8192,
       JSON.stringify({fractionalProgress,pitchStage,pitchAccepted,
-        expectedDistance,actualDistance,loopEnd}));
+        expectedDistance,actualDistance,loopEnd,pitchWorkerTiming}));
     const backendPcmEvidence=[];
     let missingBeforeModel=await page.evaluate(()=>window.__labAudit.messages
       .filter(message=>message.type==="progress"&&
@@ -591,7 +604,13 @@ test("individual-period Worker plays through one shared PCM Worklet in Chrome",a
     }));
     await page.evaluate(()=>document.querySelector("#stop").click());
   }finally{
-    await closeBrowserTree(browser);
-    server.kill();
+    const cleanupResults=await Promise.allSettled([
+      closeBrowserTree(browser),
+      stopChildProcess(server,"test HTTP server")
+    ]);
+    const cleanupErrors=cleanupResults.filter(result=>
+      result.status==="rejected").map(result=>result.reason);
+    if(cleanupErrors.length)
+      throw new AggregateError(cleanupErrors,"Browser test cleanup failed");
   }
 });
