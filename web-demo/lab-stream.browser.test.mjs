@@ -1,2 +1,637 @@
-YªçŠx-®éÜj×¢ëiºÚ+Š§j[h‘éÜ¢éí×]ùñ:-jZ.¶›­–)Þ³V–×÷'BFW7Bg&öÒ&æöFS§FW7B#°¦–×÷'B76W'Bg&öÒ&æöFS¦76W'B÷7G&–7B#°¦–×÷'B·7vçÒg&öÒ&æöFS¦6†–ÆE÷&ö6W72#°¦–×÷'BF‚g&öÒ&æöFS§F‚#°¦–×÷'BWWFVW"g&öÒ'WWFVW"Ö6÷&R#°¦–×÷'B¶6Æ÷6T'&÷w6W%G&VRÇ7F÷6†–ÆE&ö6W77Òg&öÒ"â÷FW7B×&ö6W72Ö6ÆVçWæÖ§2#° ¦7–æ2gVæ7F–öâv—Df÷%v÷&¶W%4Ò‡vRÇ¶&6¶VæCÖçVÆÂÆvVæW&F–öãÖçVÆÂÀ¢Ö–æ–×VÔvVæW&F–öãÓÆÖ—76–æt&Vf÷&Tg&ÖW3ÖçVÆÇÓ×·Ò—°¢ÆWBÖF6„†æFÆS°¢G'—¶ÖF6„†æFÆSÖv—BvRçv—Df÷$gVæ7F–öâ†W‡V7FVCÓç°¢6öç7BVF—C×v–æF÷råõöÆ$VF—C°¢6öç7BvVæW&F–öç3ÖW‡V7FVBævVæW&F–öãÓÓÖçVÆÃð¢²ââææWr6WB†VF—Bæ¦ö'2æf–ÇFW"†¦ö#Óà¢¦ö"ævVæW&F–öããÖW‡V7FVBæÖ–æ–×VÔvVæW&F–öâb`¢‚W‡V7FVBæ&6¶VæGÇÆ¦ö"æ¦ö–çD&6¶VæCÓÓÖW‡V7FVBæ&6¶VæB’¢æÖ†¦ö#Óæ¦ö"ævVæW&F–öâ’•Ó¥¶W‡V7FVBævVæW&F–öåÓ°¢6öç7B7W'&VçCÖvVæW&F–öç2æf–æB†7W'&VçCÓç°¢6öç7B¦ö'3ÖVF—Bæ¦ö'2æf–ÇFW"†—FVÓÓæ—FVÒævVæW&F–öãÓÓÖ7W'&VçBb`¢‚W‡V7FVBæ&6¶VæGÇÆ—FVÒæ¦ö–çD&6¶VæCÓÓÖW‡V7FVBæ&6¶VæB’“°¢6öç7B&VæFW&VCÖ¦ö'2æf–æDÆ7B†¦ö#ÓæVF—Bçv÷&¶W%&W7VÇG2ç6öÖR‡&W7VÇCÓà¢&W7VÇBæ¦ö#ÓÓÖ¦ö"æ¦ö"bg&W7VÇBæö²’bfVF—BæÖW76vW2ç6öÖR†ÖW76vSÓà¢ÖW76vRçG—SÓÓÒ'&VæFW&VBÖ6‡Væ²Ö66WFVB"b`¢ÖW76vRævVæW&F–öãÓÓÖ7W'&VçBbbÖW76vRç7FÆRb`¢ÖW76vRç7F'Dg&ÖSÓÓÖ¦ö"çÆå7F'Bb`¢ÖW76vRæVæDg&ÖSÓÓÖ¦ö"çÆäVæB’“°¢&WGW&â&VæFW&VBbfVF—BæÖW76vW2ç6öÖR†ÖW76vSÓà¢ÖW76vRçG—SÓÓÒ'&öw&W72"b`¢ÖW76vRçv÷&¶W$vVæW&F–öãÓÓÖ7W'&VçB“°¢Ò“°¢&WGW&â7W'&VçCÓÓ×VæFVf–æVCöfÇ6S§¶vVæW&F–öã¦7W'&VçGÓ°¢ÒÇ·F–ÖV÷WC£SÒÇ¶&6¶VæBÆvVæW&F–öâÆÖ–æ–×VÔvVæW&F–öçÒ“·Ð¢6F6‚†W'&÷"—°¢6öç7BF–væ÷7F–3Öv—BvRæWfÇVFR†W‡V7FVCÓç°¢6öç7BVF—C×v–æF÷råõöÆ$VF—C°¢6öç7B¦ö'3ÖVF—Bæ¦ö'2æf–ÇFW"†¦ö#Óâ‚W‡V7FVBæ&6¶VæGÇÀ¢¦ö"æ¦ö–çD&6¶VæCÓÓÖW‡V7FVBæ&6¶VæB’b`¢†W‡V7FVBævVæW&F–öãÓÓÖçVÆÇÇÆ¦ö"ævVæW&F–öãÓÓÖW‡V7FVBævVæW&F–öâ’“°¢6öç7B&VÆWfçD¦ö'3ÖæWr6WB†¦ö'2æÖ†¦ö#Óæ¦ö"æ¦ö"’“°¢&WGW&â·6VÆV7FVDÖöFVÃ¦Fö7VÖVçBçVW'•6VÆV7F÷"‚"6Æ"ÖÖöFVÂ"“òçfÇVRÀ¢7FGW3¦Fö7VÖVçBçVW'•6VÆV7F÷"‚"6Æ"×7FGW2"“òçFW‡D6öçFVçBÀ¢¦ö'3¦¦ö'2ç6Æ–6R‚Ó‚’Ç&W7VÇG3¦VF—Bçv÷&¶W%&W7VÇG2æf–ÇFW"‡&W7VÇCÓà¢&VÆWfçD¦ö'2æ†2‡&W7VÇBæ¦ö"’’ç6Æ–6R‚Ó‚’À¢7FFW3¦VF—BæÖW76vW2æf–ÇFW"†ÖW76vSÓà¢ÖW76vRçG—SÓÓÒ'v÷&¶W"×7FFRÖ66WFVB"’ç6Æ–6R‚Ó‚’À¢&öw&W73¦VF—BæÖW76vW2æf–ÇFW"†ÖW76vSÓæÖW76vRçG—SÓÓÒ'&öw&W72"b`¢ÖW76vRç&ö6W76–ætÖöFSÓÓÒ'v÷&¶W""’ç6Æ–6R‚Ó‚—Ó°¢ÒÇ¶&6¶VæBÆvVæW&F–öâÆÖ–æ–×VÔvVæW&F–öçÒ“°¢F‡&÷rW'&÷"‚%v÷&¶W"4ÒWf–FVæ6RF–ÖVB÷WC¢"´¥4ôâç7G&–æv–g’†F–væ÷7F–2’À¢¶6W6S¦W'&÷'Ò“°¢Ð¢6öç7B6VÆV7FVCÖv—BÖF6„†æFÆRæ§6öåfÇVR‚“°¢v—BÖF6„†æFÆRæF—7÷6R‚“°¢6öç7BWf–FVæ6SÖv—BvRæWfÇVFR†7–æ2W‡V7FVCÓç°¢6öç7BVF—C×v–æF÷råõöÆ$VF—C°¢6öç7B7W'&VçCÖW‡V7FVBævVæW&F–öã°¢6öç7B¦ö'3ÖVF—Bæ¦ö'2æf–ÇFW"†—FVÓÓæ—FVÒævVæW&F–öãÓÓÖ7W'&VçBb`¢‚W‡V7FVBæ&6¶VæGÇÆ—FVÒæ¦ö–çD&6¶VæCÓÓÖW‡V7FVBæ&6¶VæB’“°¢6öç7B¦ö#Ö¦ö'2æf–æDÆ7B†—FVÓÓæVF—Bçv÷&¶W%&W7VÇG2ç6öÖR‡&W7VÇCÓà¢&W7VÇBæ¦ö#ÓÓÖ—FVÒæ¦ö"bg&W7VÇBæö²’bfVF—BæÖW76vW2ç6öÖR†ÖW76vSÓà¢ÖW76vRçG—SÓÓÒ'&VæFW&VBÖ6‡Væ²Ö66WFVB"b`¢ÖW76vRævVæW&F–öãÓÓÖ7W'&VçBbbÖW76vRç7FÆRb`¢ÖW76vRç7F'Dg&ÖSÓÓÖ—FVÒçÆå7F'BbfÖW76vRæVæDg&ÖSÓÓÖ—FVÒçÆäVæB’“°¢6öç7B7F'CÖVF—BæÖW76vW2æf–ÇFW"†ÖW76vSÓæÖW76vRçG—SÓÓÒ'&öw&W72"b`¢ÖW76vRçv÷&¶W$vVæW&F–öãÓÓÖ7W'&VçB’æB‚Ó“°¢ÆWBVµ&×3ÓÆÆ7E&öw&W73×7F'BÆGfæ6Tg&ÖW3Ó°¢6öç7BÆö÷ÆVæwFƒ×7F'BæÆö÷VæDg&ÖR×7F'BæÆö÷7F'Dg&ÖS°¢6öç7B&ö&SÖVF—Bç&ö&RÇ6ÓÖæWrfÆöC3$'&’‡&ö&SòæfgE6—¦WÇÃ“°¢6öç7BFVFÆ–æS×W&f÷&Öæ6Rææ÷r‚’³#°¢v†–ÆR‡W&f÷&Öæ6Rææ÷r‚“ÆFVFÆ–æR—°¢6öç7B7W'&VçE&öw&W73ÖVF—BæÖW76vW2æf–ÇFW"†ÖW76vSÓà¢ÖW76vRçG—SÓÓÒ'&öw&W72"bfÖW76vRçv÷&¶W$vVæW&F–öãÓÓÖ7W'&VçB’æB‚Ó“°¢–b†7W'&VçE&öw&W72—°¢ÆWBFVÇFÖ7W'&VçE&öw&W72ç6÷W&6Tg&ÖRÖÆ7E&öw&W72ç6÷W&6Tg&ÖS°¢–b†FVÇFÂÖÆö÷ÆVæwF‚ó"–FVÇF³ÖÆö÷ÆVæwFƒ°¢–b†FVÇFã–Gfæ6Tg&ÖW2³ÖFVÇF°¢Æ7E&öw&W73Ö7W'&VçE&öw&W73°¢Ð¢–b‡&ö&Rbg6ÒæÆVæwF‚—°¢&ö&RævWDfÆöEF–ÖTFöÖ–äFF‡6Ò“°¢6öç7B&×3ÔÖF‚ç7'B‡6Òç&VGV6R‚‡7VÒÇfÇVR“Óç7VÒ·fÇVR§fÇVRÃ’÷6ÒæÆVæwF‚“°¢Vµ&×3ÔÖF‚æÖ‚‡Vµ&×2Ç&×2“°¢Ð¢–b‡Vµ&×3âãbfGfæ6Tg&ÖW3ã–'&V³°¢v—BæWr&öÖ—6R‡&W6öÇfSÓç6WEF–ÖV÷WB‡&W6öÇfRÃ’“°¢Ð¢&WGW&â¶&6¶VæC¦¦ö#òæ¦ö–çD&6¶VæBÆvVæW&F–öã¦7W'&VçBÀ¢Vµ&×2ÆGfæ6Tg&ÖW2À¢Ö—76–ætg&ÖW3¤ÖF‚æÖ‚ƒÂ†Æ7E&öw&W73òæÖ—76–ætg&ÖW7ÇÃ’Ð¢†W‡V7FVBæÖ—76–æt&Vf÷&Tg&ÖW3ó÷7F'CòæÖ—76–ætg&ÖW3óó’’À¢66WFVC¢¦ö"bfVF—BæÖW76vW2ç6öÖR†ÖW76vSÓà¢ÖW76vRçG—SÓÓÒ'&VæFW&VBÖ6‡Væ²Ö66WFVB"b`¢ÖW76vRævVæW&F–öãÓÓÖ7W'&VçBbbÖW76vRç7FÆRb`¢ÖW76vRç7F'Dg&ÖSÓÓÖ¦ö"çÆå7F'BbfÖW76vRæVæDg&ÖSÓÓÖ¦ö"çÆäVæB’À¢&VæFW&VD¦ö#¦¦ö#òæ¦ö"Ç7F'E6÷W&6Tg&ÖS§7F'Còç6÷W&6Tg&ÖRÀ¢Æ7E6÷W&6Tg&ÖS¦Æ7E&öw&W73òç6÷W&6Tg&ÖRÀ¢Ö—76–æuF÷FÃ¦Æ7E&öw&W73òæÖ—76–ætg&ÖW7ÇÃÀ¢f—'7DÖ—76–ætg&ÖS¦Æ7E&öw&W73òæf—'7DÖ—76–ætg&ÖRÀ¢ÖF6†–æt6·3¦VF—BæÖW76vW2æf–ÇFW"†ÖW76vSÓà¢ÖW76vRçG—SÓÓÒ'&VæFW&VBÖ6‡Væ²Ö66WFVB"b`¢ÖW76vRævVæW&F–öãÓÓÖ7W'&VçB’æÖ‚‡·7FÆRÆ'VffW&VE6VvÖVçG2À¢7F'Dg&ÖRÆVæDg&ÖRÇ7VVBÆ6÷&Tg&ÖW2Æ÷WGWDg&ÖW7Ò“Óâ‡·7FÆRÀ¢'VffW&VE6VvÖVçG2Ç7F'Dg&ÖRÆVæDg&ÖRÇ7VVBÆ6÷&Tg&ÖW2Æ÷WGWDg&ÖW7Ò’’À¢ÖF6†–æt¦ö'3¦VF—Bæ¦ö'2æf–ÇFW"†—FVÓÓæ—FVÒævVæW&F–öãÓÓÖ7W'&VçB’ç6Æ–6R‚ÓB’À¢ÖF6†–æu&W7VÇG3¦VF—Bçv÷&¶W%&W7VÇG2æf–ÇFW"†—FVÓÓà¢—FVÒævVæW&F–öãÓÓÖ7W'&VçB’ç6Æ–6R‚ÓB—Ó°¢ÒÇ¶&6¶VæBÆvVæW&F–öã§6VÆV7FVBævVæW&F–öâÆÖ–æ–×VÔvVæW&F–öâÆÖ—76–æt&Vf÷&Tg&ÖW7Ò“°¢76W'Bæö²†Wf–FVæ6Ræ66WFVBbfWf–FVæ6RçVµ&×3âãb`¢Wf–FVæ6RæGfæ6Tg&ÖW3ãÄ¥4ôâç7G&–æv–g’†Wf–FVæ6R’“°¢&WGW&âWf–FVæ6S°§Ð §FW7B‚&–æF—f–GVÂ×W&–öBv÷&¶W"Æ—2F‡&÷Vv‚öæR6†&VB4Òv÷&¶ÆWB–â6‡&öÖR"Æ7–æ2‚“Óç°¢6öç7B÷'CÓƒsC“°¢6öç7B6W'fW#×7vâ‡&ö6W72æVçbå•D„ôçÇÂ'—F†öã2"À¢²"ÖÒ"Â&‡GGç6W'fW""Å7G&–ær‡÷'B’Â"ÒÖ&–æB"Â##rããã%ÒÇ°¢7vC§F‚ç&W6öÇfR‚'vV"ÖFVÖò"’Ç7FF–ó¢&–væ÷&R ¢Ò“°¢ÆWB'&÷w6W#°¢G'—°¢'&÷w6W#Öv—BWWFVW"æÆVæ6‚‡°¢W†V7WF&ÆUFƒ§&ö6W72æVçbä4…$ôÔUô$”çÇÂ"÷W7"ö&–âövöövÆRÖ6‡&öÖR"À¢†VFÆW73§G'VRÆ&w3¥²"ÒÖæò×6æF&÷‚"Â"ÒÖF—6&ÆRÖFWb×6†Ò×W6vR"À¢"ÒÖ×WFRÖVF–ò"À¢"ÒÖWF÷Æ’×öÆ–7“Öæò×W6W"ÖvW7GW&R×&WV—&VB%Ð¢Ò“°¢6öç7BvSÖv—B'&÷w6W"ææWuvR‚“°¢6öç7BvTW'&÷'3ÕµÓ°¢vRæöâ‚'vVW'&÷""ÆW'&÷#ÓçvTW'&÷'2çW6‚†W'&÷"æÖW76vR’“°¢vRæöâ‚&6öç6öÆR"ÆÖW76vSÓç°¢–b†ÖW76vRçG—R‚“ÓÓÒ&W'&÷""b`¢ÖW76vRçFW‡B‚’ç7F'G5v—F‚‚$f–ÆVBFòÆöB&W6÷W&6S¢F†R6W'fW"&W7öæFVBv—F‚7FGW2öbCB"’¢vTW'&÷'2çW6‚†ÖW76vRçFW‡B‚’“°¢Ò“°¢v—BvRæWfÇVFTöäæWtFö7VÖVçB‚‚“Óç°¢6öç7BVF—C×·v÷&¶ÆWG3¥µÒÇv÷&¶W'3¥µÒÆ¦ö'3¥µÒÇv÷&¶W%&W7VÇG3¥µÒÆÖW76vW3¥µÒÇö–çFW$WfVçG3¥µÒÆ'VffW%6÷W&6W3£Ç&ö&S¦çVÆÇÓ°¢ö&¦V7BæFVf–æU&÷W'G’‡v–æF÷rÂ%õöÆ$VF—B"Ç·fÇVS¦VF—GÒ“°¢f÷"†6öç7BG—Röb²'ö–çFW&F÷vâ"Â'ö–çFW'W"Â&6Æ–6²%Ò¢Fö7VÖVçBæFDWfVçDÆ—7FVæW"‡G—RÆWfVçCÓç°¢–b†WfVçBçF&vWCòæ–CÓÓÒ'vfR"–VF—Bçö–çFW$WfVçG2çW6‚‡·G—RÀ¢ƒ¦WfVçBæ6Æ–VçE‚Ç“¦WfVçBæ6Æ–VçE—Ò“°¢ÒÇG'VR“°¢6öç7BæF—fUv÷&¶ÆWC×v–æF÷räVF–õv÷&¶ÆWDæöFS°¢6öç7BæF—fT6öææV7CÔæF—fUv÷&¶ÆWBç&÷F÷G—Ræ6öææV7C°¢æF—fUv÷&¶ÆWBç&÷F÷G—Ræ6öææV7CÖgVæ7F–öâ†FW7F–æF–öâÂââç&W7B—°¢6öç7B&W7VÇCÖæF—fT6öææV7Bæ6ÆÂ‡F†—2ÆFW7F–æF–öâÂââç&W7B“°¢–b‡F†—2åõöÆ%v÷&¶W$ÖöFRbbF†—2åõöÆ%&ö&R—°¢6öç7BæÇ—6W#×F†—2æ6öçFW‡Bæ7&VFTæÇ—6W"‚“¶æÇ—6W"æfgE6—¦SÓ#Cƒ°¢6öç7B×WFS×F†—2æ6öçFW‡Bæ7&VFTv–â‚“¶×WFRæv–âçfÇVSÓ°¢æF—fT6öææV7Bæ6ÆÂ‡F†—2ÆæÇ—6W"“¶æÇ—6W"æ6öææV7B†×WFR“°¢×WFRæ6öææV7B‡F†—2æ6öçFW‡BæFW7F–æF–öâ“°¢F†—2åõöÆ%&ö&S×G'VS¶VF—Bç&ö&SÖæÇ—6W#°¢Ð¢&WGW&â&W7VÇC°¢Ó°¢v–æF÷räVF–õv÷&¶ÆWDæöFSÖ6Æ72W‡FVæG2æF—fUv÷&¶ÆWG°¢6öç7G'V7F÷"†7G‚ÆæÖRÆ÷F–öç2—°¢7WW"†7G‚ÆæÖRÆ÷F–öç2“°¢6öç7BÖöFSÖ÷F–öç3òç&ö6W76÷$÷F–öç3òç&ö6W76–ætÖöFWÇÂ'&r#°¢F†—2åõöÆ%v÷&¶W$ÖöFSÖÖöFSÓÓÒ'v÷&¶W"#°¢VF—Bçv÷&¶ÆWG2çW6‚‡¶æÖRÆÖöFWÒ“°¢F†—2ç÷'BæFDWfVçDÆ—7FVæW"‚&ÖW76vR"ÆWfVçCÓæVF—BæÖW76vW2çW6‚‡°¢âââ†WfVçBæFFÇÇ·Ò’Ç&V6V—fVDC§W&f÷&Öæ6Rææ÷r‚¢Ò’“°¢F†—2ç÷'Bç7F'B‚“°¢Ð¢Ó°¢6öç7BæF—fUv÷&¶W#×v–æF÷råv÷&¶W#°¢v–æF÷råv÷&¶W#Ö6Æ72W‡FVæG2æF—fUv÷&¶W'°¢6öç7G'V7F÷"‡W&ÂÆ÷F–öç2—°¢7WW"‡W&ÂÆ÷F–öç2“·F†—2åõöÆ%W&ÃÕ7G&–ær‡W&Â“°¢VF—Bçv÷&¶W'2çW6‚‡F†—2åõöÆ%W&Â“°¢F†—2æFDWfVçDÆ—7FVæW"‚&ÖW76vR"ÆWfVçCÓæVF—Bçv÷&¶W%&W7VÇG2çW6‚‡°¢&V6V—fVDC§W&f÷&Öæ6Rææ÷r‚’Æ¦ö#¦WfVçBæFFòæ¦ö"À¢vVæW&F–öã¦WfVçBæFFòævVæW&F–öâÆö³¦WfVçBæFFòæö²À¢v÷&¶W$VÆ6VD×3¦WfVçBæFFòçv÷&¶W$VÆ6VD×0¢Ò’“°¢Ð¢÷7DÖW76vR‡–ÆöBÂââç&W7B—°¢–b‡F†—2åõöÆ%W&Âæ–æ6ÇVFW2‚&Æ"×&ö6W76÷"çv÷&¶W""’¢VF—Bæ¦ö'2çW6‚‡¶¦ö#§–ÆöBæ¦ö"ÆvVæW&F–öã§–ÆöBævVæW&F–öâÀ¢ÖöFVÃ§–ÆöBæÖöFVÂÆ¦ö–çD&6¶VæC§–ÆöBæ¦ö–çD&6¶VæBÀ¢7VVC§–ÆöBç7VVBÇ6VÖ—FöæW3§–ÆöBç6VÖ—FöæW2À¢6VçDC§W&f÷&Öæ6Rææ÷r‚’Æ6÷&Tg&ÖW3§–ÆöBçÆãòæ6÷&RÀ¢Æå7F'C§–ÆöBçÆãòç7F'BÀ¢ÆäVæC§–ÆöBçÆãòç7F'B·–ÆöBçÆãòæ6÷&RÀ¢÷WGWDg&ÖW3§–ÆöBçÆãòæ÷WGWDg&ÖW2À¢6÷W&6Tg&ÖW3§–ÆöBçÆãòçFò×–ÆöBçÆãòæg&öÒ°¢‡–ÆöBçÆãòçw&&–v‡GÇÃ—Ò“°¢&WGW&â7WW"ç÷7DÖW76vR‡–ÆöBÂââç&W7B“°¢Ð¢Ó°¢6öç7BæF—fT'VffW%6÷W&6SÔVF–ô6öçFW‡Bç&÷F÷G—Ræ7&VFT'VffW%6÷W&6S°¢VF–ô6öçFW‡Bç&÷F÷G—Ræ7&VFT'VffW%6÷W&6SÖgVæ7F–öâ‚ââæ&w2—°¢VF—Bæ'VffW%6÷W&6W2²³°¢&WGW&âæF—fT'VffW%6÷W&6RæÇ’‡F†—2Æ&w2“°¢Ó°¢Ò“°¢v—BvRæv÷Fò†‡GG¢òó#rããã¢G·÷'GÒö–æFW‚æ‡FÖÆÇ°¢v—EVçF–Ã¢&FöÖ6öçFVçFÆöFVB"ÇF–ÖV÷WC£# ¢Ò“°¢v—BvRçv—Df÷$gVæ7F–öâ‚‚“Óà¢Fö7VÖVçBæFö7VÖVçDVÆVÖVçBæFF6WBægt&ö÷CÓÓÒ'&VG’"Ç·F–ÖV÷WC£#Ò“°¢v—BvRæWfÇVFR†7–æ2‚“Óç°¢6öç7B6VÆV7CÖFö7VÖVçBçVW'•6VÆV7F÷"‚"6Æ"ÖÖöFVÂ"“°¢6VÆV7BçfÇVSÒ'b#·6VÆV7BæF—7F6„WfVçB†æWrWfVçB‚&6†ævR"Ç¶'V&&ÆW3§G'VWÒ’“°¢v—BæWr&öÖ—6R‡&W6öÇfSÓç6WEF–ÖV÷WB‡&W6öÇfRÃC’“°¢6öç7B–æF—f–GVÃÖFö7VÖVçBçVW'•6VÆV7F÷"‚"6Æ"Ö–æF—f–GVÂ×W&–öG2"“°¢–æF—f–GVÂæ6†V6¶VC×G'VS°¢–æF—f–GVÂæF—7F6„WfVçB†æWrWfVçB‚&6†ævR"Ç¶'V&&ÆW3§G'VWÒ’“°¢v—BæWr&öÖ—6R‡&W6öÇfSÓç6WEF–ÖV÷WB‡&W6öÇfRÃC’“°¢6öç7B6×ÆU&FSÓCƒÆg&ÖW3×6×ÆU&FR£c°¢6öç7B'—FW3ÖæWr'&”'VffW"ƒCB¶g&ÖW2£"’Çf–WsÖæWrFFf–Wr†'—FW2“°¢f–Wrç6WEV–çC3"ƒÃƒCcCcC“S"ÇG'VR“·f–Wrç6WEV–çC3"ƒBÆ'—FW2æ'—FTÆVæwF‚Ó‚ÇG'VR“°¢f–Wrç6WEV–çC3"ƒ‚ÃƒCSScCSrÇG'VR“·f–Wrç6WEV–çC3"ƒ"Ãƒ#sCfCcbÇG'VR“°¢f–Wrç6WEV–çC3"ƒbÃbÇG'VR“·f–Wrç6WEV–çCbƒ#ÃÇG'VR“°¢f–Wrç6WEV–çCbƒ#"ÃÇG'VR“·f–Wrç6WEV–çC3"ƒ#BÇ6×ÆU&FRÇG'VR“°¢f–Wrç6WEV–çC3"ƒ#‚Ç6×ÆU&FR£"ÇG'VR“·f–Wrç6WEV–çCbƒ3"Ã"ÇG'VR“°¢f–Wrç6WEV–çCbƒ3BÃbÇG'VR“·f–Wrç6WEV–çC3"ƒ3bÃƒcsCccBÇG'VR“°¢f–Wrç6WEV–çC3"ƒCÆg&ÖW2£"ÇG'VR“°¢f÷"†ÆWB“Ó¶“Æg&ÖW3¶’²²¢f–Wrç6WD–çCbƒCB¶’£"ÄÖF‚ç&÷VæB‚ã"¤ÖF‚ç6–âƒ"¤ÖF‚å’£CC¦’÷6×ÆU&FR’£3#scr’ÇG'VR“°¢6öç7Bf–ÆSÖæWrf–ÆR…¶'—FW5ÒÂ'v÷&¶W"×6÷W&6R×FöæRçvb"Ç·G—S¢&VF–ò÷vb'Ò“°¢6öç7BG&ç6fW#ÖæWrFFG&ç6fW"‚“·G&ç6fW"æ—FV×2æFB†f–ÆR“°¢6öç7B–çWCÖFö7VÖVçBçVW'•6VÆV7F÷"‚"6VF–òÖf–ÆR"“¶–çWBæf–ÆW3×G&ç6fW"æf–ÆW3°¢–çWBæF—7F6„WfVçB†æWrWfVçB‚&6†ævR"Ç¶'V&&ÆW3§G'VWÒ’“°¢Ò“°¢G'—°¢v—BvRçv—Df÷$gVæ7F–öâ‚‚“ÓæFö7VÖVçBçVW'•6VÆV7F÷"‚"6f–ÆRÖÖWF"“òçFW‡D6öçFVç@¢æ–æ6ÇVFW2‚'v÷&¶W"×6÷W&6R×FöæRçvb"’b`¢Fö7VÖVçBçVW'•6VÆV7F÷"‚"6f–ÆRÖÖWF"’çFW‡D6öçFVçBæ–æ6ÇVFW2‚.ŠªÞ8þ‹ëÎ8þKŠÒ"’À¢·F–ÖV÷WC£SÒ“°¢Ö6F6‚†W'&÷"—°¢6öç7BF–væ÷7F–3Öv—BvRæWfÇVFR‚‚“Óâ‡°¢F—FÆS¦Fö7VÖVçBçF—FÆRÆÖWF¦Fö7VÖVçBçVW'•6VÆV7F÷"‚"6f–ÆRÖÖWF"“òçFW‡D6öçFVçBÀ¢7FGW3¦Fö7VÖVçBçVW'•6VÆV7F÷"‚"77FGW2"“òçFW‡D6öçFVçBÀ¢&öG“¦Fö7VÖVçBæ&öG’æ–ææW%FW‡Bç6Æ–6RƒÃ#¢Ò’“°¢6öç6öÆRæÆör‚$6‡&öÖRf–ÆRÖÆöBF–væ÷7F–2"Ä¥4ôâç7G&–æv–g’‡¶F–væ÷7F–2ÇvTW'&÷'7Ò’“°¢F‡&÷rW'&÷#°¢Ð¢6öç7B6ö×F–&–Æ—G“Öv—BvRâFWfÂ‚"6Æ"ÖÖöFVÂÖ6ö×F–&–Æ—G’"ÆæöFSÓææöFRçFW‡D6öçFVçB“°¢76W'BæÖF6‚†6ö×F–&–Æ—G’ÂóÂã^8	Ã.XÒò“°¢76W'BæÖF6‚†6ö×F–&–Æ—G’ÂôÂô"ò“°¢76W'BæÖF6‚†6ö×F–&–Æ—G’ÂþXÛ>i˜.8+ž8*þ8:ž89n8þiÊ®Zûî[ùÂò“° ¢v—BvRæWfÇVFR‚‚“ÓæFö7VÖVçBçVW'•6VÆV7F÷"‚"7Æ’×vWB"’æ6Æ–6²‚’“°¢G'—°¢v—BvRçv—Df÷$gVæ7F–öâ‚‚“ÓæFö7VÖVçBçVW'•6VÆV7F÷"‚"7'BÖ–æF–6F÷""“òçFW‡D6öçFVç@¢æ–æ6ÇVFW2‚.8:.88~8:¾XhÞyIþKŠÒ"’bgv–æF÷råõöÆ$VF—Bçv÷&¶ÆWG2æÆVæwFƒÓÓÓÀ¢·F–ÖV÷WC£#Ò“°¢Ö6F6‚†W'&÷"—°¢6öç7BF–væ÷7F–3Öv—BvRæWfÇVFR‚‚“Óâ‡°¢–æF–6F÷#¦Fö7VÖVçBçVW'•6VÆV7F÷"‚"7'BÖ–æF–6F÷""“òçFW‡D6öçFVçBÀ¢7FGW3¦Fö7VÖVçBçVW'•6VÆV7F÷"‚"6Æ"×7FGW2"“òçFW‡D6öçFVçBÀ¢f–ÆS¦Fö7VÖVçBçVW'•6VÆV7F÷"‚"6f–ÆRÖÖWF"“òçFW‡D6öçFVçBÀ¢v÷&¶ÆWG3§v–æF÷råõöÆ$VF—Bçv÷&¶ÆWG2Çv÷&¶W'3§v–æF÷råõöÆ$VF—Bçv÷&¶W'2À¢¦ö'3§v–æF÷råõöÆ$VF—Bæ¦ö'2ç6Æ–6R‚ÓR’À¢&W7VÇG3§v–æF÷råõöÆ$VF—Bçv÷&¶W%&W7VÇG2ç6Æ–6R‚ÓR¢Ò’“°¢6öç6öÆRæÆör‚$6‡&öÖRÆ–&6²×7F'BF–væ÷7F–2"Ä¥4ôâç7G&–æv–g’†F–væ÷7F–2’“°¢F‡&÷rW'&÷#°¢Ð¢v—BvRçv—Df÷$gVæ7F–öâ‚‚“Óçv–æF÷råõöÆ$VF—BæÖW76vW2ç6öÖR†ÖW76vSÓà¢ÖW76vRçG—SÓÓÒ'&öw&W72"bfÖW76vRç&ö6W76–ætÖöFSÓÓÒ'v÷&¶W""’À¢·F–ÖV÷WC£Ò“°¢v—BvRçv—Df÷$gVæ7F–öâ‚‚“Óç°¢6öç7B&ö&S×v–æF÷råõöÆ$VF—Bç&ö&S°¢–b‚&ö&R—&WGW&âfÇ6S°¢6öç7B6ÓÖæWrfÆöC3$'&’‡&ö&RæfgE=·çËh‘éì¶»§q«^u}±…‰Õ‘¥Ð¹µ•ÍÍ…•Ì(€€€€€€¹™¥±Ñ•È¡µ•ÍÍ…”ôùµ•ÍÍ…”¹ÑåÁ”ôôô‰ÁÉ½É•ÍÌˆ¤¹…Ð ´Ä¤ü¹±½½Á¹‘É…µ”¤ì(€€€½¹ÍÐÁ¥Ñ¡]½É­•ÉQ¥µ¥¹œõ…Ý…¥ÐÁ…”¹•Ù…±Õ…Ñ” ¡í•¹•É…Ñ¥½¸±ÍÑ…•‘É…µ•ô¤ôùì(€€€€€½¹ÍÐ©½ˆõÝ¥¹‘½Ü¹}}±…‰Õ‘¥Ð¹©½‰Ì¹™¥±Ñ•È¡¥Ñ•´ôø(€€€€€€€¥Ñ•´¹•¹•É…Ñ¥½¸ù•¹•É…Ñ¥½¸˜™¥Ñ•´¹Í•µ¥Ñ½¹•ÌôôôÈ˜˜(€€€€€€€€€¥Ñ•´¹Á±…¹MÑ…ÉÐôôõÍÑ…•‘É…µ”¤¹…Ð ´Ä¤ì(€€€€€½¹ÍÐÉ•ÍÕ±Ðõ©½ˆ˜™Ý¥¹‘½Ü¹}}±…‰Õ‘¥Ð¹Ý½É­•ÉI•ÍÕ±ÑÌ¹™¥¹‘1…ÍÐ¡¥Ñ•´ôø(€€€€€€€¥Ñ•´¹©½ˆôôõ©½ˆ¹©½ˆ¤ì(€€€€€É•ÑÕÉ¸í©½‰M•¹ÑÐé©½ˆü¹Í•¹ÑÐ±É•ÍÕ±ÑI••¥Ù•‘ÐéÉ•ÍÕ±Ðü¹É••¥Ù•‘Ð°(€€€€€€€Ý½É­•É±…ÁÍ•‘5ÌéÉ•ÍÕ±Ðü¹Ý½É­•É±…ÁÍ•‘5Ì°(€€€€€€€‰É½ÝÍ•ÉI½Õ¹‘QÉ¥Á5Ìé©½ˆ˜™É•ÍÕ±ÐýÉ•ÍÕ±Ð¹É••¥Ù•‘Ðµ©½ˆ¹Í•¹ÑÐé¹Õ±°°(€€€€€€€µ½‘•°é©½ˆü¹µ½‘•°±©½¥¹Ñ	…­•¹é©½ˆü¹©½¥¹Ñ	…­•¹°(€€€€€€€Á±…¹MÑ…ÉÐé©½ˆü¹Á±…¹MÑ…ÉÐ±½É•É…µ•Ìé©½ˆü¹½É•É…µ•Ì°(€€€€€€€Í½ÕÉ•É…µ•Ìé©½ˆü¹Í½ÕÉ•É…µ•Íôì(€€€ô±í•¹•É…Ñ¥½¸éÍÁ••‘•¹•É…Ñ¥½¸±ÍÑ…•‘É…µ”éÁ¥Ñ¡MÑ…”¹Í½ÕÉ•É…µ•ô¤ì(€€€…ÍÍ•ÉÐ¹•ÅÕ…°¡Á¥Ñ¡]½É­•ÉQ¥µ¥¹œ¹µ½‘•°°‰Á•É¥½µ©½¥¹Ðˆ°(€€€€€)M=8¹ÍÑÉ¥¹¥™ä¡Á¥Ñ¡]½É­•ÉQ¥µ¥¹œ¤¤ì(€€€…ÍÍ•ÉÐ¹•ÅÕ…°¡Á¥Ñ¡]½É­•ÉQ¥µ¥¹œ¹©½¥¹Ñ	…­•¹°‰ÁØˆ°(€€€€€)M=8¹ÍÑÉ¥¹¥™ä¡Á¥Ñ¡]½É­•ÉQ¥µ¥¹œ¤¤ì(€€€½¹ÍÐ•áÁ•Ñ•‘¥ÍÑ…¹”ô ¡Á¥Ñ¡MÑ…”¹Í½ÕÉ•É…µ”µ™É…Ñ¥½¹…±AÉ½É•ÍÌ¤•±½½Á¹¬(€€€€€±½½Á¹¤•±½½Á¹ì(€€€½¹ÍÐ…ÑÕ…±¥ÍÑ…¹”ô ¡Á¥Ñ¡•ÁÑ•¹Í½ÕÉ•É…µ”µ™É…Ñ¥½¹…±AÉ½É•ÍÌ¤•±½½Á¹¬(€€€€€±½½Á¹¤•±½½Á¹ì(€€€…ÍÍ•ÉÐ¹½¬¡5…Ñ ¹…‰Ì¡…ÑÕ…±¥ÍÑ…¹”µ•áÁ•Ñ•‘¥ÍÑ…¹”¤ðàÄäÈ°(€€€€€)M=8¹ÍÑÉ¥¹¥™ä¡í™É…Ñ¥½¹…±AÉ½É•ÍÌ±Á¥Ñ¡MÑ…”±Á¥Ñ¡•ÁÑ•°(€€€€€€€•áÁ•Ñ•‘¥ÍÑ…¹”±…ÑÕ…±¥ÍÑ…¹”±±½½Á¹±Á¥Ñ¡]½É­•ÉQ¥µ¥¹ô¤¤ì(€€€…ÍÍ•ÉÐ¹•ÅÕ…°¡µ¥ÍÍ¥¹™Ñ•ÉA¥Ñ ±µ¥ÍÍ¥¹	•™½É•A¥Ñ °(€€€€€€‰Á¥Ñ ¡…¹‘½™˜µÕÍÐ¹½Ð…‘µ¥ÍÍ¥¹œA4™É…µ•Ìˆ¤ì(€€€½¹ÍÐ‰…­•¹‘AµÙ¥‘•¹”õmtì(€€€±•Ðµ¥ÍÍ¥¹	•™½É•5½‘•°õ…Ý…¥ÐÁ…”¹•Ù…±Õ…Ñ”  ¤ôùÝ¥¹‘½Ü¹}}±…‰Õ‘¥Ð¹µ•ÍÍ…•Ì(€€€€€€¹™¥±Ñ•È¡µ•ÍÍ…”ôùµ•ÍÍ…”¹ÑåÁ”ôôô‰ÁÉ½É•ÍÌˆ˜˜(€€€€€€€µ•ÍÍ…”¹ÁÉ½•ÍÍ¥¹5½‘”ôôô‰Ý½É­•Èˆ¤¹…Ð ´Ä¤ü¹µ¥ÍÍ¥¹É…µ•ÍñðÀ¤ì(€€€…Ý…¥ÐÁ…”¸‘•Ù…° ˆ±…ˆµµ½‘•°ˆ±¹½‘”ôùì(€€€€€¹½‘”¹Ù…±Õ”ô‰ÝÍ½±„ˆí¹½‘”¹‘¥ÍÁ…Ñ¡Ù•¹Ð¡¹•ÜÙ•¹Ð ‰¡…¹”ˆ±í‰Õ‰‰±•ÌéÑÉÕ•ô¤¤ì(€€€ô¤ì(€€€‰…­•¹‘AµÙ¥‘•¹”¹ÁÕÍ ¡…Ý…¥ÐÝ…¥Ñ½É]½É­•ÉA4¡Á…”±í‰…­•¹è‰ÝÍ½±„ˆ°(€€€€€µ¥¹¥µÕµ•¹•É…Ñ¥½¸èÀ±µ¥ÍÍ¥¹	•™½É•É…µ•Ìéµ¥ÍÍ¥¹	•™½É•5½‘•±ô¤¤ì(€€€™½È¡½¹ÍÐµ½‘•°½˜l‰‘Õ…°ˆ°‰…´‰t¥ì(€€€€€µ¥ÍÍ¥¹	•™½É•5½‘•°õ…Ý…¥ÐÁ…”¹•Ù…±Õ…Ñ”  ¤ôùÝ¥¹‘½Ü¹}}±…‰Õ‘¥Ð¹µ•ÍÍ…•Ì(€€€€€€€€¹™¥±Ñ•È¡µ•ÍÍ…”ôùµ•ÍÍ…”¹ÑåÁ”ôôô‰ÁÉ½É•ÍÌˆ˜˜(€€€€€€€€€µ•ÍÍ…”¹ÁÉ½•ÍÍ¥¹5½‘”ôôô‰Ý½É­•Èˆ¤¹…Ð ´Ä¤ü¹µ¥ÍÍ¥¹É…µ•ÍñðÀ¤ì(€€€€€…Ý…¥ÐÁ…”¸‘•Ù…° ˆ±…ˆµµ½‘•°ˆ°¡¹½‘”±Ù…±Õ”¤ôùì(€€€€€€€¹½‘”¹Ù…±Õ”õÙ…±Õ”í¹½‘”¹‘¥ÍÁ…Ñ¡Ù•¹Ð¡¹•ÜÙ•¹Ð ‰¡…¹”ˆ±í‰Õ‰‰±•ÌéÑÉÕ•ô¤¤ì(€€€€€ô±µ½‘•°¤ì(€€€€€‰…­•¹‘AµÙ¥‘•¹”¹ÁÕÍ ¡…Ý…¥ÐÝ…¥Ñ½É]½É­•ÉA4¡Á…”±í‰…­•¹éµ½‘•°°(€€€€€€€µ¥¹¥µÕµ•¹•É…Ñ¥½¸èÀ±µ¥ÍÍ¥¹	•™½É•É…µ•Ìéµ¥ÍÍ¥¹	•™½É•5½‘•±ô¤¤ì(€€€ô(€€€•Ù¥‘•¹”õ…Ý…¥ÐÁ…”¹•Ù…±Õ…Ñ”  ¤ôùì(€€€€€½¹ÍÐÁÉ½É•ÍÌõÝ¥¹‘½Ü¹}}±…‰Õ‘¥Ð¹µ•ÍÍ…•Ì¹™¥±Ñ•È¡µ•ÍÍ…”ôø(€€€€€€€µ•ÍÍ…”¹ÑåÁ”ôôô‰ÁÉ½É•ÍÌˆ˜™µ•ÍÍ…”¹ÁÉ½•ÍÍ¥¹5½‘”ôôô‰Ý½É­•Èˆ¤ì(€€€€€½¹ÍÐ…Ñ¥Ù”õÁÉ½É•ÍÌ¹…Ð ´Ä¤ì(€€€€€½¹ÍÐ…Ñ¥Ù•AÉ½É•ÍÌõÁÉ½É•ÍÌ¹™¥±Ñ•È¡µ•ÍÍ…”ôø(€€€€€€€µ•ÍÍ…”¹Ý½É­•É•¹•É…Ñ¥½¸ôôõ…Ñ¥Ù”ü¹Ý½É­•É•¹•É…Ñ¥½¸¤ì(€€€€€½¹ÍÐµ¥ÍÍ¥¹	…Í•±¥¹”õ…Ñ¥Ù•AÉ½É•ÍÍlÁtü¹µ¥ÍÍ¥¹É…µ•ÍñðÀì(€€€€€É•ÑÕÉ¸ì(€€€€€Ý½É­±•ÑÌéÝ¥¹‘½Ü¹}}±…‰Õ‘¥Ð¹Ý½É­±•ÑÌ°(€€€€€Ý½É­±•ÑMÑ…Ñ•ÌéÝ¥¹‘½Ü¹}}±…‰Õ‘¥Ð¹µ•ÍÍ…•Ì¹™¥±Ñ•È¡µ•ÍÍ…”ôø(€€€€€€€µ•ÍÍ…”¹ÑåÁ”ôôô‰Ý½É­•ÈµÍÑ…Ñ”µ…•ÁÑ•‰ñð(€€€€€€€€€µ•ÍÍ…”¹ÑåÁ”ôôô‰Ý½É­•ÈµÍÑ…Ñ”µ…Ñ¥Ù…Ñ•ˆ¤°(€€€€€É•Ñ…¥¹•‘	…­•¹‘)½‰ÌéÝ¥¹‘½Ü¹}}±…‰Õ‘¥Ð¹©½‰Ì¹™¥±Ñ•È¡©½ˆôø(€€€€€€€l‰ÁØˆ°‰ÝÍ½±„ˆ°‰‘Õ…°ˆ°‰…´‰t¹¥¹±Õ‘•Ì¡©½ˆ¹©½¥¹Ñ	…­•¹¤¤°(€€€€€ÍÕ•ÍÍ™Õ±	…­•¹‘)½‰ÌéÝ¥¹‘½Ü¹}}±…‰Õ‘¥Ð¹Ý½É­•ÉI•ÍÕ±ÑÌ¹µ…À¡É•ÍÕ±Ðôø¡ì(€€€€€€€€¸¸¹É•ÍÕ±Ð±©½ˆéÝ¥¹‘½Ü¹}}±…‰Õ‘¥Ð¹©½‰Ì¹™¥¹¡¥Ñ•´ôù¥Ñ•´¹©½ˆôôõÉ•ÍÕ±Ð¹©½ˆ¤(€€€€€ô¤¤¹™¥±Ñ•È¡É•ÍÕ±ÐôùÉ•ÍÕ±Ð¹½¬˜™l‰ÁØˆ°‰ÝÍ½±„ˆ°‰‘Õ…°ˆ°‰…´‰t(€€€€€€€€¹¥¹±Õ‘•Ì¡É•ÍÕ±Ð¹©½ˆü¹©½¥¹Ñ	…­•¹¤¤°(€€€€€…Ñ¥Ù••¹•É…Ñ¥½¸é…Ñ¥Ù”ü¹Ý½É­•É•¹•É…Ñ¥½¸°(€€€€€µ…á5¥ÍÍ¥¹É…µ•Ìé5…Ñ ¹µ…à À°¸¸¹…Ñ¥Ù•AÉ½É•ÍÌ¹µ…À¡µ•ÍÍ…”ôø(€€€€€€€€¡µ•ÍÍ…”¹µ¥ÍÍ¥¹É…µ•ÍñðÀ¤µµ¥ÍÍ¥¹	…Í•±¥¹”¤¤°(€€€€€‰Õ™™•ÉÌéÝ¥¹‘½Ü¹}}±…‰Õ‘¥Ð¹‰Õ™™•ÉM½ÕÉ•Ì°(€€€€€ÍÑ…ÑÕÌé‘½Õµ•¹Ð¹ÅÕ•ÉåM•±•Ñ½È ˆ±…ˆµÍÑ…ÑÕÌˆ¤ü¹Ñ•áÑ½¹Ñ•¹Ð(€€€€€ôì(€€€ô¤ì(€€€…ÍÍ•ÉÐ¹•ÅÕ…°¡•Ù¥‘•¹”¹Ý½É­±•ÑÌ¹±•¹Ñ °Ä±•Ù¥‘•¹”¤ì(€€€…ÍÍ•ÉÐ¹•ÅÕ…°¡•Ù¥‘•¹”¹‰Õ™™•ÉÌ°À±•Ù¥‘•¹”¤ì(€€€…ÍÍ•ÉÐ¹½¬¡•Ù¥‘•¹”¹Ý½É­±•ÑMÑ…Ñ•Ì¹±•¹Ñ øôÔ±•Ù¥‘•¹”¤ì(€€€™½È¡½¹ÍÐµ½‘•°½˜l‰ÁØˆ°‰ÝÍ½±„ˆ°‰‘Õ…°ˆ°‰…´‰t¤(€€€€€…ÍÍ•ÉÐ¹½¬¡•Ù¥‘•¹”¹É•Ñ…¥¹•‘	…­•¹‘)½‰Ì¹Í½µ”¡©½ˆôù©½ˆ¹©½¥¹Ñ	…­•¹ôôõµ½‘•°¤°(€€€€€€€íµ½‘•°±•Ù¥‘•¹•ô¤ì(€€€…ÍÍ•ÉÐ¹‘••ÁÅÕ…°¡l¸¸¹¹•ÜM•Ð¡•Ù¥‘•¹”¹ÍÕ•ÍÍ™Õ±	…­•¹‘)½‰Ì(€€€€€€¹µ…À¡É•ÍÕ±ÐôùÉ•ÍÕ±Ð¹©½ˆ¹©½¥¹Ñ	…­•¹¤¥t¹Í½ÉÐ ¤°(€€€€€l‰…´ˆ°‰‘Õ…°ˆ°‰ÁØˆ°‰ÝÍ½±„‰t±•Ù¥‘•¹”¹ÍÕ•ÍÍ™Õ±	…­•¹‘)½‰Ì¤ì(€€€…ÍÍ•ÉÐ¹½¬¡‰…­•¹‘AµÙ¥‘•¹”¹•Ù•Éä¡¥Ñ•´ôù¥Ñ•´¹…•ÁÑ•˜˜(€€€€€¥Ñ•´¹Á•…­IµÌø¸ÀÄ˜™¥Ñ•´¹…‘Ù…¹•É…µ•ÌøÀ¤±‰…­•¹‘AµÙ¥‘•¹”¤ì(€€€¥˜¡•Ù¥‘•¹”¹µ…á5¥ÍÍ¥¹É…µ•ÌøÀ¤(€€€€€…ÍÍ•ÉÐ¹µ…Ñ ¡•Ù¥‘•¹”¹ÍÑ…ÑÕÌ°¿š²ƒ¢BõA7Ž
-K¢¢c¦2ËŽ_ŽûŽ_Ž|¼¤ì((€€€…Ý…¥ÐÁ…”¸‘•Ù…° ˆÝ…Ù”ˆ±…¹Ù…Ìôù…¹Ù…Ì¹ÍÉ½±±%¹Ñ½Y¥•Ü¡í‰±½¬è‰•¹Ñ•È‰ô¤¤ì(€€€½¹ÍÐÑ…É•ÑÉ…µ•Ìõ…Ý…¥ÐÁ…”¹•Ù…±Õ…Ñ”  ¤ôùì(€€€€€½¹ÍÐÁÉ½É•ÍÌõÝ¥¹‘½Ü¹}}±…‰Õ‘¥Ð¹µ•ÍÍ…•Ì¹™¥±Ñ•È¡µ•ÍÍ…”ôø(€€€€€€€µ•ÍÍ…”¹ÑåÁ”ôôô‰ÁÉ½É•ÍÌˆ˜™µ•ÍÍ…”¹ÁÉ½•ÍÍ¥¹5½‘”ôôô‰Ý½É­•Èˆ¤¹…Ð ´Ä¤ì(€€€€€½¹ÍÐÑ½Ñ…±É…µ•ÌõÁÉ½É•ÍÌü¹±½½Á¹‘É…µ”ì(€€€€€¥˜ …9Õµ‰•È¹¥ÍM…™•%¹Ñ••È¡Ñ½Ñ…±É…µ•Ì¥ññÑ½Ñ…±É…µ•ÌðÈ¤(€€€€€€€Ñ¡É½ÜÉÉ½È ‰]½É­•ÈÍ½ÕÉ”µ™É…µ”•áÑ•¹Ð¥ÌÕ¹…Ù…¥±…‰±”ˆ¤ì(€€€€€É•ÑÕÉ¸íÑ½Ñ…±É…µ•Ì±Í••¬é5…Ñ ¹É½Õ¹¡Ñ½Ñ…±É…µ•Ì¨¸ÜÔ¤±¹•…É¹é5…Ñ ¹É½Õ¹¡Ñ½Ñ…±É…µ•Ì¨¸äà¥ôì(€€€ô¤ì(€€€½¹ÍÐµ¥ÍÍ¥¹	•™½É•M••¬õ…Ý…¥ÐÁ…”¹•Ù…±Õ…Ñ”  ¤ôùÝ¥¹‘½Ü¹}}±…‰Õ‘¥Ð¹µ•ÍÍ…•Ì(€€€€€€¹™¥±Ñ•È¡µ•ÍÍ…”ôùµ•ÍÍ…”¹ÑåÁ”ôôô‰ÁÉ½É•ÍÌˆ˜˜(€€€€€€€µ•ÍÍ…”¹ÁÉ½•ÍÍ¥¹5½‘”ôôô‰Ý½É­•Èˆ¤¹…Ð ´Ä¤ü¹µ¥ÍÍ¥¹É…µ•ÍñðÀ¤ì(€€€½¹ÍÐÝ…Ù”õ…Ý…¥ÐÁ…”¸‘•Ù…° ˆÝ…Ù”ˆ±…¹Ù…Ìôùì(€€€€€½¹ÍÐÉ•Ðõ…¹Ù…Ì¹•Ñ	½Õ¹‘¥¹±¥•¹ÑI•Ð ¤ì(€€€€€É•ÑÕÉ¸íàéÉ•Ð¹à±äéÉ•Ð¹ä±Ý¥‘Ñ éÉ•Ð¹Ý¥‘Ñ ±¡•¥¡ÐéÉ•Ð¹¡•¥¡Ñôì(€€€ô¤ì(€€€½¹ÍÐÍ••­A½¥¹ÐõíàéÝ…Ù”¹à­Ý…Ù”¹Ý¥‘Ñ ¨¸ÜÔ±äéÝ…Ù”¹ä­Ý…Ù”¹¡•¥¡Ð¼Éôì(€€€…Ý…¥ÐÁ…”¹µ½ÕÍ”¹±¥¬¡Í••­A½¥¹Ð¹à±Í••­A½¥¹Ð¹ä¤ì(€€€ÑÉåì(€€€€€…Ý…¥ÐÁ…”¹Ý…¥Ñ½ÉÕ¹Ñ¥½¸¡Ñ…É•ÐôùÝ¥¹‘½Ü¹}}±…‰Õ‘¥Ð¹µ•ÍÍ…•Ì¹Í½µ”¡µ•ÍÍ…”ôø(€€€€€€€µ•ÍÍ…”¹ÑåÁ”ôôô‰Ý½É­•ÈµÍÑ…Ñ”µ…•ÁÑ•ˆ˜˜(€€€€€€€5…Ñ ¹…‰Ì¡µ•ÍÍ…”¹Í½ÕÉ•É…µ”µÑ…É•Ð¤ðôÄÀÀ¤±íÑ¥µ•½ÕÐèÄÀÀÀÁô±Ñ…É•ÑÉ…µ•Ì¹Í••¬¤ì(€€€õ…Ñ ¡•ÉÉ½È¥ì(€€€€€½¹ÍÐ‘¥…¹½ÍÑ¥Œõ…Ý…¥ÐÁ…”¹•Ù…±Õ…Ñ” ¡íÁ½¥¹Ð±Ñ…É•ÑÍô¤ôùì(€€€€€€€½¹ÍÐ…Õ‘¥ÐõÝ¥¹‘½Ü¹}}±…‰Õ‘¥Ð±Ý…Ù”õ‘½Õµ•¹Ð¹ÅÕ•ÉåM•±•Ñ½È ˆÝ…Ù”ˆ¤ì(€€€€€€€½¹ÍÐ¡¥Ðõ‘½Õµ•¹Ð¹•±•µ•¹ÑÉ½µA½¥¹Ð¡Á½¥¹Ð¹à±Á½¥¹Ð¹ä¤ì(€€€€€€€É•ÑÕÉ¸íÍ•±•Ñ•‘5½‘•°é‘½Õµ•¹Ð¹ÅÕ•ÉåM•±•Ñ½È ˆ±…ˆµµ½‘•°ˆ¤ü¹Ù…±Õ”°(€€€€€€€€€ÍÑ…ÑÕÌé‘½Õµ•¹Ð¹ÅÕ•ÉåM•±•Ñ½È ˆ±…ˆµÍÑ…ÑÕÌˆ¤ü¹Ñ•áÑ½¹Ñ•¹Ð°(€€€€€€€€€¥¹‘¥…Ñ½Èé‘½Õµ•¹Ð¹ÅÕ•ÉåM•±•Ñ½È ˆÉÐµ¥¹‘¥…Ñ½Èˆ¤ü¹Ñ•áÑ½¹Ñ•¹Ð°(€€€€€€€€€™¥±”é‘½Õµ•¹Ð¹ÅÕ•ÉåM•±•Ñ½È ˆ™¥±”µµ•Ñ„ˆ¤ü¹Ñ•áÑ½¹Ñ•¹Ð°(€€€€€€€€€Ý…Ù•I•ÐéÝ…Ù”ü¹•Ñ	½Õ¹‘¥¹±¥•¹ÑI•Ð ¤¹Ñ½)M=8 ¤°(€€€€€€€€€Í••­!¥Ðéí¥é¡¥Ðü¹¥±Ñ…œé¡¥Ðü¹Ñ…9…µ”±±…ÍÍ9…µ”é¡¥Ðü¹±…ÍÍ9…µ•ô°(€€€€€€€€€Á½¥¹Ñ•ÉÙ•¹ÑÌé…Õ‘¥Ð¹Á½¥¹Ñ•ÉÙ•¹ÑÌ¹Í±¥” ´à¤°(€€€€€€€€€Ñ…É•ÑÌ°(€€€€€€€€€Ý½É­•ÉMÑ…Ñ•Ìé…Õ‘¥Ð¹µ•ÍÍ…•Ì¹™¥±Ñ•È¡µ•ÍÍ…”ôø(€€€€€€€€€€€µ•ÍÍ…”¹ÑåÁ”ôôô‰Ý½É­•ÈµÍÑ…Ñ”µ…•ÁÑ•ˆ¤¹Í±¥” ´à¤°(€€€€€€€€€Ý½É­•ÉAÉ½É•ÍÌé…Õ‘¥Ð¹µ•ÍÍ…•Ì¹™¥±Ñ•È¡µ•ÍÍ…”ôø(€€€€€€€€€€€µ•ÍÍ…”¹ÑåÁ”ôôô‰ÁÉ½É•ÍÌˆ˜™µ•ÍÍ…”¹ÁÉ½•ÍÍ¥¹5½‘”ôôô‰Ý½É­•Èˆ¤¹Í±¥” ´à¤°(€€€€€€€€€©½‰Ìé…Õ‘¥Ð¹©½‰Ì¹Í±¥” ´à¤±É•ÍÕ±ÑÌé…Õ‘¥Ð¹Ý½É­•ÉI•ÍÕ±ÑÌ¹Í±¥” ´à¥ôì(€€€€€ô±íÁ½¥¹ÐéÍ••­A½¥¹Ð±Ñ…É•ÑÌéÑ…É•ÑÉ…µ•Íô¤ì(€€€€€½¹Í½±”¹±½œ ‰¡É½µ”Í••¬…•ÁÑ…¹”‘¥…¹½ÍÑ¥Œˆ±)M=8¹ÍÑÉ¥¹¥™ä¡í‘¥…¹½ÍÑ¥Œ±Á…•ÉÉ½ÉÍô¤¤ì(€€€€€Ñ¡É½Ü•ÉÉ½Èì(€€€ô(€€€½¹ÍÐÍ••­•¹•É…Ñ¥½¸õ…Ý…¥ÐÁ…”¹•Ù…±Õ…Ñ”¡Ñ…É•ÐôùÝ¥¹‘½Ü¹}}±…‰Õ‘¥Ð¹µ•ÍÍ…•Ì(€€€€€€¹™¥±Ñ•È¡µ•ÍÍ…”ôùµ•ÍÍ…”¹ÑåÁ”ôôô‰Ý½É­•ÈµÍÑ…Ñ”µ…•ÁÑ•ˆ˜˜(€€€€€€€5…Ñ ¹…‰Ì¡µ•ÍÍ…”¹Í½ÕÉ•É…µ”µÑ…É•Ð¤ðôÄÀÀ¤¹…Ð ´Ä¤ü¹•¹•É…Ñ¥½¸±Ñ…É•ÑÉ…µ•Ì¹Í••¬¤ì(€€€½¹ÍÐÍ••­AµÙ¥‘•¹”õ…Ý…¥ÐÝ…¥Ñ½É]½É­•ÉA4¡Á…”±í•¹•É…Ñ¥½¸éÍ••­•¹•É…Ñ¥½¸°(€€€€€µ¥ÍÍ¥¹	•™½É•É…µ•Ìéµ¥ÍÍ¥¹	•™½É•M••­ô¤ì(€€€½¹ÍÐµ¥ÍÍ¥¹	•™½É•1½½Àõ…Ý…¥ÐÁ…”¹•Ù…±Õ…Ñ”  ¤ôùÝ¥¹‘½Ü¹}}±…‰Õ‘¥Ð¹µ•ÍÍ…•Ì(€€€€€€¹™¥±Ñ•È¡µ•ÍÍ…”ôùµ•ÍÍ…”¹ÑåÁ”ôôô‰ÁÉ½É•ÍÌˆ˜˜(€€€€€€€µ•ÍÍ…”¹ÁÉ½•ÍÍ¥¹5½‘”ôôô‰Ý½É­•Èˆ¤¹…Ð ´Ä¤ü¹µ¥ÍÍ¥¹É…µ•ÍñðÀ¤ì(€€€…Ý…¥ÐÁ…”¹µ½ÕÍ”¹±¥¬¡Ý…Ù”¹à­Ý…Ù”¹Ý¥‘Ñ ¨¸äà±Ý…Ù”¹ä­Ý…Ù”¹¡•¥¡Ð¼È¤ì(€€€…Ý…¥ÐÁ…”¹Ý…¥Ñ½ÉÕ¹Ñ¥½¸ ¡í•¹•É…Ñ¥½¸±Ñ…É•Ñô¤ôùÝ¥¹‘½Ü¹}}±…‰Õ‘¥Ð¹µ•ÍÍ…•Ì¹Í½µ”¡µ•ÍÍ…”ôø(€€€€€µ•ÍÍ…”¹ÑåÁ”ôôô‰Ý½É­•ÈµÍÑ…Ñ”µ…•ÁÑ•ˆ˜™µ•ÍÍ…”¹•¹•É…Ñ¥½¸ù•¹•É…Ñ¥½¸˜˜(€€€€€5…Ñ ¹…‰Ì¡µ•ÍÍ…”¹Í½ÕÉ•É…µ”µÑ…É•Ð¤ðôÄÀÀ¤°(€€€€€íÑ¥µ•½ÕÐèÄÀÀÀÁô±í•¹•É…Ñ¥½¸éÍ••­•¹•É…Ñ¥½¸±Ñ…É•ÐéÑ…É•ÑÉ…µ•Ì¹¹•…É¹‘ô¤ì(€€€½¹ÍÐ±½½Á•¹•É…Ñ¥½¸õ…Ý…¥ÐÁ…”¹•Ù…±Õ…Ñ”¡Ñ…É•ÐôùÝ¥¹‘½Ü¹}}±…‰Õ‘¥Ð¹µ•ÍÍ…•Ì(€€€€€€¹™¥±Ñ•È¡µ•ÍÍ…”ôùµ•ÍÍ…”¹ÑåÁ”ôôô‰Ý½É­•ÈµÍÑ…Ñ”µ…•ÁÑ•ˆ˜˜(€€€€€€€5…Ñ ¹…‰Ì¡µ•ÍÍ…”¹Í½ÕÉ•É…µ”µÑ…É•Ð¤ðôÄÀÀ¤¹…Ð ´Ä¤¹•¹•É…Ñ¥½¸±Ñ…É•ÑÉ…µ•Ì¹¹•…É¹¤ì(€€€…Ý…¥ÐÁ…”¹Ý…¥Ñ½ÉÕ¹Ñ¥½¸ ¡í•¹•É…Ñ¥½¸±Ñ½Ñ…±É…µ•Íô¤ôùì(€€€€€½¹ÍÐÁÉ½É•ÍÌõÝ¥¹‘½Ü¹}}±…‰Õ‘¥Ð¹µ•ÍÍ…•Ì¹™¥±Ñ•È¡µ•ÍÍ…”ôø(€€€€€€€µ•ÍÍ…”¹ÑåÁ”ôôô‰ÁÉ½É•ÍÌˆ˜™µ•ÍÍ…”¹Ý½É­•É•¹•É…Ñ¥½¸ôôõ•¹•É…Ñ¥½¸¤ì(€€€€€½¹ÍÐ•¹‘%¹‘•àõÁÉ½É•ÍÌ¹™¥¹‘%¹‘•à¡µ•ÍÍ…”ôø(€€€€€€€µ•ÍÍ…”¹Í½ÕÉ•É…µ”ùÑ½Ñ…±É…µ•Ì¨¸ääØÔ¤ì(€€€€€½¹ÍÐÝÉ…ÁÁ•õ•¹‘%¹‘•àøôÀ˜™ÁÉ½É•ÍÌ¹Í±¥”¡•¹‘%¹‘•à¬Ä¤¹Í½µ”¡µ•ÍÍ…”ôø(€€€€€€€µ•ÍÍ…”¹Í½ÕÉ•É…µ”ðÐÀäØ¤ì(€€€€€¥˜ …ÝÉ…ÁÁ•¥É•ÑÕÉ¸™…±Í”ì(€€€€€½¹ÍÐÁÉ½‰”õÝ¥¹‘½Ü¹}}±…‰Õ‘¥Ð¹ÁÉ½‰”±Á´õ¹•Ü±½…ÐÌÉÉÉ…ä¡ÁÉ½‰”ü¹™™ÑM¥é•ñðÀ¤ì(€€€€€¥˜ …ÁÉ½‰•ñð…Á´¹±•¹Ñ ¥É•ÑÕÉ¸™…±Í”ì(€€€€€ÁÉ½‰”¹•Ñ±½…ÑQ¥µ•½µ…¥¹…Ñ„¡Á´¤ì(€€€€€É•ÑÕÉ¸5…Ñ ¹ÍÅÉÐ¡Á´¹É•‘Õ” ¡ÍÕ´±Ù…±Õ”¤ôùÍÕ´­Ù…±Õ”©Ù…±Õ”°À¤½Á´¹±•¹Ñ ¤ø¸ÀÄì(€€€ô±íÑ¥µ•½ÕÐèÄÔÀÀÁô±í•¹•É…Ñ¥½¸é±½½Á•¹•É…Ñ¥½¸±Ñ½Ñ…±É…µ•ÌéÑ…É•ÑÉ…µ•Ì¹Ñ½Ñ…±É…µ•Íô¤ì(€€€½¹ÍÐ±½½Á]É…ÁÙ¥‘•¹”õ…Ý…¥ÐÁ…”¹•Ù…±Õ…Ñ” ¡•¹•É…Ñ¥½¸±µ¥ÍÍ¥¹	•™½É”±Ñ½Ñ…±É…µ•Ì¤ôùì(€€€€€½¹ÍÐÁÉ½É•ÍÌõÝ¥¹‘½Ü¹}}±…‰Õ‘¥Ð¹µ•ÍÍ…•Ì¹™¥±Ñ•È¡µ•ÍÍ…”ôø(€€€€€€€µ•ÍÍ…”¹ÑåÁ”ôôô‰ÁÉ½É•ÍÌˆ˜™µ•ÍÍ…”¹Ý½É­•É•¹•É…Ñ¥½¸ôôõ•¹•É…Ñ¥½¸¤ì(€€€€€½¹ÍÐ•¹‘%¹‘•àõÁÉ½É•ÍÌ¹™¥¹‘%¹‘•à¡µ•ÍÍ…”ôø(€€€€€€€µ•ÍÍ…”¹Í½ÕÉ•É…µ”ùÑ½Ñ…±É…µ•Ì¨¸ääØÔ¤ì(€€€€€½¹ÍÐ¹•…É¹õÁÉ½É•ÍÍm•¹‘%¹‘•át±…™Ñ•É]É…ÀõÁÉ½É•ÍÌ¹Í±¥”¡•¹‘%¹‘•à¬Ä¤(€€€€€€€€¹™¥¹¡µ•ÍÍ…”ôùµ•ÍÍ…”¹Í½ÕÉ•É…µ”ðÐÀäØ¤ì(€€€€€É•ÑÕÉ¸í•¹•É…Ñ¥½¸±¹•…É¹‘É…µ”é¹•…É¹ü¹Í½ÕÉ•É…µ”°(€€€€€€€…™Ñ•É]É…ÁÉ…µ”é…™Ñ•É]É…Àü¹Í½ÕÉ•É…µ”°(€€€€€€€µ¥ÍÍ¥¹É…µ•Ìè¡…™Ñ•É]É…Àü¹µ¥ÍÍ¥¹É…µ•ÍñðÀ¤µµ¥ÍÍ¥¹	•™½É•ôì(€€€ô±±½½Á•¹•É…Ñ¥½¸±µ¥ÍÍ¥¹	•™½É•1½½À±Ñ…É•ÑÉ…µ•Ì¹Ñ½Ñ…±É…µ•Ì¤ì(€€€…ÍÍ•ÉÐ¹½¬¡±½½Á]É…ÁÙ¥‘•¹”¹¹•…É¹‘É…µ”ùÑ…É•ÑÉ…µ•Ì¹Ñ½Ñ…±É…µ•Ì¨¸ääØÔ˜˜(€€€€€±½½Á]É…ÁÙ¥‘•¹”¹…™Ñ•É]É…ÁÉ…µ”ðÐÀäØ±±½½Á]É…ÁÙ¥‘•¹”¤ì((€€€€¼¼‘•½‘”™…¥±ÕÉ”µÕÍÐ±•…Ù”Ñ¡”ÕÉÉ•¹Ð]½É­•È…Õ‘¥¼ÍÑÉ•…´…¹Í½ÕÉ”(€€€€¼¼™¥±”¥¹Ñ…ÐÍ¼Ñ¡”±¥ÍÑ•¹•È…¸É•ÍÕµ”Ý¥Ñ¡½ÕÐÉ•Í•±•Ñ¥¹œ¥Ð¸(€€€…Ý…¥ÐÁ…”¹•Ù…±Õ…Ñ”  ¤ôùì(€€€€€½¹ÍÐ‰É½­•¸õ¹•Ü¥±”¡mU¥¹ÐáÉÉ…ä¹™É½´¡lÄ°È°Ì°Ñt¥t°‰‰É½­•¸¹Ý…Øˆ±íÑåÁ”è‰…Õ‘¥¼½Ý…Ø‰ô¤ì(€€€€€½¹ÍÐÑÉ…¹Í™•Èõ¹•Ü…Ñ…QÉ…¹Í™•È ¤íÑÉ…¹Í™•È¹¥Ñ•µÌ¹…‘¡‰É½­•¸¤ì(€€€€€½¹ÍÐ¥¹ÁÕÐõ‘½Õµ•¹Ð¹ÅÕ•ÉåM•±•Ñ½È ˆ…Õ‘¥¼µ™¥±”ˆ¤í¥¹ÁÕÐ¹™¥±•ÌõÑÉ…¹Í™•È¹™¥±•Ìì(€€€€€¥¹ÁÕÐ¹‘¥ÍÁ…Ñ¡Ù•¹Ð¡¹•ÜÙ•¹Ð ‰¡…¹”ˆ±í‰Õ‰‰±•ÌéÑÉÕ•ô¤¤ì(€€€ô¤ì(€€€…Ý…¥ÐÁ…”¹Ý…¥Ñ½ÉÕ¹Ñ¥½¸  ¤ôù‘½Õµ•¹Ð¹ÅÕ•ÉåM•±•Ñ½È ˆÍÑ…ÑÕÌˆ¤ü¹Ñ•áÑ½¹Ñ•¹Ð(€€€€€€¹¥¹±Õ‘•Ì ‹’î—–&7Ž»¦~Ï–ŽÃŽ¿’þwš2Ž_Ž›ŽŽûŽdˆ¤±íÑ¥µ•½ÕÐèÄÀÀÀÁô¤ì(€€€½¹ÍÐÉ•½Ù•Éäõ…Ý…¥ÐÁ…”¹•Ù…±Õ…Ñ”  ¤ôø¡ì(€€€€€™¥±”é‘½Õµ•¹Ð¹ÅÕ•ÉåM•±•Ñ½È ˆ™¥±”µµ•Ñ„ˆ¤ü¹Ñ•áÑ½¹Ñ•¹Ð°(€€€€€Ý½É­±•ÑÌéÝ¥¹‘½Ü¹}}±…‰Õ‘¥Ð¹Ý½É­±•ÑÌ°(€€€€€ÍÑ…ÑÕÌé‘½Õµ•¹Ð¹ÅÕ•ÉåM•±•Ñ½È ˆÍÑ…ÑÕÌˆ¤ü¹Ñ•áÑ½¹Ñ•¹Ð°(€€€€€Í½ÕÉ•É…µ•ÌéÝ¥¹‘½Ü¹}}±…‰Õ‘¥Ð¹µ•ÍÍ…•Ì¹™¥±Ñ•È¡µ•ÍÍ…”ôø(€€€€€€€µ•ÍÍ…”¹ÑåÁ”ôôô‰ÁÉ½É•ÍÌˆ˜™µ•ÍÍ…”¹ÁÉ½•ÍÍ¥¹5½‘”ôôô‰Ý½É­•Èˆ¤(€€€€€€€€¹µ…À¡µ•ÍÍ…”ôùµ•ÍÍ…”¹Í½ÕÉ•É…µ”¤(€€€ô¤¤ì(€€€…ÍÍ•ÉÐ¹µ…Ñ ¡É•½Ù•Éä¹™¥±”°½Ý½É­•ÈµÍ½ÕÉ”µÑ½¹•p¹Ý…Ø¼¤ì(€€€…ÍÍ•ÉÐ¹•ÅÕ…°¡É•½Ù•Éä¹Ý½É­±•ÑÌ¹±•¹Ñ °Ä±É•½Ù•Éä¤ì(€€€…ÍÍ•ÉÐ¹‘••ÁÅÕ…°¡Á…•ÉÉ½ÉÌ±mt¤ì(€€€½¹Í½±”¹±½œ ‰¡É½µ”±•…ä]½É­•ÈA4•Ù¥‘•¹”ˆ±)M=8¹ÍÑÉ¥¹¥™ä¡ì(€€€€€ÍÑ…ÉÑÕÀéíµ½‘”éÍÑ…ÉÑÕÁÙ¥‘•¹”¹Ý½É­±•ÑÍlÁtü¹µ½‘”°(€€€€€€€Ý½É­•É½Õ¹ÐéÍÑ…ÉÑÕÁÙ¥‘•¹”¹Ý½É­•ÉÌ¹™¥±Ñ•È¡ÕÉ°ôø(€€€€€€€€€ÕÉ°¹¥¹±Õ‘•Ì ‰±…ˆµÁÉ½•ÍÍ½È¹Ý½É­•Èˆ¤¤¹±•¹Ñ °(€€€€€€€™¥ÉÍÑ=ÕÑÁÕÑIµÌéÍÑ…ÉÑÕÁÙ¥‘•¹”¹ÉµÌ°(€€€€€€€Í½ÕÉ•É…µ•MÑ…ÉÐéÍÑ…ÉÑÕÁÙ¥‘•¹”¹™É…µ•ÍlÁt°(€€€€€€€Í½ÕÉ•É…µ•¹éÍÑ…ÉÑÕÁÙ¥‘•¹”¹™É…µ•Ì¹…Ð ´Ä¤°(€€€€€€€™¥ÉÍÑ5½‘•°éÍÑ…ÉÑÕÁÙ¥‘•¹”¹©½‰ÍlÁtü¹©½¥¹Ñ	…­•¹‘ô°(€€€€€Í•±•Ñ•‘MAÌél‰ÁØˆ°‰ÝÍ½±„ˆ°‰‘Õ…°ˆ°‰…´‰t°(€€€€€ÍÕ•ÍÍ™Õ±MAÌél¸¸¹¹•ÜM•Ð¡•Ù¥‘•¹”¹ÍÕ•ÍÍ™Õ±	…­•¹‘)½‰Ì(€€€€€€€€¹µ…À¡É•ÍÕ±ÐôùÉ•ÍÕ±Ð¹©½ˆ¹©½¥¹Ñ	…­•¹¤¥t°(€€€€€ÍÑ•…‘å¥Ù•M•½¹‘ÌéíÍ½ÕÉ•É…µ•Í‘Ù…¹•è(€€€€€€€ÍÑ•…‘åÙ¥‘•¹”¹Í½ÕÉ•É…µ”µÍÑ…ÉÑAÉ½É•ÍÌ¹Í½ÕÉ•É…µ”°(€€€€€€€µ¥ÍÍ¥¹=ÕÑÁÕÑÉ…µ•ÌéÍÑ•…‘åÙ¥‘•¹”¹µ¥ÍÍ¥¹É…µ•ÌµÍÑ…ÉÑAÉ½É•ÍÌ¹µ¥ÍÍ¥¹É…µ•Íô°(€€€€€‰…­•¹‘AµÙ¥‘•¹”±Í••­AµÙ¥‘•¹”±±½½Á]É…ÁÙ¥‘•¹”°(€€€€€Ý½É­•ÉI•¹‘•É5Ìél‰ÁØˆ°‰ÝÍ½±„ˆ°‰‘Õ…°ˆ°‰…´‰t¹µ…À¡‰…­•¹ôùì(€€€€€€€½¹ÍÐÍ…µÁ±•Ìõ•Ù¥‘•¹”¹ÍÕ•ÍÍ™Õ±	…­•¹‘)½‰Ì¹™¥±Ñ•È¡É•ÍÕ±Ðôø(€€€€€€€€€É•ÍÕ±Ð¹©½ˆ¹©½¥¹Ñ	…­•¹ôôõ‰…­•¹¤¹µ…À¡É•ÍÕ±Ðôø(€€€€€€€€€5…Ñ ¹É½Õ¹¡É•ÍÕ±Ð¹É••¥Ù•‘ÐµÉ•ÍÕ±Ð¹©½ˆ¹Í•¹ÑÐ¤¤¹Í½ÉÐ ¡„±ˆ¤ôù„µˆ¤ì(€€€€€€€É•ÑÕÉ¸í‰…­•¹±©½‰ÌéÍ…µÁ±•Ì¹±•¹Ñ °(€€€€€€€€€µ•‘¥…¹5ÌéÍ…µÁ±•Ím5…Ñ ¹™±½½È¡Í…µÁ±•Ì¹±•¹Ñ ¼È¥t°(€€€€€€€€€µ…á5ÌéÍ…µÁ±•Ì¹…Ð ´Ä¥ôì(€€€€€ô¤°(€€€€€Á¥Ñ¡!…¹‘½™˜éíÍÑ…•‘É…µ”éÁ¥Ñ¡MÑ…”¹Í½ÕÉ•É…µ”°(€€€€€€€…Ñ¥Ù…Ñ•‘É…µ”éÁ¥Ñ¡•ÁÑ•¹Í½ÕÉ•É…µ”±™É…Ñ¥½¹…±AÉ½É•ÍÌ±±½½Á¹°(€€€€€€€•áÁ•Ñ•‘¥ÍÑ…¹”±…ÑÕ…±¥ÍÑ…¹”°(€€€€€€€Í½ÕÉ•A½Í¥Ñ¥½¹ÉÉ½ÉÉ…µ•Ìé…ÑÕ…±¥ÍÑ…¹”µ•áÁ•Ñ•‘¥ÍÑ…¹”°(€€€€€€€µ¥ÍÍ¥¹	•™½É”éµ¥ÍÍ¥¹	•™½É•A¥Ñ ±µ¥ÍÍ¥¹™Ñ•Èéµ¥ÍÍ¥¹™Ñ•ÉA¥Ñ °(€€€€€€€Ý½É­•ÈéÁ¥Ñ¡]½É­•ÉQ¥µ¥¹ô°(€€€€€•¹•É…Ñ¥½¹UÁ‘…Ñ•Ìé•Ù¥‘•¹”¹Ý½É­±•ÑMÑ…Ñ•Ì¹±•¹Ñ °(€€€€€µ…á=‰Í•ÉÙ•‘U¹‘•ÉÉÕ¹É…µ•Ìé•Ù¥‘•¹”¹µ…á5¥ÍÍ¥¹É…µ•Ì°(€€€€€Í••­É…µ”éÉ•½Ù•Éä¹Í½ÕÉ•É…µ•Ì¹…Ð ´Ä¤°(€€€€€™…¥±•‘I•Á±…•µ•¹ÑI•Ñ…¥¹•‘M½ÕÉ”éÉ•½Ù•Éä¹™¥±”°(€€€€€Ý½É­±•Ñ½Õ¹Ñ™Ñ•ÉI•½Ù•ÉäéÉ•½Ù•Éä¹Ý½É­±•ÑÌ¹±•¹Ñ (€€€ô¤¤ì(€€€…Ý…¥ÐÁ…”¹•Ù…±Õ…Ñ”  ¤ôù‘½Õµ•¹Ð¹ÅÕ•ÉåM•±•Ñ½È ˆÍÑ½Àˆ¤¹±¥¬ ¤¤ì(€õ™¥¹…±±åì(€€€½¹ÍÐ±•…¹ÕÁI•ÍÕ±ÑÌõ…Ý…¥ÐAÉ½µ¥Í”¹…±±M•ÑÑ±•¡l(€€€€€±½Í•	É½ÝÍ•ÉQÉ•”¡‰É½ÝÍ•È¤°(€€€€€ÍÑ½Á¡¥±‘AÉ½•ÍÌ¡Í•ÉÙ•È°‰Ñ•ÍÐ!QQ@Í•ÉÙ•Èˆ¤(€€€t¤ì(€€€½¹ÍÐ±•…¹ÕÁÉÉ½ÉÌõ±•…¹ÕÁI•ÍÕ±ÑÌ¹™¥±Ñ•È¡É•ÍÕ±Ðôø(€€€€€É•ÍÕ±Ð¹ÍÑ…ÑÕÌôôô‰É•©•Ñ•ˆ¤¹µ…À¡É•ÍÕ±ÐôùÉ•ÍÕ±Ð¹É•…Í½¸¤ì(€€€¥˜¡±•…¹ÕÁÉÉ½ÉÌ¹±•¹Ñ ¤(€€€€€Ñ¡É½Ü¹•ÜÉ•…Ñ•ÉÉ½È¡±•…¹ÕÁÉÉ½ÉÌ°‰	É½ÝÍ•ÈÑ•ÍÐ±•…¹ÕÀ™…¥±•ˆ¤ì(€ô)ô¤ì(
+import test from "node:test";
+import assert from "node:assert/strict";
+import {spawn} from "node:child_process";
+import path from "node:path";
+import puppeteer from "puppeteer-core";
+import {closeBrowserTree,stopChildProcess} from "./test-process-cleanup.mjs";
+
+async function waitForWorkerPCM(page,{backend=null,generation=null,
+  minimumGeneration=0,missingBeforeFrames=null}={}){
+  let matchHandle;
+  try{matchHandle=await page.waitForFunction(expected=>{
+    const audit=window.__labAudit;
+    const generations=expected.generation===null?
+      [...new Set(audit.jobs.filter(job=>
+        job.generation>=expected.minimumGeneration&&
+        (!expected.backend||job.jointBackend===expected.backend))
+        .map(job=>job.generation))]:[expected.generation];
+    const current=generations.find(current=>{
+      const jobs=audit.jobs.filter(item=>item.generation===current&&
+        (!expected.backend||item.jointBackend===expected.backend));
+      const rendered=jobs.findLast(job=>audit.workerResults.some(result=>
+        result.job===job.job&&result.ok)&&audit.messages.some(message=>
+          message.type==="rendered-chunk-accepted"&&
+          message.generation===current&&!message.stale&&
+          message.startFrame===job.planStart&&
+          message.endFrame===job.planEnd));
+      return rendered&&audit.messages.some(message=>
+          message.type==="progress"&&
+          message.workerGeneration===current);
+    });
+    return current===undefined?false:{generation:current};
+  },{timeout:15000},{backend,generation,minimumGeneration});}
+  catch(error){
+    const diagnostic=await page.evaluate(expected=>{
+      const audit=window.__labAudit;
+      const jobs=audit.jobs.filter(job=>(!expected.backend||
+        job.jointBackend===expected.backend)&&
+        (expected.generation===null||job.generation===expected.generation));
+      const relevantJobs=new Set(jobs.map(job=>job.job));
+      return {selectedModel:document.querySelector("#lab-model")?.value,
+        status:document.querySelector("#lab-status")?.textContent,
+        jobs:jobs.slice(-8),results:audit.workerResults.filter(result=>
+          relevantJobs.has(result.job)).slice(-8),
+        states:audit.messages.filter(message=>
+          message.type==="worker-state-accepted").slice(-8),
+        progress:audit.messages.filter(message=>message.type==="progress"&&
+          message.processingMode==="worker").slice(-8)};
+    },{backend,generation,minimumGeneration});
+    throw Error("Worker PCM evidence timed out: "+JSON.stringify(diagnostic),
+      {cause:error});
+  }
+  const selected=await matchHandle.jsonValue();
+  await matchHandle.dispose();
+  const evidence=await page.evaluate(async expected=>{
+    const audit=window.__labAudit;
+    const current=expected.generation;
+    const jobs=audit.jobs.filter(item=>item.generation===current&&
+      (!expected.backend||item.jointBackend===expected.backend));
+    const job=jobs.findLast(item=>audit.workerResults.some(result=>
+      result.job===item.job&&result.ok)&&audit.messages.some(message=>
+        message.type==="rendered-chunk-accepted"&&
+        message.generation===current&&!message.stale&&
+        message.startFrame===item.planStart&&message.endFrame===item.planEnd));
+    const start=audit.messages.filter(message=>message.type==="progress"&&
+      message.workerGeneration===current).at(-1);
+    let peakRms=0,lastProgress=start,advanceFrames=0;
+    const loopLength=start.loopEndFrame-start.loopStartFrame;
+    const probe=audit.probe,pcm=new Float32Array(probe?.fftSize||0);
+    const deadline=performance.now()+12000;
+    while(performance.now()<deadline){
+      const currentProgress=audit.messages.filter(message=>
+        message.type==="progress"&&message.workerGeneration===current).at(-1);
+      if(currentProgress){
+        let delta=currentProgress.sourceFrame-lastProgress.sourceFrame;
+        if(delta< -loopLength/2)delta+=loopLength;
+        if(delta>0)advanceFrames+=delta;
+        lastProgress=currentProgress;
+      }
+      if(probe&&pcm.length){
+        probe.getFloatTimeDomainData(pcm);
+        const rms=Math.sqrt(pcm.reduce((sum,value)=>sum+value*value,0)/pcm.length);
+        peakRms=Math.max(peakRms,rms);
+      }
+      if(peakRms>.01&&advanceFrames>0)break;
+      await new Promise(resolve=>setTimeout(resolve,100));
+    }
+    return {backend:job?.jointBackend,generation:current,
+      peakRms,advanceFrames,
+      missingFrames:Math.max(0,(lastProgress?.missingFrames||0)-
+        (expected.missingBeforeFrames??start?.missingFrames??0)),
+      accepted:!!job&&audit.messages.some(message=>
+        message.type==="rendered-chunk-accepted"&&
+        message.generation===current&&!message.stale&&
+        message.startFrame===job.planStart&&message.endFrame===job.planEnd),
+      renderedJob:job?.job,startSourceFrame:start?.sourceFrame,
+      lastSourceFrame:lastProgress?.sourceFrame,
+      missingTotal:lastProgress?.missingFrames||0,
+      firstMissingFrame:lastProgress?.firstMissingFrame,
+      matchingAcks:audit.messages.filter(message=>
+        message.type==="rendered-chunk-accepted"&&
+        message.generation===current).map(({stale,bufferedSegments,
+          startFrame,endFrame,speed,coreFrames,outputFrames})=>({stale,
+          bufferedSegments,startFrame,endFrame,speed,coreFrames,outputFrames})),
+      matchingJobs:audit.jobs.filter(item=>item.generation===current).slice(-4),
+      matchingResults:audit.workerResults.filter(item=>
+        item.generation===current).slice(-4)};
+  },{backend,generation:selected.generation,minimumGeneration,missingBeforeFrames});
+  assert.ok(evidence.accepted&&evidence.peakRms>.01&&
+    evidence.advanceFrames>0,JSON.stringify(evidence));
+  return evidence;
+}
+
+test("individual-period Worker plays through one shared PCM Worklet in Chrome",async()=>{
+  const port=18749;
+  const server=spawn(process.env.PYTHON||"python3",
+    ["-m","http.server",String(port),"--bind","127.0.0.1"],{
+    cwd:path.resolve("web-demo"),stdio:"ignore"
+  });
+  let browser;
+  try{
+    browser=await puppeteer.launch({
+      executablePath:process.env.CHROME_BIN||"/usr/bin/google-chrome",
+      headless:true,args:["--no-sandbox","--disable-dev-shm-usage",
+        "--mute-audio",
+        "--autoplay-policy=no-user-gesture-required"]
+    });
+    const page=await browser.newPage();
+    const pageErrors=[];
+    page.on("pageerror",error=>pageErrors.push(error.message));
+    page.on("console",message=>{
+      if(message.type()==="error"&&
+         !message.text().startsWith("Failed to load resource: the server responded with a status of 404"))
+        pageErrors.push(message.text());
+    });
+    await page.evaluateOnNewDocument(()=>{
+      const audit={worklets:[],workers:[],jobs:[],workerResults:[],messages:[],pointerEvents:[],bufferSources:0,probe:null};
+      Object.defineProperty(window,"__labAudit",{value:audit});
+      for(const type of ["pointerdown","pointerup","click"])
+        document.addEventListener(type,event=>{
+          if(event.target?.id==="wave")audit.pointerEvents.push({type,
+            x:event.clientX,y:event.clientY});
+        },true);
+      const NativeWorklet=window.AudioWorkletNode;
+      const nativeConnect=NativeWorklet.prototype.connect;
+      NativeWorklet.prototype.connect=function(destination,...rest){
+        const result=nativeConnect.call(this,destination,...rest);
+        if(this.__labWorkerMode&&!this.__labProbe){
+          const analyser=this.context.createAnalyser();analyser.fftSize=2048;
+          const mute=this.context.createGain();mute.gain.value=0;
+          nativeConnect.call(this,analyser);analyser.connect(mute);
+          mute.connect(this.context.destination);
+          this.__labProbe=true;audit.probe=analyser;
+        }
+        return result;
+      };
+      window.AudioWorkletNode=class extends NativeWorklet{
+        constructor(ctx,name,options){
+          super(ctx,name,options);
+          const mode=options?.processorOptions?.processingMode||"raw";
+          this.__labWorkerMode=mode==="worker";
+          audit.worklets.push({name,mode});
+          this.port.addEventListener("message",event=>audit.messages.push({
+            ...(event.data||{}),receivedAt:performance.now()
+          }));
+          this.port.start();
+        }
+      };
+      const NativeWorker=window.Worker;
+      window.Worker=class extends NativeWorker{
+        constructor(url,options){
+          super(url,options);this.__labUrl=String(url);
+          audit.workers.push(this.__labUrl);
+          this.addEventListener("message",event=>audit.workerResults.push({
+            receivedAt:performance.now(),job:event.data?.job,
+            generation:event.data?.generation,ok:event.data?.ok,
+            workerElapsedMs:event.data?.workerElapsedMs
+          }));
+        }
+        postMessage(payload,...rest){
+          if(this.__labUrl.includes("lab-processor.worker"))
+            audit.jobs.push({job:payload.job,generation:payload.generation,
+              model:payload.model,jointBackend:payload.jointBackend,
+              speed:payload.speed,semitones:payload.semitones,
+            sentAt:performance.now(),coreFrames:payload.plan?.core,
+              planStart:payload.plan?.start,
+              planEnd:payload.plan?.start+payload.plan?.core,
+              outputFrames:payload.plan?.outputFrames,
+              sourceFrames:payload.plan?.to-payload.plan?.from+
+                (payload.plan?.wrapRight||0)});
+          return super.postMessage(payload,...rest);
+        }
+      };
+      const nativeBufferSource=AudioContext.prototype.createBufferSource;
+      AudioContext.prototype.createBufferSource=function(...args){
+        audit.bufferSources++;
+        return nativeBufferSource.apply(this,args);
+      };
+    });
+    await page.goto(`http://127.0.0.1:${port}/index.html`,{
+      waitUntil:"domcontentloaded",timeout:20000
+    });
+    await page.waitForFunction(()=>
+      document.documentElement.dataset.fwBoot==="ready",{timeout:20000});
+    await page.evaluate(async()=>{
+      const select=document.querySelector("#lab-model");
+      select.value="pv";select.dispatchEvent(new Event("change",{bubbles:true}));
+      await new Promise(resolve=>setTimeout(resolve,40));
+      const individual=document.querySelector("#lab-individual-periods");
+      individual.checked=true;
+      individual.dispatchEvent(new Event("change",{bubbles:true}));
+      await new Promise(resolve=>setTimeout(resolve,40));
+      const sampleRate=48000,frames=sampleRate*6;
+      const bytes=new ArrayBuffer(44+frames*2),view=new DataView(bytes);
+      view.setUint32(0,0x46464952,true);view.setUint32(4,bytes.byteLength-8,true);
+      view.setUint32(8,0x45564157,true);view.setUint32(12,0x20746d66,true);
+      view.setUint32(16,16,true);view.setUint16(20,1,true);
+      view.setUint16(22,1,true);view.setUint32(24,sampleRate,true);
+      view.setUint32(28,sampleRate*2,true);view.setUint16(32,2,true);
+      view.setUint16(34,16,true);view.setUint32(36,0x61746164,true);
+      view.setUint32(40,frames*2,true);
+      for(let i=0;i<frames;i++)
+        view.setInt16(44+i*2,Math.round(.2*Math.sin(2*Math.PI*440*i/sampleRate)*32767),true);
+      const file=new File([bytes],"worker-source-tone.wav",{type:"audio/wav"});
+      const transfer=new DataTransfer();transfer.items.add(file);
+      const input=document.querySelector("#audio-file");input.files=transfer.files;
+      input.dispatchEvent(new Event("change",{bubbles:true}));
+    });
+    try{
+      await page.waitForFunction(()=>document.querySelector("#file-meta")?.textContent
+        .includes("worker-source-tone.wav")&&
+        !document.querySelector("#file-meta").textContent.includes("èª­ã¿è¾¼ã¿ä¸­"),
+        {timeout:15000});
+    }catch(error){
+      const diagnostic=await page.evaluate(()=>({
+        title:document.title,meta:document.querySelector("#file-meta")?.textContent,
+        status:document.querySelector("#status")?.textContent,
+        body:document.body.innerText.slice(0,1200)
+      }));
+      console.log("Chrome file-load diagnostic",JSON.stringify({diagnostic,pageErrors}));
+      throw error;
+    }
+    const compatibility=await page.$eval("#lab-model-compatibility",node=>node.textContent);
+    assert.match(compatibility,/0\.5ã€œ2å€/);
+    assert.match(compatibility,/A\/B/);
+    assert.match(compatibility,/å³æ™‚ã‚¹ã‚¯ãƒ©ãƒ–ã¯æœªå¯¾å¿œ/);
+
+    await page.evaluate(()=>document.querySelector("#play-wet").click());
+    try{
+      await page.waitForFunction(()=>document.querySelector("#rt-indicator")?.textContent
+        .includes("ãƒ¢ãƒ‡ãƒ«å†ç”Ÿä¸­")&&window.__labAudit.worklets.length===1,
+        {timeout:20000});
+    }catch(error){
+      const diagnostic=await page.evaluate(()=>({
+        indicator:document.querySelector("#rt-indicator")?.textContent,
+        status:document.querySelector("#lab-status")?.textContent,
+        file:document.querySelector("#file-meta")?.textContent,
+        worklets:window.__labAudit.worklets,workers:window.__labAudit.workers,
+        jobs:window.__labAudit.jobs.slice(-5),
+        results:window.__labAudit.workerResults.slice(-5)
+      }));
+      console.log("Chrome playback-start diagnostic",JSON.stringify(diagnostic));
+      throw error;
+    }
+    await page.waitForFunction(()=>window.__labAudit.messages.some(message=>
+      message.type==="progress"&&message.processingMode==="worker"),
+      {timeout:10000});
+    await page.waitForFunction(()=>{
+      const probe=window.__labAudit.probe;
+      if(!probe)return false;
+      const pcm=new Float32Array(probe.fftSize);probe.getFloatTimeDomainData(pcm);
+      const rms=Math.sqrt(pcm.reduce((sum,value)=>sum+value*value,0)/pcm.length);
+      window.__labAudit.maxRms=Math.max(window.__labAudit.maxRms||0,rms);
+      return window.__labAudit.maxRms>.01;
+    },{timeout:5000});
+    await page.waitForFunction(()=>{
+      const frames=window.__labAudit.messages.filter(message=>
+        message.type==="progress"&&message.processingMode==="worker")
+        .map(message=>message.sourceFrame);
+      return frames.length>=2&&frames.at(-1)>frames[0];
+    },{timeout:5000});
+    let evidence=await page.evaluate(()=>{
+      const probe=window.__labAudit.probe;
+      const pcm=new Float32Array(probe?.fftSize||0);
+      probe?.getFloatTimeDomainData(pcm);
+      return {
+        worklets:window.__labAudit.worklets,
+        workers:window.__labAudit.workers,
+        jobs:window.__labAudit.jobs,
+        bufferSources:window.__labAudit.bufferSources,
+        rms:window.__labAudit.maxRms||
+          (pcm.length?Math.sqrt(pcm.reduce((sum,value)=>sum+value*value,0)/pcm.length):0),
+        frames:window.__labAudit.messages.filter(message=>
+          message.type==="progress"&&message.processingMode==="worker")
+          .map(message=>message.sourceFrame),
+        indicator:document.querySelector("#rt-indicator")?.textContent
+      };
+    });
+    assert.equal(evidence.worklets.length,1,evidence);
+    assert.equal(evidence.worklets[0].mode,"worker",evidence);
+    assert.equal(evidence.workers.filter(url=>url.includes("lab-processor.worker")).length,1,evidence);
+    assert.equal(evidence.bufferSources,0,evidence);
+    assert.ok(evidence.rms>.01,evidence);
+    assert.ok(evidence.frames.length>=2&&
+      evidence.frames.at(-1)>evidence.frames[0],evidence);
+    assert.match(evidence.jobs[0].model,/period-joint/);
+    assert.equal(evidence.jobs[0].jointBackend,"pv");
+    assert.ok(evidence.jobs.every(job=>job.coreFrames<=72000&&job.sourceFrames<200000),evidence.jobs);
+    const loopControls=await page.evaluate(()=>({
+      a:document.querySelector("#player-loop-a").disabled,
+      b:document.querySelector("#player-loop-b").disabled,
+      enabled:document.querySelector("#player-loop-enabled").disabled,
+      aNow:document.querySelector("#player-loop-a-now").disabled,
+      bNow:document.querySelector("#player-loop-b-now").disabled,
+      hint:document.querySelector("#player-loop-hint").textContent
+    }));
+    assert.ok(loopControls.a&&loopControls.b&&loopControls.enabled&&
+      loopControls.aNow&&loopControls.bNow,
+      loopControls);
+    assert.match(loopControls.hint,/Worker.*A\/B.*æœªå¯¾å¿œ/);
+    const startupEvidence={...evidence};
+    const startProgress=await page.evaluate(()=>{
+      const progress=window.__labAudit.messages.filter(message=>
+        message.type==="progress"&&message.processingMode==="worker").at(-1);
+      return {sourceFrame:progress?.sourceFrame,missingFrames:progress?.missingFrames||0};
+    });
+    await new Promise(resolve=>setTimeout(resolve,5000));
+    const steadyEvidence=await page.evaluate(()=>{
+      const progress=window.__labAudit.messages.filter(message=>
+        message.type==="progress"&&message.processingMode==="worker").at(-1);
+      return {sourceFrame:progress?.sourceFrame,missingFrames:progress?.missingFrames||0};
+    });
+    assert.ok(steadyEvidence.sourceFrame>startProgress.sourceFrame,
+      {startProgress,steadyEvidence});
+
+    // Model and pitch/speed edits reset only the Worker generation. The same
+    // Worklet remains the single source clock and applies each actual setting.
+    await page.$eval("#granular-speed-value",node=>{
+      node.value="1.33";node.dispatchEvent(new Event("change",{bubbles:true}));
+    });
+    await page.waitForFunction(()=>window.__labAudit.messages.some(message=>
+      message.type==="worker-state-activated"&&message.speed===1.33),
+      {timeout:10000});
+    const speedGeneration=await page.evaluate(()=>window.__labAudit.messages
+      .filter(message=>message.type==="worker-state-activated"&&
+        message.speed===1.33).at(-1).generation);
+    await page.waitForFunction(({generation,frame})=>window.__labAudit.messages.some(
+      message=>message.type==="progress"&&
+        message.workerGeneration===generation&&
+        message.sourceFrame>frame+12000&&
+        !Number.isInteger(message.sourceFrame)),
+      {timeout:15000},{generation:speedGeneration,frame:steadyEvidence.sourceFrame});
+    const fractionalProgress=await page.evaluate(generation=>{
+      const messages=window.__labAudit.messages.filter(message=>
+        message.type==="progress"&&message.workerGeneration===generation&&
+        !Number.isInteger(message.sourceFrame));
+      return messages.at(-1)?.sourceFrame;
+    },speedGeneration);
+    assert.ok(Number.isFinite(fractionalProgress),fractionalProgress);
+    const missingBeforePitch=await page.evaluate(()=>window.__labAudit.messages
+      .filter(message=>message.type==="progress"&&
+        message.processingMode==="worker").at(-1)?.missingFrames||0);
+    await page.$eval("#granular-pitch-value",node=>{
+      node.value="2";node.dispatchEvent(new Event("change",{bubbles:true}));
+    });
+    try{
+      await page.waitForFunction(generation=>window.__labAudit.messages.some(message=>
+        message.type==="worker-state-activated"&&message.pitchSemitones===2&&
+          message.generation>generation),
+        {timeout:10000},speedGeneration);
+    }catch(error){
+      const diagnostic=await page.evaluate(generation=>{
+        const audit=window.__labAudit;
+        const jobs=audit.jobs.filter(item=>item.generation>generation);
+        const jobIds=new Set(jobs.map(item=>item.job));
+        return {status:document.querySelector("#lab-status")?.textContent,
+          stage:audit.messages.filter(item=>item.type==="worker-state-staged"&&
+            item.generation>generation).slice(-4),
+          activations:audit.messages.filter(item=>
+            item.type==="worker-state-activated"&&item.generation>generation).slice(-4),
+          jobs:jobs.slice(-4),results:audit.workerResults.filter(item=>
+            jobIds.has(item.job)).slice(-4),
+          progress:audit.messages.filter(item=>item.type==="progress"&&
+            item.processingMode==="worker").slice(-4)};
+      },speedGeneration);
+      throw Error("Worker pitch activation timed out: "+JSON.stringify(diagnostic),
+        {cause:error});
+    }
+    const pitchAccepted=await page.evaluate(generation=>window.__labAudit.messages
+      .filter(message=>message.type==="worker-state-activated"&&
+        message.pitchSemitones===2&&message.generation>generation).at(-1),
+      speedGeneration);
+    const missingAfterPitch=await page.evaluate(()=>window.__labAudit.messages
+      .filter(message=>message.type==="progress"&&
+        message.processingMode==="worker").at(-1)?.missingFrames||0);
+    const pitchStage=await page.evaluate(generation=>window.__labAudit.messages
+      .filter(message=>message.type==="worker-state-staged"&&
+        message.generation>generation).at(-1),speedGeneration);
+    const loopEnd=await page.evaluate(()=>window.__labAudit.messages
+      .filter(message=>message.type==="progress").at(-1)?.loopEndFrame);
+    const pitchWorkerTiming=await page.evaluate(({generation,stagedFrame})=>{
+      const job=window.__labAudit.jobs.filter(item=>
+        item.generation>generation&&item.semitones===2&&
+          item.planStart===stagedFrame).at(-1);
+      const result=job&&window.__labAudit.workerResults.findLast(item=>
+        item.job===job.job);
+      return {jobSentAt:job?.sentAt,resultReceivedAt:result?.receivedAt,
+        workerElapsedMs:result?.workerElapsedMs,
+        browserRoundTripMs:job&&result?result.receivedAt-job.sentAt:null,
+        model:job?.model,jointBackend:job?.jointBackend,
+        planStart:job?.planStart,coreFrames:job?.coreFrames,
+        sourceFrames:job?.sourceFrames};
+    },{generation:speedGeneration,stagedFrame:pitchStage.sourceFrame});
+    assert.equal(pitchWorkerTiming.model,"period-joint",
+      JSON.stringify(pitchWorkerTiming));
+    assert.equal(pitchWorkerTiming.jointBackend,"pv",
+      JSON.stringify(pitchWorkerTiming));
+    const expectedDistance=((pitchStage.sourceFrame-fractionalProgress)%loopEnd+
+      loopEnd)%loopEnd;
+    const actualDistance=((pitchAccepted.sourceFrame-fractionalProgress)%loopEnd+
+      loopEnd)%loopEnd;
+    assert.ok(Math.abs(actualDistance-expectedDistance)<8192,
+      JSON.stringify({fractionalProgress,pitchStage,pitchAccepted,
+        expectedDistance,actualDistance,loopEnd,pitchWorkerTiming}));
+    assert.equal(missingAfterPitch,missingBeforePitch,
+      "pitch handoff must not add missing PCM frames");
+    const backendPcmEvidence=[];
+    let missingBeforeModel=await page.evaluate(()=>window.__labAudit.messages
+      .filter(message=>message.type==="progress"&&
+        message.processingMode==="worker").at(-1)?.missingFrames||0);
+    await page.$eval("#lab-model",node=>{
+      node.value="wsola";node.dispatchEvent(new Event("change",{bubbles:true}));
+    });
+    backendPcmEvidence.push(await waitForWorkerPCM(page,{backend:"wsola",
+      minimumGeneration:0,missingBeforeFrames:missingBeforeModel}));
+    for(const model of ["dual","am"]){
+      missingBeforeModel=await page.evaluate(()=>window.__labAudit.messages
+        .filter(message=>message.type==="progress"&&
+          message.processingMode==="worker").at(-1)?.missingFrames||0);
+      await page.$eval("#lab-model",(node,value)=>{
+        node.value=value;node.dispatchEvent(new Event("change",{bubbles:true}));
+      },model);
+      backendPcmEvidence.push(await waitForWorkerPCM(page,{backend:model,
+        minimumGeneration:0,missingBeforeFrames:missingBeforeModel}));
+    }
+    evidence=await page.evaluate(()=>{
+      const progress=window.__labAudit.messages.filter(message=>
+        message.type==="progress"&&message.processingMode==="worker");
+      const active=progress.at(-1);
+      const activeProgress=progress.filter(message=>
+        message.workerGeneration===active?.workerGeneration);
+      const missingBaseline=activeProgress[0]?.missingFrames||0;
+      return {
+      worklets:window.__labAudit.worklets,
+      workletStates:window.__labAudit.messages.filter(message=>
+        message.type==="worker-state-accepted"||
+          message.type==="worker-state-activated"),
+      retainedBackendJobs:window.__labAudit.jobs.filter(job=>
+        ["pv","wsola","dual","am"].includes(job.jointBackend)),
+      successfulBackendJobs:window.__labAudit.workerResults.map(result=>({
+        ...result,job:window.__labAudit.jobs.find(item=>item.job===result.job)
+      })).filter(result=>result.ok&&["pv","wsola","dual","am"]
+        .includes(result.job?.jointBackend)),
+      activeGeneration:active?.workerGeneration,
+      maxMissingFrames:Math.max(0,...activeProgress.map(message=>
+        (message.missingFrames||0)-missingBaseline)),
+      buffers:window.__labAudit.bufferSources,
+      status:document.querySelector("#lab-status")?.textContent
+      };
+    });
+    assert.equal(evidence.worklets.length,1,evidence);
+    assert.equal(evidence.buffers,0,evidence);
+    assert.ok(evidence.workletStates.length>=5,evidence);
+    for(const model of ["pv","wsola","dual","am"])
+      assert.ok(evidence.retainedBackendJobs.some(job=>job.jointBackend===model),
+        {model,evidence});
+    assert.deepEqual([...new Set(evidence.successfulBackendJobs
+      .map(result=>result.job.jointBackend))].sort(),
+      ["am","dual","pv","wsola"],evidence.successfulBackendJobs);
+    assert.ok(backendPcmEvidence.every(item=>item.accepted&&
+      item.peakRms>.01&&item.advanceFrames>0),backendPcmEvidence);
+    if(evidence.maxMissingFrames>0)
+      assert.match(evidence.status,/æ¬ è½PCMã‚’è¨˜éŒ²ã—ã¾ã—ãŸ/);
+
+    await page.$eval("#wave",canvas=>canvas.scrollIntoView({block:"center"}));
+    const targetFrames=await page.evaluate(()=>{
+      const progress=window.__labAudit.messages.filter(message=>
+        message.type==="progress"&&message.processingMode==="worker").at(-1);
+      const totalFrames=progress?.loopEndFrame;
+      if(!Number.isSafeInteger(totalFrames)||totalFrames<2)
+        throw Error("Worker source-frame extent is unavailable");
+      return {totalFrames,seek:Math.round(totalFrames*.75),nearEnd:Math.round(totalFrames*.98)};
+    });
+    const missingBeforeSeek=await page.evaluate(()=>window.__labAudit.messages
+      .filter(message=>message.type==="progress"&&
+        message.processingMode==="worker").at(-1)?.missingFrames||0);
+    const wave=await page.$eval("#wave",canvas=>{
+      const rect=canvas.getBoundingClientRect();
+      return {x:rect.x,y:rect.y,width:rect.width,height:rect.height};
+    });
+    const seekPoint={x:wave.x+wave.width*.75,y:wave.y+wave.height/2};
+    await page.mouse.click(seekPoint.x,seekPoint.y);
+    try{
+      await page.waitForFunction(target=>window.__labAudit.messages.some(message=>
+        message.type==="worker-state-accepted"&&
+        Math.abs(message.sourceFrame-target)<=100),{timeout:10000},targetFrames.seek);
+    }catch(error){
+      const diagnostic=await page.evaluate(({point,targets})=>{
+        const audit=window.__labAudit,wave=document.querySelector("#wave");
+        const hit=document.elementFromPoint(point.x,point.y);
+        return {selectedModel:document.querySelector("#lab-model")?.value,
+          status:document.querySelector("#lab-status")?.textContent,
+          indicator:document.querySelector("#rt-indicator")?.textContent,
+          file:document.querySelector("#file-meta")?.textContent,
+          waveRect:wave?.getBoundingClientRect().toJSON(),
+          seekHit:{id:hit?.id,tag:hit?.tagName,className:hit?.className},
+          pointerEvents:audit.pointerEvents.slice(-8),
+          targets,
+          workerStates:audit.messages.filter(message=>
+            message.type==="worker-state-accepted").slice(-8),
+          workerProgress:audit.messages.filter(message=>
+            message.type==="progress"&&message.processingMode==="worker").slice(-8),
+          jobs:audit.jobs.slice(-8),results:audit.workerResults.slice(-8)};
+      },{point:seekPoint,targets:targetFrames});
+      console.log("Chrome seek acceptance diagnostic",JSON.stringify({diagnostic,pageErrors}));
+      throw error;
+    }
+    const seekGeneration=await page.evaluate(target=>window.__labAudit.messages
+      .filter(message=>message.type==="worker-state-accepted"&&
+        Math.abs(message.sourceFrame-target)<=100).at(-1)?.generation,targetFrames.seek);
+    const seekPcmEvidence=await waitForWorkerPCM(page,{generation:seekGeneration,
+      missingBeforeFrames:missingBeforeSeek});
+    const missingBeforeLoop=await page.evaluate(()=>window.__labAudit.messages
+      .filter(message=>message.type==="progress"&&
+        message.processingMode==="worker").at(-1)?.missingFrames||0);
+    await page.mouse.click(wave.x+wave.width*.98,wave.y+wave.height/2);
+    await page.waitForFunction(({generation,target})=>window.__labAudit.messages.some(message=>
+      message.type==="worker-state-accepted"&&message.generation>generation&&
+      Math.abs(message.sourceFrame-target)<=100),
+      {timeout:10000},{generation:seekGeneration,target:targetFrames.nearEnd});
+    const loopGeneration=await page.evaluate(target=>window.__labAudit.messages
+      .filter(message=>message.type==="worker-state-accepted"&&
+        Math.abs(message.sourceFrame-target)<=100).at(-1).generation,targetFrames.nearEnd);
+    await page.waitForFunction(({generation,totalFrames})=>{
+      const progress=window.__labAudit.messages.filter(message=>
+        message.type==="progress"&&message.workerGeneration===generation);
+      const endIndex=progress.findIndex(message=>
+        message.sourceFrame>totalFrames*.9965);
+      const wrapped=endIndex>=0&&progress.slice(endIndex+1).some(message=>
+        message.sourceFrame<4096);
+      if(!wrapped)return false;
+      const probe=window.__labAudit.probe,pcm=new Float32Array(probe?.fftSize||0);
+      if(!probe||!pcm.length)return false;
+      probe.getFloatTimeDomainData(pcm);
+      return Math.sqrt(pcm.reduce((sum,value)=>sum+value*value,0)/pcm.length)>.01;
+    },{timeout:15000},{generation:loopGeneration,totalFrames:targetFrames.totalFrames});
+    const loopWrapEvidence=await page.evaluate((generation,missingBefore,totalFrames)=>{
+      const progress=window.__labAudit.messages.filter(message=>
+        message.type==="progress"&&message.workerGeneration===generation);
+      const endIndex=progress.findIndex(message=>
+        message.sourceFrame>totalFrames*.9965);
+      const nearEnd=progress[endIndex],afterWrap=progress.slice(endIndex+1)
+        .find(message=>message.sourceFrame<4096);
+      return {generation,nearEndFrame:nearEnd?.sourceFrame,
+        afterWrapFrame:afterWrap?.sourceFrame,
+        missingFrames:(afterWrap?.missingFrames||0)-missingBefore};
+    },loopGeneration,missingBeforeLoop,targetFrames.totalFrames);
+    assert.ok(loopWrapEvidence.nearEndFrame>targetFrames.totalFrames*.9965&&
+      loopWrapEvidence.afterWrapFrame<4096,loopWrapEvidence);
+
+    // A decode failure must leave the current Worker audio stream and source
+    // file intact so the listener can resume without reselecting it.
+    await page.evaluate(()=>{
+      const broken=new File([Uint8Array.from([1,2,3,4])],"broken.wav",{type:"audio/wav"});
+      const transfer=new DataTransfer();transfer.items.add(broken);
+      const input=document.querySelector("#audio-file");input.files=transfer.files;
+      input.dispatchEvent(new Event("change",{bubbles:true}));
+    });
+    await page.waitForFunction(()=>document.querySelector("#status")?.textContent
+      .includes("ä»¥å‰ã®éŸ³å£°ã¯ä¿æŒã—ã¦ã„ã¾ã™"),{timeout:10000});
+    const recovery=await page.evaluate(()=>({
+      file:document.querySelector("#file-meta")?.textContent,
+      worklets:window.__labAudit.worklets,
+      status:document.querySelector("#status")?.textContent,
+      sourceFrames:window.__labAudit.messages.filter(message=>
+        message.type==="progress"&&message.processingMode==="worker")
+        .map(message=>message.sourceFrame)
+    }));
+    assert.match(recovery.file,/worker-source-tone\.wav/);
+    assert.equal(recovery.worklets.length,1,recovery);
+    assert.deepEqual(pageErrors,[]);
+    console.log("Chrome legacy Worker PCM evidence",JSON.stringify({
+      startup:{mode:startupEvidence.worklets[0]?.mode,
+        workerCount:startupEvidence.workers.filter(url=>
+          url.includes("lab-processor.worker")).length,
+        firstOutputRms:startupEvidence.rms,
+        sourceFrameStart:startupEvidence.frames[0],
+        sourceFrameEnd:startupEvidence.frames.at(-1),
+        firstModel:startupEvidence.jobs[0]?.jointBackend},
+      selectedDSPs:["pv","wsola","dual","am"],
+      successfulDSPs:[...new Set(evidence.successfulBackendJobs
+        .map(result=>result.job.jointBackend))],
+      steadyFiveSeconds:{sourceFramesAdvanced:
+        steadyEvidence.sourceFrame-startProgress.sourceFrame,
+        missingOutputFrames:steadyEvidence.missingFrames-startProgress.missingFrames},
+      backendPcmEvidence,seekPcmEvidence,loopWrapEvidence,
+      workerRenderMs:["pv","wsola","dual","am"].map(backend=>{
+        const samples=evidence.successfulBackendJobs.filter(result=>
+          result.job.jointBackend===backend).map(result=>
+          Math.round(result.receivedAt-result.job.sentAt)).sort((a,b)=>a-b);
+        return {backend,jobs:samples.length,
+          medianMs:samples[Math.floor(samples.length/2)],
+          maxMs:samples.at(-1)};
+      }),
+      pitchHandoff:{stagedFrame:pitchStage.sourceFrame,
+        activatedFrame:pitchAccepted.sourceFrame,fractionalProgress,loopEnd,
+        expectedDistance,actualDistance,
+        sourcePositionErrorFrames:actualDistance-expectedDistance,
+        missingBefore:missingBeforePitch,missingAfter:missingAfterPitch,
+        worker:pitchWorkerTiming},
+      generationUpdates:evidence.workletStates.length,
+      maxObservedUnderrunFrames:evidence.maxMissingFrames,
+      seekFrame:recovery.sourceFrames.at(-1),
+      failedReplacementRetainedSource:recovery.file,
+      workletCountAfterRecovery:recovery.worklets.length
+    }));
+    await page.evaluate(()=>document.querySelector("#stop").click());
+  }finally{
+    const cleanupResults=await Promise.allSettled([
+      closeBrowserTree(browser),
+      stopChildProcess(server,"test HTTP server")
+    ]);
+    const cleanupErrors=cleanupResults.filter(result=>
+      result.status==="rejected").map(result=>result.reason);
+    if(cleanupErrors.length)
+      throw new AggregateError(cleanupErrors,"Browser test cleanup failed");
+  }
+});
