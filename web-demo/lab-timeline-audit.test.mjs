@@ -11,8 +11,11 @@ test('legacy Worker PCM is rendered by one shared Worklet source clock',async()=
   constructor(){workers.push(this);this.requests=[];}
   postMessage(payload){this.requests.push(payload);}
   terminate(){}
-  flush(){
-   const req=this.requests.shift();assert.ok(req,'pending bounded Worker request');
+  flush(generation=null){
+   const index=generation===null?0:this.requests.findIndex(req=>
+    req.generation===generation);
+   assert.ok(index>=0,'pending bounded Worker request');
+   const [req]=this.requests.splice(index,1);
    const channels=req.channels.map(()=>new Float32Array(req.plan.outputFrames).fill(.1));
    this.onmessage({data:{job:req.job,generation:req.generation,ok:true,channels,plan:req.plan}});
   }
@@ -96,6 +99,7 @@ test('legacy Worker PCM is rendered by one shared Worklet source clock',async()=
    this.speed=options.processorOptions.speed;this.generation=0;
    this.revision=0;this.running=false;this.segments=[];this.stagedChunks=[];
    this.rejectStagedChunk=false;
+   this.deferNextActivation=false;this.deferredActivation=null;
    worklets.push(this);
   }
   connect(){return this;}disconnect(){}
@@ -114,7 +118,9 @@ test('legacy Worker PCM is rendered by one shared Worklet source clock',async()=
       pitchSemitones:staged.pitchSemitones,revision:this.revision,
       bufferedSegments:this.segments.length};
     this.port.messages.push(activated);
-    this.port.onmessage?.({data:activated});
+    if(this.deferNextActivation){
+     this.deferNextActivation=false;this.deferredActivation=activated;
+    }else this.port.onmessage?.({data:activated});
    }
    this.frame+=outputFrames*this.speed*this.options.processorOptions.sourceSampleRate/
      this.options.processorOptions.sourceSampleRate;
@@ -126,6 +132,11 @@ test('legacy Worker PCM is rendered by one shared Worklet source clock',async()=
      missingFrames:0};
    this.port.messages.push(progress);
    this.port.onmessage?.({data:progress});
+  }
+  deliverActivation(){
+   assert.ok(this.deferredActivation,'deferred activation is available');
+   const data=this.deferredActivation;this.deferredActivation=null;
+   this.port.onmessage?.({data});
   }
  }
  globalThis.Worker=StubWorker;globalThis.AudioWorkletNode=StubWorklet;
@@ -215,10 +226,59 @@ test('legacy Worker PCM is rendered by one shared Worklet source clock',async()=
   assert.equal(worklets[0].stagedState.frame,136000);
   assert.equal(workers[0].requests[0].plan.start,136000,
     "the replacement Worker job starts at the updated safe boundary");
+
+  // The Worklet can activate a generation before its main-thread activation
+  // event is dispatched. A subsequent settings reversal currently deletes
+  // that generation's config metadata; a seek must then fail closed on reuse.
+  const returnedToDifferentPitch=stream.updateSettings({speed:.75,semitones:2});
+  let preparedGenerationThree=false;
+  for(let attempt=0;attempt<20&&!preparedGenerationThree;attempt++){
+   await settle();
+   const owner=workers.find(candidate=>candidate.requests.some(request=>
+    request.generation===3));
+   if(owner){
+    owner.flush(3);
+    for(let i=0;i<8;i++)await settle();
+    preparedGenerationThree=worklets[0].stagedChunks.some(chunk=>
+     chunk.generation===3);
+   }else{
+    const pendingOwner=workers.find(candidate=>candidate.requests.length);
+    const request=pendingOwner?.requests[0];
+    if(request){
+     pendingOwner.flush(request.generation);
+     await settle();
+    }else{
+     await settle();
+    }
+   }
+  }
+  assert.ok(preparedGenerationThree,
+    "the intermediate pitch generation has prepared shared-clock PCM");
+  worklets[0].deferNextActivation=true;worklets[0].advance(0);
+  assert.equal(worklets[0].deferredActivation.generation,3);
+  assert.equal(worklets[0].deferredActivation.pitchSemitones,2,
+    "the activated intermediate generation has different PCM settings");
+  const returnedToOriginal=stream.updateSettings({speed:.75,semitones:0});
+  for(let i=0;i<4;i++)await settle();
+  worklets[0].deliverActivation();
+  await settle();
+  const activeChunk=worklets[0].segments[0];
+  assert.ok(activeChunk&&activeChunk.generation===3);
+  const racedSeek=stream.seek(activeChunk.startFrame+1);
+  for(let i=0;i<4;i++)await settle();
+  const racedSeekStage=worklets[0].port.messages.filter(message=>
+   message.type==="worker-seek-stage").at(-1);
+  assert.equal(racedSeekStage?.reuseCompatible,false,
+    "unknown active-generation config must disable PCM reuse after a delayed activation event");
+
+  const pendingAtStop=stream.updateSettings({speed:.9,semitones:0});
+  for(let i=0;i<2;i++)await settle();
   stream.stop();
-  const stopped=await transition;
+  const stopped=await pendingAtStop;
   assert.equal(stopped.cancelled,true,
     "normal stream stop cancels a pending model transition without rejecting");
+  await Promise.allSettled([transition,returnedToDifferentPitch,
+    returnedToOriginal,racedSeek]);
  }finally{stream?.stop();globalThis.Worker=OriginalWorker;
   globalThis.AudioWorkletNode=OriginalWorklet;}
 });

@@ -48,6 +48,7 @@ export async function createModelStream({ctx,sourceChannels,sampleRate,speed,sem
     referenceWindows,periodCycles,jointBackend};
   let activeConfig=config;
   const sameRenderConfig=(left,right)=>{
+    if(!left||!right)return false;
     const leftKeys=Object.keys(left||{}),rightKeys=Object.keys(right||{});
     return leftKeys.length===rightKeys.length&&leftKeys.every(key=>{
       const a=left[key],b=right[key];
@@ -254,7 +255,12 @@ export async function createModelStream({ctx,sourceChannels,sampleRate,speed,sem
         activeGeneration=data.generation;stagedGeneration=null;
         if(seekTransitionGeneration===data.generation)
           seekTransitionGeneration=null;
-        activeConfig=configs.get(activeGeneration)||activeConfig;
+        // A rapid settings reversal may discard metadata for a generation
+        // that the Worklet has already activated but whose event arrived late.
+        // Unknown active settings must disable PCM reuse rather than retain an
+        // older configuration that happens to match the next request.
+        activeConfig=configs.has(activeGeneration)?
+          configs.get(activeGeneration):null;
         latestFrame=data.sourceFrame;appliedRevision=data.revision;
         bufferedSegments=data.bufferedSegments??bufferedSegments;
         for(const key of configs.keys())
