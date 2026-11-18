@@ -429,8 +429,11 @@ test("individual-period Worker plays through one shared PCM Worklet in Chrome",a
         pitchRequest.progressAudioTime))%loopEnd+loopEnd)%loopEnd;
     const transitionLatencyMs=(pitchAccepted.audioTime-
       pitchRequest.requestAudioTime)*1000;
+    assert.ok(Number.isFinite(pitchAccepted.activationAudioTime),
+      JSON.stringify({pitchAccepted,
+        reason:"activation must include the AudioWorklet sample time"}));
     const expectedActivationFrame=((requestFrame+pitchRequest.speed*48000*
-      (pitchAccepted.audioTime-pitchRequest.requestAudioTime))%loopEnd+loopEnd)%loopEnd;
+      (pitchAccepted.activationAudioTime-pitchRequest.requestAudioTime))%loopEnd+loopEnd)%loopEnd;
     const sourcePositionErrorFrames=((pitchAccepted.sourceFrame-
       expectedActivationFrame+loopEnd/2)%loopEnd+loopEnd)%loopEnd-loopEnd/2;
     const pitchWorkerTiming=await page.evaluate(({generation,stagedFrame})=>{
@@ -453,7 +456,7 @@ test("individual-period Worker plays through one shared PCM Worklet in Chrome",a
     assert.ok(transitionLatencyMs>=0&&transitionLatencyMs<1500,
       JSON.stringify({transitionLatencyMs,pitchRequest,pitchStage,
         pitchAccepted,pitchWorkerTiming}));
-    assert.ok(Math.abs(sourcePositionErrorFrames)<8192,
+    assert.ok(Math.abs(sourcePositionErrorFrames)<128,
       JSON.stringify({fractionalProgress,pitchRequest,pitchStage,
         pitchAccepted,expectedActivationFrame,sourcePositionErrorFrames,
         loopEnd,pitchWorkerTiming}));

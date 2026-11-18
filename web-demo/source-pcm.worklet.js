@@ -378,6 +378,8 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
       }
       this.port.postMessage({type:"worker-state-activated",
         ...workerActivation,requestId,
+        activationAudioTime:currentTime+
+          (workerActivation.sampleOffset??0)/sampleRate,
         bufferedSegments:this.renderer.statistics.renderedChunkCount,
         missingFrames:this.renderer.statistics.missingFrames});
     }

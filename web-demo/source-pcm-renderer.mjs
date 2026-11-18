@@ -480,7 +480,7 @@ export function createSourcePCMRenderer({
           nextRenderedSequence=seek.sequence+prepared.length;
           stagedWorkerState=null;
           workerActivation={...workerState,sourceFrame:activated.sourceFrame,
-            revision:activated.revision};
+            revision:activated.revision,sampleOffset:i};
           state=timeline.state;
           position=timeline.sourceFrameAt(0);
         }
@@ -517,7 +517,7 @@ export function createSourcePCMRenderer({
             pitchSemitones:staged.pitchSemitones};
           stagedWorkerState=null;
           workerActivation={...workerState,sourceFrame:position,
-            revision:activated.revision};
+            revision:activated.revision,sampleOffset:i};
         }
         segment=renderedChunks[0];
         let invalid=!segment||position<segment.startFrame||
