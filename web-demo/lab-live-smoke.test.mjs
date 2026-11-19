@@ -254,7 +254,9 @@ test('full Chrome: inherited Rust AudioWorklet live independent speed/pitch UI',
       Number(status?.dataset.renderRevision)>previous;
    },{timeout:10000},{speed,previous});
    const statusText=await page.$eval('#granular-optin-status',e=>e.textContent);
-   assert.ok(statusText.includes(`\n${speed<0?'−':'+'}${Math.abs(speed).toFixed(3)}×・+12.000半音`),
+   const visibleSpeed=speed===0?'0.000':(speed<0?'−':'+')+
+    Math.abs(speed).toFixed(3);
+   assert.ok(statusText.includes(`\n${visibleSpeed}×・+12.000半音`),
     'visible status must follow the selected signed speed and pitch: '+statusText);
    const statusHeight=await page.$eval('#granular-optin-status',e=>e.getBoundingClientRect().height);
    assert.equal(statusHeight,visibleProcessingStatus.height,
