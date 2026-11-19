@@ -546,7 +546,10 @@ export async function createModelStream({ctx,source,sourceChannels,sampleRate,sp
     return accepted;
   };
   const stageSettings=({frame,speed,semitones,...settings}={})=>{
-    const targetFrame=frame??latestFrame;
+    // The shared Worklet source clock can report fractional source frames.
+    // Worker chunk planning and staged transport commands require integer
+    // source frames, so quantize only at this DSP boundary.
+    const targetFrame=frame??Math.round(latestFrame);
     const validationFrame=frame===undefined&&targetFrame===totalFrames?
       totalFrames-1:targetFrame;
     // Validate against the caller's source position, but the audible source
