@@ -4,6 +4,20 @@
 import {createSourcePCMBridge} from "./source-pcm-bridge.mjs";
 import {RENDERED_CHUNK_SLOTS} from "./source-pcm-renderer.mjs";
 export const CHUNK_SECONDS=1.5;
+export function repeatLoopContext(source,loopStartFrame,loopEndFrame,count,side){
+  if(!(source instanceof Float32Array)||
+     !Number.isSafeInteger(loopStartFrame)||loopStartFrame<0||
+     !Number.isSafeInteger(loopEndFrame)||loopStartFrame>=loopEndFrame||
+     loopEndFrame>source.length||!Number.isSafeInteger(count)||count<0||
+     side!=="left"&&side!=="right")
+    throw RangeError("invalid repeated loop context");
+  const length=loopEndFrame-loopStartFrame,context=new Float32Array(count);
+  for(let i=0;i<count;i++){
+    const offset=side==="left"?length-count+i:i;
+    context[i]=source[loopStartFrame+((offset%length)+length)%length];
+  }
+  return context;
+}
 export function planChunk({totalFrames,sampleRate,speed,startSeconds,startFrame=null,model='dual',fftSize=2048,shortFftSize=512,longFftSize=fftSize,referenceWindows=8,jointBackend=null,loopStartFrame=0,loopEndFrame=totalFrames,loopEnabled=true}){
   if(!(totalFrames>0&&sampleRate>0&&speed>0))throw RangeError('invalid source range');
   if(startFrame!==null&&!Number.isSafeInteger(startFrame))throw RangeError('invalid source frame');
@@ -30,13 +44,13 @@ export function planChunk({totalFrames,sampleRate,speed,startSeconds,startFrame=
       Math.max(Math.ceil(sampleRate*.120),analysisWindow*2)):Math.ceil(sampleRate*.120)):
     Math.min(Math.ceil(sampleRate*.7),Math.max(Math.ceil(sampleRate*.040),referenceWindows*analysisWindow/4,analysisWindow));
   const contiguousLeft=Math.min(start-(loopEnabled?loopStartFrame:0),context);
-  const leftWrapCandidate=loopEnabled&&loopStartFrame>0?
+  const leftWrapCandidate=loopEnabled?
     context-contiguousLeft:0;
-  const wrapLeft=Math.min(leftWrapCandidate,loopLength);
+  const wrapLeft=leftWrapCandidate;
   const left=contiguousLeft+wrapLeft;
   const right=Math.min(rangeEnd-start-core,context);
   const wrapRight=loopEnabled&&start+core>=rangeEnd?
-    Math.min(context-right,loopLength):0;
+    context-right:0;
   const from=start-contiguousLeft,to=start+core+right;
   const crop=Math.round(left/speed),central=Math.ceil(core/speed);
   const tail=Math.min(Math.round(.025*sampleRate),Math.round(right/speed));
@@ -126,11 +140,11 @@ export async function createModelStream({ctx,sourceChannels,sampleRate,speed,sem
       loopEndFrame:jobConfig.loopEndFrame,
       loopEnabled:jobConfig.loopEnabled});
     const channels=sourceChannels.map(ch=>{
-      const left=plan.wrapLeft?
-        ch.slice(plan.loopEndFrame-plan.wrapLeft,plan.loopEndFrame):null;
+      const left=plan.wrapLeft?repeatLoopContext(ch,plan.loopStartFrame,
+        plan.loopEndFrame,plan.wrapLeft,"left"):null;
       const core=ch.slice(plan.from,plan.to);
-      const right=plan.wrapRight?
-        ch.slice(plan.loopStartFrame,plan.loopStartFrame+plan.wrapRight):null;
+      const right=plan.wrapRight?repeatLoopContext(ch,plan.loopStartFrame,
+        plan.loopEndFrame,plan.wrapRight,"right"):null;
       if(!left&&!right)return core;
       const input=new Float32Array((left?.length||0)+core.length+
         (right?.length||0));

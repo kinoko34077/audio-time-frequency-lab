@@ -305,7 +305,7 @@ test("individual-period Worker applies and wraps edited source-frame A/B without
       assert.equal(disabled.model,"pv",disabled);
       assert.ok(disabled.rms>.01,disabled);
 
-      const nearStartA=96,nearStartB=12000;
+      const nearStartA=0,nearStartB=12000;
       await page.evaluate(({a,b})=>{
         for(const [edge,value] of [["a",a],["b",b]]){
           const input=document.querySelector("#player-loop-"+edge);
