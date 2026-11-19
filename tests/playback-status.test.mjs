@@ -43,6 +43,15 @@ test('paused transport stays paused when a silent render receipt arrives',()=>{
   assert.equal(transportFromReceipt({paused:false,running:true}),'playing');
 });
 
+test('rejecting an unsupported model preserves the paused player transport',()=>{
+  assert.equal(playbackStatus.transportFromPlayer({paused:true,active:true}),
+    'paused');
+  assert.equal(playbackStatus.transportFromPlayer({paused:false,active:true}),
+    'playing');
+  assert.equal(playbackStatus.transportFromPlayer({paused:false,active:false}),
+    'stopped');
+});
+
 test('worker start status uses the current selection after async preparation',()=>{
   assert.equal(playbackStatus.phaseForModelStart?.({supported:false,settingsPending:false}),
     'unsupported');

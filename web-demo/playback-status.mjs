@@ -37,6 +37,10 @@ export function transportFromReceipt({paused=false,running=false}){
   return paused?'paused':running?'playing':'stopped';
 }
 
+export function transportFromPlayer({paused=false,active=false}){
+  return paused?'paused':active?'playing':'stopped';
+}
+
 export function phaseForModelStart({supported,settingsPending}){
   if(!supported)return 'unsupported';
   return settingsPending?'pending':'applied';

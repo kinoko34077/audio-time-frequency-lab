@@ -21,7 +21,7 @@ import {prepareStreamSettings} from "./stream-parameter-contract.mjs";
 import {displaySourceFrameFromProgress} from "./player-display-clock.mjs";
 import {createPlaybackFeedback} from "./playback-feedback.mjs";
 import {formatPlaybackStatus,rendererMatchesSelection,
-  transportFromReceipt,phaseForModelStart} from "./playback-status.mjs";
+  transportFromReceipt,transportFromPlayer,phaseForModelStart} from "./playback-status.mjs";
 import {axisShiftUnits,axisShiftCanonical,axisShiftView} from "./axis-shift-view.mjs";
 
 const $=id=>document.querySelector(id);
@@ -2668,7 +2668,10 @@ async function labSettingsChanged(){
     // A pending model request must not destroy the last-good audio stream.
     // Keep the requested canonical speed and model; do not silently start a
     // different DSP or claim that an unsupported render was applied.
-    const playing=state.player&&state.player.mode!=="dry";
+    const player=state.player;
+    const playing=Boolean(player&&player.mode!=="dry");
+    const transport=transportFromPlayer({paused:player?.paused===true,
+      active:playing});
     const active=state.player?.labStream?(state.player.appliedLabMode||previous):
       state.player?.labRealtime?"live":
       state.player?.rawPCM&&state.player.granular?
@@ -2677,7 +2680,7 @@ async function labSettingsChanged(){
       "指定値とモデル選択は保持します。"+(playing?
       "再生中の"+active+"を維持し、モデル切替は保留しています。":"");
     setPlayerProcessingStatus("unsupported",{
-      transport:playing?"playing":"stopped",model:nextMode,
+      transport,model:nextMode,
       individual:lab.individual,speed:nextSpeed,pitch:nextSemi});
     setPlayerProcessingDetail("モデル未対応: "+capability.reason);
     labStatusText("適用待ち: "+explanation);
