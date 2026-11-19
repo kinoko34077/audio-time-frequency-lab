@@ -589,9 +589,29 @@ test("U1/U5 primary Play routes to REAL selected live/PV/Granular engines and on
         const rate=Number(fileMeta.match(/(\d+)Hz/)?.[1]);
         const totalFrames=Number(canvas?.getAttribute("aria-valuemax"))+1;
         if(!current||!(rate>0&&totalFrames>1))return;
-        window.__expectedSeekFrame=Math.round(Math.min(
+        const expectedFrame=Math.round(Math.min(
           totalFrames/rate-.01,current.sourceFrame/rate+2)*rate);
+        window.__expectedSeekFrame=expectedFrame;
+        window.__seekKeyObservation={key:event.key,target:event.target?.id||"",
+          workletId:id,currentFrame:current.sourceFrame,sampleRate:rate,
+          totalFrames,expectedFrame,
+          elapsedBefore:document.querySelector("#elapsed")?.textContent||"",
+          loopA:document.querySelector("#player-loop-a")?.value||"",
+          loopB:document.querySelector("#player-loop-b")?.value||"",
+          loopEnabled:document.querySelector("#player-loop-enabled")?.checked};
       },true);
+      document.addEventListener("keydown",event=>{
+        if(event.target?.id!=="wave"||event.key!=="ArrowRight")return;
+        window.__seekKeyObservation.afterBubble={
+          elapsed:document.querySelector("#elapsed")?.textContent||"",
+          playhead:document.querySelector("#playhead")?.style.left||"",
+          commands:window.__workletCommands.map(x=>({frame:x.frame,generation:x.generation})),
+          model:document.querySelector("#lab-model")?.value||"",
+          transport:document.querySelector("#rt-telemetry")?.dataset.pcmTransport||"",
+          status:document.querySelector("#lab-status")?.textContent||"",
+          stopped:document.querySelector("#stop")?.disabled??true
+        };
+      },false);
     });
     await page.goto("http://127.0.0.1:"+port+"/?model=granular",{
       waitUntil:"domcontentloaded",timeout:20000
@@ -805,6 +825,10 @@ test("U1/U5 primary Play routes to REAL selected live/PV/Granular engines and on
     }catch(error){
       const diagnostic=await page.evaluate(({generation,frame})=>({
         expectedFrame:frame,
+        keyObservation:window.__seekKeyObservation,
+        activeWorkletId:window.__lastPcmWorkletId,
+        latestActiveWorkletEvent:[...window.__workletFrames].reverse().find(x=>
+          x.id===window.__lastPcmWorkletId),
         commands:window.__workletCommands.filter(x=>
           x.type==="worker-seek-stage"&&x.generation>generation),
         activations:window.__workletFrames.filter(x=>
