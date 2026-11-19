@@ -543,7 +543,7 @@ test("U1/U5 primary Play routes to REAL selected live/PV/Granular engines and on
           window.__engineCreations.push({kind:"worklet",name,id});
           if(name==="audio-lab-source-pcm")window.__lastPcmWorkletId=id;
           this.port.addEventListener("message",event=>{
-            if(Number.isSafeInteger(event.data?.sourceFrame))
+            if(Number.isFinite(event.data?.sourceFrame))
               window.__workletFrames.push({id,type:event.data.type,
                 sourceFrame:event.data.sourceFrame,
                 generation:event.data.generation,
@@ -583,7 +583,7 @@ test("U1/U5 primary Play routes to REAL selected live/PV/Granular engines and on
         if(event.target?.id!=="wave"||event.key!=="ArrowRight")return;
         const id=window.__lastPcmWorkletId;
         const current=[...window.__workletFrames].reverse().find(x=>
-          x.id===id&&Number.isSafeInteger(x.sourceFrame));
+          x.id===id&&Number.isFinite(x.sourceFrame));
         const canvas=document.getElementById("wave-detail");
         const fileMeta=document.getElementById("file-meta")?.textContent||"";
         const rate=Number(fileMeta.match(/(\d+)Hz/)?.[1]);
@@ -829,6 +829,8 @@ test("U1/U5 primary Play routes to REAL selected live/PV/Granular engines and on
         activeWorkletId:window.__lastPcmWorkletId,
         latestActiveWorkletEvent:[...window.__workletFrames].reverse().find(x=>
           x.id===window.__lastPcmWorkletId),
+        elapsedAtTimeout:document.querySelector("#elapsed")?.textContent||"",
+        playheadAtTimeout:document.querySelector("#playhead")?.style.left||"",
         commands:window.__workletCommands.filter(x=>
           x.type==="worker-seek-stage"&&x.generation>generation),
         activations:window.__workletFrames.filter(x=>
