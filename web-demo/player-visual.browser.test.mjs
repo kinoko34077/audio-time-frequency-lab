@@ -28,7 +28,17 @@ async function layoutEvidence(page,tag){
     return {viewport:innerWidth,scrollWidth:document.documentElement.scrollWidth,
       waveform:box(".wave-detail-wrap"),transport:box(".actions"),
       speedPitch:box("#granular-optin-controls"),ab:box("#player-loop-controls"),
-      advancedOpen:document.querySelector(".player-tune-advanced").open,
+      railRangeVisible:document.querySelector("#granular-range").getClientRects().length>0&&
+        document.querySelector("#granular-range").closest("details")===null,
+      waveTimeBoundsInside:(()=>{
+        const waveform=document.querySelector(".wave-detail-wrap").getBoundingClientRect();
+        return ["#wave-visible-start","#wave-visible-end"].every(selector=>{
+          const element=document.querySelector(selector);
+          const bounds=element.getBoundingClientRect();
+          return element.parentElement===document.querySelector(".wave-detail-time-bounds")&&
+            bounds.top>=waveform.top&&bounds.bottom<=waveform.bottom;
+        });
+      })(),
       precisionOpen:document.querySelector(".player-loop-precision").open,
       legacyVisible:getComputedStyle(document.querySelector(".model-legacy-fold")).display!=="none"};
   });
@@ -40,7 +50,8 @@ async function layoutEvidence(page,tag){
   assert.ok(value.waveform.top<value.transport.top&&
     value.transport.top<value.speedPitch.top&&value.speedPitch.top<value.ab.top,
     "expected waveform > transport > speed/pitch > loop hierarchy "+tag);
-  assert.equal(value.advancedOpen,false);
+  assert.equal(value.railRangeVisible,true,"speed rail width is directly available");
+  assert.equal(value.waveTimeBoundsInside,true,"visible waveform bounds stay inside the detailed waveform");
   assert.equal(value.precisionOpen,true, "A/B detail must remain expanded by default");
   assert.equal(value.legacyVisible,false);
 }
@@ -92,6 +103,25 @@ test("R4 usability visual captures: desktop and mobile player and folded researc
     assert.equal(await page.$eval("#model-transport-host #audio-state-summary",e=>e.getClientRects().length>0),true);
     assert.equal(await page.$eval("#runtime-hud",e=>e.getClientRects().length),0,
       "the model view must not append a second permanent status panel after the footer");
+    await page.setViewport({width:610,height:900,deviceScaleFactor:1});
+    const tabletModel=await page.evaluate(()=>{
+      const grid=document.querySelector(".model-extra-grid");
+      const controls=[...grid.querySelectorAll(".lab-inline-control")]
+        .filter(control=>control.getClientRects().length>0);
+      return {columns:getComputedStyle(grid).gridTemplateColumns.trim().split(/\s+/).length,
+        controls:controls.map(control=>{
+          const label=control.querySelector(":scope > label").getBoundingClientRect();
+          const slider=control.querySelector(":scope > input[type=range]").getBoundingClientRect();
+          const value=control.querySelector(":scope > .inline-number").getBoundingClientRect();
+          return {sliderWidth:slider.width,labelBeforeSlider:label.right<=slider.left,
+            sliderBeforeValue:slider.right<=value.left};
+        })};
+    });
+    assert.equal(tabletModel.columns,1,"model controls need a full-width row at 610 px");
+    assert.ok(tabletModel.controls.length>=3&&tabletModel.controls.every(control=>
+      control.sliderWidth>0&&control.labelBeforeSlider&&control.sliderBeforeValue),
+      "model sliders must remain visible between their labels and editable values: "+JSON.stringify(tabletModel));
+    await page.setViewport({width:1280,height:900,deviceScaleFactor:1});
     // Error states must remain visible even if the full diagnostics are closed,
     // including startup failures from the separately loaded entry controller.
     await page.evaluate(()=>{

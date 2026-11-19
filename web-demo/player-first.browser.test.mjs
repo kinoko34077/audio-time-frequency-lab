@@ -1004,8 +1004,12 @@ test("shared A/B updates every realtime model and compact numeric controls stay 
       modelInfo:document.querySelector(".model-info-controls").open,
       modelDetails:document.querySelector(".model-extra-controls").open,
       loopDetails:document.querySelector(".player-loop-precision").open,
-      inlinePitch:document.querySelector("#granular-pitch-value").closest(".player-tune-heading")!==null,
-      inlineSpeed:document.querySelector("#granular-speed-value").closest(".player-tune-heading")!==null,
+      inlinePitch:document.querySelector("#granular-pitch-value").closest(".player-tune-control")===
+        document.querySelector("#granular-pitch").closest(".player-tune-control"),
+      inlineSpeed:document.querySelector("#granular-speed-value").closest(".player-tune-control")===
+        document.querySelector("#granular-speed").closest(".player-tune-control"),
+      railRangeAlwaysVisible:document.querySelector("#granular-range").closest("details")===null,
+      noDevelopmentQualityNote:document.querySelector(".player-quality-note")===null,
       inlineAB:document.querySelector("#player-loop-a").closest(".loop-point")!==null,
       modelNumbers:["lab-short","lab-long","lab-windows","lab-period-cycles"]
         .every(id=>document.querySelector("#"+id+"-value")?.type==="number"),
