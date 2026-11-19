@@ -980,7 +980,11 @@ body.model-lab[data-main-tab="player"] #play-main{
 .player-rail-setting select{padding:6px;border:1px solid #456b68;color:#e2f7f1;background:#0e2830;border-radius:6px}
 .player-tune-advanced .player-quality-note{margin:7px 0 0}
 .player-tune #granular-rail-note:empty{display:none}
-.player-tune .player-processing-status{font-size:10px;margin:0;line-height:1.3;color:#91b7b3}
+.player-tune .player-processing-status{
+  box-sizing:border-box;min-height:2.6em;max-height:2.6em;overflow:hidden;
+  white-space:pre-line;font-size:10px;margin:0;line-height:1.3;
+  font-variant-numeric:tabular-nums;color:#91b7b3
+}
 body.model-lab[data-main-tab="player"] #player-loop-controls{
   gap:3px;margin:1px 0 0;padding:9px 12px;border:1px solid #305158;
   border-radius:9px;background:transparent
