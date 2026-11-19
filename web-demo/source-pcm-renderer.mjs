@@ -446,9 +446,8 @@ export function createSourcePCMRenderer({
            current.startFrame===loopStartFrame&&
            current.endFrame>=loopEndFrame)
           current.retireAfterLoop=true;
-        if(loopEnabled&&position<loopEndFrame&&
-           current.startFrame<loopEndFrame&&current.endFrame>loopEndFrame)
-          current.endFrame=loopEndFrame;
+        // Keep old PCM intact while the replacement Worker chunk renders.
+        // New loop bounds apply atomically at generation handoff.
         sequence=current.sequence+1;
         renderedChunks.splice(0,renderedChunks.length,...retained);
       }else if(activeChunks.length&&

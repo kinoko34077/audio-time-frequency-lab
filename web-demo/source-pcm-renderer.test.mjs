@@ -201,6 +201,36 @@ test("staged Worker A/B settings activate at the next chunk and repeat the selec
   assert.equal(p.statistics.missingFrames,0);
 });
 
+test("shortening Worker B keeps the audible retained chunk until replacement PCM arrives",()=>{
+  const p=createSourcePCMRenderer({sourceFrames:32,sourceSampleRate:8,
+    outputSampleRate:8,channelCount:1,speed:1,startFrame:0,
+    loopStartFrame:0,loopEndFrame:32,loopEnabled:true});
+  const chunk=(generation,sequence,startFrame,endFrame,value)=>({generation,
+    sequence,startFrame,endFrame,speed:1,coreFrames:endFrame-startFrame,
+    channels:[new Float32Array(endFrame-startFrame).fill(value)]});
+  p.installRenderedChunk(chunk(0,0,0,12,1));
+  p.installRenderedChunk(chunk(0,1,12,24,2));
+  assert.equal(p.renderBuffered([new Float32Array(2)]),0);
+  assert.equal(p.timeline.state.sourceFrame,2);
+
+  const staged=p.stageRenderedState({generation:1,speed:1,pitchSemitones:0,
+    loopStartFrame:0,loopEndFrame:8,loopEnabled:true});
+  assert.equal(staged.sourceFrame,0);
+  assert.equal(staged.sequence,1);
+  const retained=[new Float32Array(10)];
+  assert.equal(p.renderBuffered(retained),0,
+    "old contiguous PCM must remain audible while the new B chunk renders");
+  assert.deepEqual(Array.from(retained[0]),Array(10).fill(1));
+  assert.equal(p.statistics.missingFrames,0);
+
+  p.installRenderedChunk(chunk(1,staged.sequence,0,8,3));
+  assert.equal(p.renderBuffered([new Float32Array(1)]),0);
+  assert.equal(p.workerState.generation,1);
+  assert.equal(p.timeline.state.loopEndFrame,8);
+  assert.equal(p.takeWorkerActivation().sourceFrame,0);
+  assert.equal(p.statistics.missingFrames,0);
+});
+
 test("extending a short active Worker loop retires its old loop body at the boundary",()=>{
   const p=createSourcePCMRenderer({sourceFrames:32,sourceSampleRate:8,
     outputSampleRate:8,channelCount:1,speed:1,startFrame:6,
