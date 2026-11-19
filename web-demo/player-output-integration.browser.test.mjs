@@ -64,8 +64,20 @@ test("recorded piano main player: gesture/parameter receipts AND actual output P
     await page.waitForFunction(()=>document.querySelector("#file-meta")?.textContent
       .includes("meta-piano-a0-cc0-3s-48khz.wav"),{timeout:20000});
     await page.waitForSelector("#play-main:not([disabled])",{timeout:15000});
-    assert.equal(await page.$eval("#lab-model",el=>el.value),"spectral",
-      "public Audio Time must select the true STFT renderer by default");
+    assert.equal(await page.$eval("#lab-model",el=>el.value),"pv",
+      "public Audio Time must select the actual Phase Vocoder renderer by default");
+    const speedRails=await page.evaluate(()=>({
+      railValue:document.querySelector("#granular-range").value,
+      railOptions:[...document.querySelector("#granular-range").options].map(option=>option.value),
+      min:document.querySelector("#granular-speed").min,
+      max:document.querySelector("#granular-speed").max,
+      preciseMin:document.querySelector("#granular-speed-value").min,
+      preciseMax:document.querySelector("#granular-speed-value").max
+    }));
+    assert.deepEqual(speedRails,{
+      railValue:"2",railOptions:["1","2","4","8"],min:"-2",max:"2",
+      preciseMin:"-8",preciseMax:"8"
+    },"the rail starts at ±2×, retains a selectable ±8×, and precise input keeps ±8×");
     const decodedRate=Number((await page.$eval("#file-meta",el=>el.textContent))
       .match(/(\d+)Hz/)?.[1]);
     assert.ok(decodedRate>=8000&&decodedRate<=192000);
@@ -100,8 +112,8 @@ test("recorded piano main player: gesture/parameter receipts AND actual output P
     assert.ok(outputSilence.gains.length>=2&&
       outputSilence.gains.every(value=>value===0),outputSilence);
     const route=await page.$eval("#rt-telemetry",el=>el.dataset.pcmTransport);
-    assert.equal(route,"spectral-realtime",
-      "recorded music must use real selected STFT audio Worklet, not Granular");
+    assert.equal(route,"pv-phase-locked",
+      "recorded music must use the real selected Phase Vocoder Worklet by default");
     const nodeStarts=await page.$eval("#rt-telemetry",
       el=>Number(el.dataset.pcmNodeStarts));
     assert.equal(nodeStarts,1);

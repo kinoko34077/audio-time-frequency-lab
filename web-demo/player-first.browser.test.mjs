@@ -481,8 +481,8 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, swit
     assert.ok(!await page.$eval("#audio-state-summary",
       el=>el.textContent.includes("停止中 · 再生中")),
       "the visible status must not claim playback after Stop");
-    // The original button remains a separate audition path, not an alias
-    // for granular pitch-shifted output on the new default home page.
+    // The original button remains a separate audition path; it never aliases
+    // the selected Phase Vocoder output.
     await page.click("#play-dry");
     await page.waitForFunction(()=>document.querySelector("#rt-indicator")
       ?.textContent.includes("原音再生中"),{timeout:20000});
@@ -1016,11 +1016,14 @@ test("shared A/B updates every realtime model and compact numeric controls stay 
     await (await page.$("#audio-file")).uploadFile(recording);
     await page.waitForSelector("#play-main:not([disabled])",{timeout:20000});
     await page.click("#play-main");
+    await page.waitForFunction(()=>document.querySelector("#rt-telemetry")
+      ?.dataset.pcmTransport==="pv-phase-locked",{timeout:20000});
     const routes={spectral:"spectral-realtime",pv:"pv-phase-locked",
       wsola:"wsola-source-time",dual:"dual-transient-source-time",
       am:"am-envelope-source-time",granular:"granular-experimental"};
     for(const [index,[mode,route]] of Object.entries(routes).entries()){
-      if(mode!=="spectral")await page.evaluate(selected=>{
+      // Keep this route matrix independent of the user's current default model.
+      await page.evaluate(selected=>{
         const input=document.getElementById("lab-model");
         input.value=selected;input.dispatchEvent(new Event("change",{bubbles:true}));
       },mode);

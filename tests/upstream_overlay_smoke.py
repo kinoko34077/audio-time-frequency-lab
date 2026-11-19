@@ -42,9 +42,14 @@ try:
       page.locator("#granular-pitch-value").evaluate("(e)=>{e.value='5';e.dispatchEvent(new Event('change',{bubbles:true}));}")
       assert page.locator("#granular-speed-value").input_value()=="1.5"
       assert page.locator("#granular-pitch-value").input_value()=="5"
-      # The actual user-facing default is Spectral STFT, not implicit
-      # Granular/Rust rendering behind a different selected model.
-      assert page.locator("#lab-model").input_value()=="spectral"
+      # The actual user-facing default is the selected Phase Vocoder route.
+      assert page.locator("#lab-model").input_value()=="pv"
+      assert page.locator("#granular-speed").get_attribute("min")=="-2"
+      assert page.locator("#granular-speed").get_attribute("max")=="2"
+      assert page.locator("#granular-speed-value").get_attribute("min")=="-8"
+      assert page.locator("#granular-speed-value").get_attribute("max")=="8"
+      assert page.locator("#granular-range").input_value()=="2"
+      assert page.locator("#granular-range option[value='8']").count()==1
       # The Playwright browser can suppress AudioWorklet addModule; native
       # actual Chrome worklet proof is separately covered by lab-live-smoke.test.mjs.
       # Here the real native file picker is the acceptance target, not injection.
