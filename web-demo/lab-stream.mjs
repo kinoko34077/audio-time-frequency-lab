@@ -75,10 +75,14 @@ export function planChunk({totalFrames,sampleRate,speed,startSeconds,startFrame=
     outputStart:crop,outputFrames:central+tail+(wrapRight>0?1:0),
     coreFrames:central,nextSeconds:nextFrame/sampleRate};
 }
-export async function createModelStream({ctx,sourceChannels,sampleRate,speed,semitones,model,fftSize,shortFftSize=512,longFftSize=fftSize,referenceWindows,periodCycles=8,jointBackend=null,startSeconds=0,loopStartFrame=0,loopEndFrame=null,loopEnabled=true,onStatus=()=>{},onStarted=()=>{},onFailure=()=>{}}){
-  const totalFrames=sourceChannels[0].length,duration=totalFrames/sampleRate;
+export async function createModelStream({ctx,source,sourceChannels,sampleRate,speed,semitones,model,fftSize,shortFftSize=512,longFftSize=fftSize,referenceWindows,periodCycles=8,jointBackend=null,startSeconds=0,loopStartFrame=0,loopEndFrame=null,loopEnabled=true,onStatus=()=>{},onStarted=()=>{},onFailure=()=>{}}){
+  const totalFrames=source?.sourceFrames??sourceChannels?.[0]?.length;
+  const channelCount=source?.channelCount??sourceChannels?.length;
+  const duration=totalFrames/sampleRate;
   loopEndFrame??=totalFrames;
   if(!Number.isSafeInteger(totalFrames)||totalFrames<1||
+     !Number.isInteger(channelCount)||channelCount<1||channelCount>2||
+     !(source&&typeof source.read==='function'||Array.isArray(sourceChannels))||
      !Number.isFinite(sampleRate)||sampleRate<=0||
      !Number.isFinite(speed)||speed<.5||speed>2||
      !Number.isFinite(semitones)||semitones<-12||semitones>12||
@@ -141,7 +145,30 @@ export async function createModelStream({ctx,sourceChannels,sampleRate,speed,sem
     if(stopped)return;
     onFailure(message||"Worker処理失敗");cleanup();
   };
-  const prepareChunk=(jobConfig,startFrame,sequence)=>{
+  const readRange=async(start,count)=>{
+    if(source){
+      const range=await source.read(start,count,{priority:'playback'});
+      if(range?.startFrame!==start||!Array.isArray(range.channels)||
+         range.channels.length!==channelCount||
+         !range.channels.every(ch=>ch instanceof Float32Array&&ch.length===count))
+        throw Error('progressive PCM source returned an invalid Worker range');
+      return range.channels;
+    }
+    return sourceChannels.map(ch=>ch.slice(start,start+count));
+  };
+  const repeatedContext=async(plan,count,side)=>{
+    if(!count)return null;
+    if(!source)return sourceChannels.map(ch=>repeatLoopContext(ch,
+      plan.loopStartFrame,plan.loopEndFrame,count,side));
+    const loopLength=plan.loopEndFrame-plan.loopStartFrame;
+    const materializedLength=Math.min(count,loopLength);
+    const rangeStart=side==='left'?
+      plan.loopEndFrame-materializedLength:plan.loopStartFrame;
+    const base=await readRange(rangeStart,materializedLength);
+    return base.map(channel=>repeatLoopContext(channel,0,channel.length,
+      count,side));
+  };
+  const prepareChunk=async(jobConfig,startFrame,sequence)=>{
     const plan=planChunk({totalFrames,sampleRate,
       speed:jobConfig.speed,startSeconds:startFrame/sampleRate,
       startFrame,model:jobConfig.model,fftSize:jobConfig.fftSize,
@@ -152,12 +179,14 @@ export async function createModelStream({ctx,sourceChannels,sampleRate,speed,sem
       loopStartFrame:jobConfig.loopStartFrame,
       loopEndFrame:jobConfig.loopEndFrame,
       loopEnabled:jobConfig.loopEnabled});
-    const channels=sourceChannels.map(ch=>{
-      const left=plan.wrapLeft?repeatLoopContext(ch,plan.loopStartFrame,
-        plan.loopEndFrame,plan.wrapLeft,"left"):null;
-      const core=ch.slice(plan.from,plan.to);
-      const right=plan.wrapRight?repeatLoopContext(ch,plan.loopStartFrame,
-        plan.loopEndFrame,plan.wrapRight,"right"):null;
+    const [coreChannels,leftChannels,rightChannels]=await Promise.all([
+      readRange(plan.from,plan.to-plan.from),
+      repeatedContext(plan,plan.wrapLeft,'left'),
+      repeatedContext(plan,plan.wrapRight,'right')
+    ]);
+    const channels=coreChannels.map((core,index)=>{
+      const left=leftChannels?.[index]??null;
+      const right=rightChannels?.[index]??null;
       if(!left&&!right)return core;
       const input=new Float32Array((left?.length||0)+core.length+
         (right?.length||0));
@@ -208,7 +237,6 @@ export async function createModelStream({ctx,sourceChannels,sampleRate,speed,sem
       onStatus('並行Workerを準備できず、旧PCM境界で切替を続行');
       return;
     }
-    const {plan,channels}=prepareChunk(targetConfig,startFrame,sequence);
     handoffWorker=nextWorker;handoffPending=true;
     handoffJobId=taskJob;handoffGeneration=targetGeneration;
     const fallback=reason=>{
@@ -228,33 +256,42 @@ export async function createModelStream({ctx,sourceChannels,sampleRate,speed,sem
       onStatus('並行Workerを準備できず、旧PCM境界で切替を続行');
       if(!pending)pump();
     };
-    nextWorker.onerror=event=>fallback(event?.message||'parallel Worker error');
-    nextWorker.onmessage=({data})=>{
-      if(stopped||data.job!==taskJob||handoffJobId!==taskJob)return;
-      if(data.generation!==targetGeneration||targetGeneration!==generation){
+    void prepareChunk(targetConfig,startFrame,sequence).then(({plan,channels})=>{
+      if(stopped||handoffJobId!==taskJob)return;
+      if(targetGeneration!==generation){
         handoffPending=false;handoffWorker=null;handoffJobId=0;
         handoffGeneration=null;
         try{nextWorker.terminate();}catch{}
         resolveTransition(targetGeneration,{stale:true});pump();return;
       }
-      if(!data.ok){fallback(data.message||'parallel Worker DSP failed');return;}
-      handoffPending=false;handoffWorker=null;handoffJobId=0;
-      handoffGeneration=null;
-      try{nextWorker.terminate();}catch{}
-      handoffUnavailableGeneration=null;
-      handoffResult={generation:targetGeneration,config:targetConfig,
-        plan,sequence,channels:data.channels};
-      pump();
-    };
-    try{nextWorker.postMessage({job:taskJob,generation:targetGeneration,
-      channels,sampleRate,speed:targetConfig.speed,
-      semitones:targetConfig.semitones,model:targetConfig.model,
-      fftSize:targetConfig.fftSize,shortFftSize:targetConfig.shortFftSize,
-      longFftSize:targetConfig.longFftSize,
-      referenceWindows:targetConfig.referenceWindows,
-      periodCycles:targetConfig.periodCycles,
-      jointBackend:targetConfig.jointBackend,plan},channels.map(ch=>ch.buffer));}
-    catch{fallback();}
+      nextWorker.onerror=event=>fallback(event?.message||'parallel Worker error');
+      nextWorker.onmessage=({data})=>{
+        if(stopped||data.job!==taskJob||handoffJobId!==taskJob)return;
+        if(data.generation!==targetGeneration||targetGeneration!==generation){
+          handoffPending=false;handoffWorker=null;handoffJobId=0;
+          handoffGeneration=null;
+          try{nextWorker.terminate();}catch{}
+          resolveTransition(targetGeneration,{stale:true});pump();return;
+        }
+        if(!data.ok){fallback(data.message||'parallel Worker DSP failed');return;}
+        handoffPending=false;handoffWorker=null;handoffJobId=0;
+        handoffGeneration=null;
+        try{nextWorker.terminate();}catch{}
+        handoffUnavailableGeneration=null;
+        handoffResult={generation:targetGeneration,config:targetConfig,
+          plan,sequence,channels:data.channels};
+        pump();
+      };
+      try{nextWorker.postMessage({job:taskJob,generation:targetGeneration,
+        channels,sampleRate,speed:targetConfig.speed,
+        semitones:targetConfig.semitones,model:targetConfig.model,
+        fftSize:targetConfig.fftSize,shortFftSize:targetConfig.shortFftSize,
+        longFftSize:targetConfig.longFftSize,
+        referenceWindows:targetConfig.referenceWindows,
+        periodCycles:targetConfig.periodCycles,
+        jointBackend:targetConfig.jointBackend,plan},channels.map(ch=>ch.buffer));}
+      catch(error){fallback(error.message);}
+    }).catch(error=>fallback(error.message));
   };
   const pump=()=>{
     if(stopped||stagingOperations>0||handoffInstalling)return;
@@ -301,22 +338,30 @@ export async function createModelStream({ctx,sourceChannels,sampleRate,speed,sem
     const bufferLimit=RENDERED_CHUNK_SLOTS;
     if(bufferedSegments>=bufferLimit)return;
     const jobConfig=requestedConfig,jobGeneration=requestedGeneration;
-    const {plan,channels,sequence}=prepareChunk(jobConfig,cursorFrame,
-      sequenceCursor++);
+    const sequence=sequenceCursor++;
     pending=true;activeJob=++job;activeJobGeneration=jobGeneration;
+    const requestedJob=activeJob;
     activeJobConfig=jobConfig;activeJobSequence=sequence;
     onStatus(lastMissingFrames>0?
       'Worker処理が再生時計に遅れ、実際の欠落PCMを記録しました':
       started?'次の区間をWorkerで処理中':'モデルの先頭区間を準備中…');
-    try{worker.postMessage({job:activeJob,generation:jobGeneration,
-      channels,sampleRate,speed:jobConfig.speed,
-      semitones:jobConfig.semitones,model:jobConfig.model,
-      fftSize:jobConfig.fftSize,shortFftSize:jobConfig.shortFftSize,
-      longFftSize:jobConfig.longFftSize,
-      referenceWindows:jobConfig.referenceWindows,
-      periodCycles:jobConfig.periodCycles,
-      jointBackend:jobConfig.jointBackend,plan},channels.map(ch=>ch.buffer));}
-    catch(error){pending=false;fail(error.message);}
+    void prepareChunk(jobConfig,cursorFrame,sequence).then(({plan,channels})=>{
+      if(stopped||requestedJob!==activeJob)return;
+      if(jobGeneration!==generation&&jobGeneration!==activeGeneration){
+        pending=false;pump();return;
+      }
+      try{worker.postMessage({job:requestedJob,generation:jobGeneration,
+        channels,sampleRate,speed:jobConfig.speed,
+        semitones:jobConfig.semitones,model:jobConfig.model,
+        fftSize:jobConfig.fftSize,shortFftSize:jobConfig.shortFftSize,
+        longFftSize:jobConfig.longFftSize,
+        referenceWindows:jobConfig.referenceWindows,
+        periodCycles:jobConfig.periodCycles,
+        jointBackend:jobConfig.jointBackend,plan},channels.map(ch=>ch.buffer));}
+      catch(error){pending=false;fail(error.message);}
+    }).catch(error=>{
+      if(!stopped&&requestedJob===activeJob){pending=false;fail(error.message);}
+    });
   };
   const onBridgeEvent=data=>{
     if(data.type==="worker-state-activated"){
@@ -363,7 +408,7 @@ export async function createModelStream({ctx,sourceChannels,sampleRate,speed,sem
     }else if(data.type==="fatal-error")fail(data.message);
   };
   try{
-    bridge=await createSourcePCMBridge({ctx,sourceChannels,
+    bridge=await createSourcePCMBridge({ctx,source,sourceChannels,
       sourceSampleRate:sampleRate,speed,startFrame:cursorFrame,
       loopStartFrame,loopEndFrame,loopEnabled,
       processingMode:"worker",pitchSemitones:semitones,onEvent:onBridgeEvent});

@@ -41,7 +41,9 @@ export function createPlayerWaveEditor({
   visibleStart,visibleEnd,getPosition,onPosition,onStart,onAB,onScrubState,
   onScrubMotion=()=>{},onHoverFrame=()=>false,onHoverEnd=()=>{}
 }){
-  let channels=null,rate=48000,levels=null,frames=0,spanFrames=rate*8;
+  let channels=null,source=null,detailChannels=null,detailStart=0,detailEnd=0;
+  let detailPending=null,detailFailedKey=null,detailRevision=0;
+  let rate=48000,levels=null,frames=0,spanFrames=rate*8;
   let lastFrame=NaN,lastSpan=NaN,lastWidth=0,lastHeight=0;
   const pointers=new Map();
   let gesture=null,dragged=false,active=false;
@@ -51,8 +53,14 @@ export function createPlayerWaveEditor({
   const center=()=>clamp(Math.round(getPosition()*rate),0,Math.max(0,frames-1));
   function setSource(nextChannels,nextRate){
     if(hover){hover=null;onHoverEnd(false);}
-    channels=nextChannels;rate=nextRate||48000;frames=channels?.[0]?.length||0;
-    levels=frames?peakHierarchy(channels):null;
+    source=nextChannels&&typeof nextChannels.read==='function'?
+      nextChannels:null;
+    channels=source?null:nextChannels;
+    detailChannels=null;detailStart=detailEnd=0;detailPending=null;
+    detailFailedKey=null;detailRevision++;
+    rate=nextRate||48000;
+    frames=source?.sourceFrames||channels?.[0]?.length||0;
+    levels=channels&&frames?peakHierarchy(channels):null;
     spanFrames=Math.max(2,Math.min(frames,rate*12));
     lastFrame=NaN;lastSpan=NaN;refresh(true);
   }
@@ -60,9 +68,25 @@ export function createPlayerWaveEditor({
     return w*(.5+(frame-c)/spanFrames);
   }
   function sampledPeak(from,to,level){
-    if(!channels||to<=from)return [0,0];
+    if(to<=from)return [0,0];
     let low=1,high=-1;
-    if(level){
+    if(source){
+      if(detailChannels&&from>=detailStart&&to<=detailEnd){
+        const begin=from-detailStart,end=to-detailStart;
+        for(let i=begin;i<end;i++)for(const channel of detailChannels){
+          const value=channel[i];low=Math.min(low,value);high=Math.max(high,value);
+        }
+      }else if(source.overviewPeaks?.length){
+        const peaks=source.overviewPeaks;
+        const begin=clamp(Math.floor(from*peaks.length/frames),0,peaks.length-1);
+        const end=clamp(Math.floor((to-1)*peaks.length/frames),begin,peaks.length-1);
+        for(let i=begin;i<=end;i++){
+          const peak=peaks[i];if(!peak)continue;
+          low=Math.min(low,peak[0]);high=Math.max(high,peak[1]);
+        }
+      }
+    }else if(!channels)return [0,0];
+    else if(level){
       // Coarse hierarchy bins deliberately include partial border samples:
       // their visual envelope is conservative, and no raw whole-song scan is
       // repeated on each playback animation frame.
@@ -81,6 +105,26 @@ export function createPlayerWaveEditor({
       }
     }
     return [low===1&&high===-1?0:low,high===-1&&low===1?0:high];
+  }
+  function requestDetail(start,end){
+    if(!source||detailPending||spanFrames>(source.maxReadFrames||262_144)||
+       detailChannels&&start>=detailStart&&end<=detailEnd)return;
+    const from=clamp(Math.floor(start),0,Math.max(0,frames-1));
+    const to=clamp(Math.ceil(end),from+1,frames);
+    const key=from+':'+to;
+    if(detailFailedKey===key)return;
+    const reader=source,revision=++detailRevision;
+    detailPending=reader.read(from,to-from,{priority:'waveform'}).then(range=>{
+      if(source!==reader||revision!==detailRevision)return;
+      detailStart=range.startFrame;detailEnd=range.startFrame+range.channels[0].length;
+      detailChannels=range.channels;detailFailedKey=null;
+    }).catch(()=>{
+      if(source===reader&&revision===detailRevision)detailFailedKey=key;
+    }).finally(()=>{
+      if(source===reader&&revision===detailRevision){
+        detailPending=null;refresh(true);
+      }
+    });
   }
   function zoom(factor,pivotX=.5){
     if(!frames)return;
@@ -119,6 +163,7 @@ export function createPlayerWaveEditor({
       context.clearRect(0,0,width,height);
       context.fillStyle="#0a1e27";context.fillRect(0,0,width,height);
       const start=c-spanFrames/2;
+      requestDetail(Math.max(0,start),Math.min(frames,start+spanFrames));
       const {a,b,enabled}=onAB();
       const xa=clamp(boundsToX(a,c,width),0,width);
       const xb=clamp(boundsToX(b,c,width),0,width);
@@ -127,7 +172,8 @@ export function createPlayerWaveEditor({
       context.strokeStyle="#33595f";context.lineWidth=ratio;
       context.beginPath();context.moveTo(0,height/2);context.lineTo(width,height/2);context.stroke();
       const samplesPerPixel=spanFrames/width;
-      const level=samplesPerPixel>=256?levels.slice().reverse().find(x=>x.block<=samplesPerPixel*1.6)||levels[0]:null;
+      const level=levels&&samplesPerPixel>=256?
+        levels.slice().reverse().find(x=>x.block<=samplesPerPixel*1.6)||levels[0]:null;
       context.strokeStyle="#75d9c5";context.lineWidth=Math.max(1,ratio);
       context.beginPath();
       for(let x=0;x<width;x++){

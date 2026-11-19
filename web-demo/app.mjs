@@ -2,6 +2,7 @@ import {QUALITY,mixWet} from "./dsp.mjs";
 import {fullBandPartialOptions} from "./lab-contract.mjs";
 import {createModelStream} from "./lab-stream.mjs";
 import {createSourcePCMBridge} from "./source-pcm-bridge.mjs";
+import {createProgressiveAudioSource} from "./progressive-audio-source.mjs";
 import {returnToPlaySpeed,scrubSpeed,releaseScrubSpeed} from "./scrub-kinetics.mjs";
 import {createPlayerWaveEditor} from "./player-wave-editor.mjs";
 import {primaryModelCapability} from "./model-route.mjs";
@@ -25,7 +26,6 @@ import {formatPlaybackStatus,rendererMatchesSelection,
 import {axisShiftUnits,axisShiftCanonical,axisShiftView} from "./axis-shift-view.mjs";
 
 const $=id=>document.querySelector(id);
-const MAX_PREVIEW_SECONDS=600;
 // Normal Audio Time uses the real Phase Vocoder; raw PCM remains opt-in.
 const PCM_EXPERIMENT=new URLSearchParams(location.search).get("pcmTransport");
 const RAW_PCM_EXPERIMENT=PCM_EXPERIMENT==="1"||PCM_EXPERIMENT==="granular";
@@ -67,7 +67,8 @@ const controls={
 const dualControls={};
 let lowUnitControl=null,highUnitControl=null,pivotUnitControl=null,aMinUnitControl=null,sineUnitControl=null,slopeUnitControl=null;
 const state={
-  ctx:null,decoded:null,dry:null,offline:null,offlineWorker:null,
+  ctx:null,decoded:null,dry:null,source:null,loadingSource:null,overviewPeaks:null,
+  offline:null,offlineWorker:null,
   module:null,workletLoaded:false,player:null,position:0,seek:0,
   qualityIndex:0,settingsRevision:0,name:"audio",fileMeta:"音声未選択",processing:false,
   precise:Object.create(null),
@@ -158,7 +159,11 @@ const fmtTime=seconds=>{
   const s=Math.max(0,seconds);
   return Math.floor(s/60)+":"+(s%60).toFixed(1).padStart(4,"0");
 };
-const duration=()=>state.dry?.length?state.dry[0].length/state.decoded.sampleRate:0;
+const sourceFrames=()=>state.source?.sourceFrames??state.dry?.[0]?.length??0;
+const sourceChannels=()=>state.source?.channelCount??state.dry?.length??0;
+const hasAudioSource=()=>Boolean((state.source||state.dry)&&state.decoded);
+const duration=()=>sourceFrames()&&state.decoded?.sampleRate?
+  sourceFrames()/state.decoded.sampleRate:0;
 // #36 R3: thin UI over source-timeline + existing granular bridge contracts.
 // Presentation rounding and rail visibility must not rewrite canonical values.
 function refreshGranular(){
@@ -238,7 +243,7 @@ function waveformScrubMotion(speed,phase,sourceFrame=null){
   // direction and smoothly converges to the user's configured playback speed.
   const frame=()=>{
     if(token!==scrubMotionToken)return;
-    if(!state.dry){cancelTemporaryScrub(false);return;}
+    if(!hasAudioSource()){cancelTemporaryScrub(false);return;}
     const elapsed=performance.now()-started;
     const target=returnToPlaySpeed(from,granular.speed,elapsed);
     setTemporaryScrubSpeed(target,elapsed>=480);
@@ -325,7 +330,7 @@ function selectWorkspaceTab(target){
   if(target!=="player"&&target!=="model")return;
   document.body.dataset.mainTab=target;
   (target==="model"?modelTransportHost:playerActionsSlot).appendChild(sharedTransport);
-  if(target==="model")$("#model-audio-note").textContent=state.dry?
+  if(target==="model")$("#model-audio-note").textContent=hasAudioSource()?
     state.fileMeta:"音源は「再生」タブで選択してください。";
   for(const mode of ["player","model"]){
     const btn=$("#main-tab-"+mode);
@@ -348,11 +353,11 @@ for(const mode of ["player","model"]){
 selectWorkspaceTab(mainTab());
 
 function refreshAB(){
-  const present=Boolean(state.dry&&state.decoded);
+  const present=hasAudioSource();
   const panel=$("#player-loop-controls");
   panel.hidden=!present;
   if(!present)return;
-  const frames=state.dry[0].length;
+  const frames=sourceFrames();
   for(const [id,value] of [["a",ab.a],["b",ab.b]]){
     const input=$("#player-loop-"+id);
     input.max=String(id==="a"?frames-1:frames);
@@ -408,7 +413,7 @@ function syncLoopToPlayer(player=state.player){
   });
 }
 function editAB(edge,raw){
-  const input=$("#player-loop-"+edge),frames=state.dry?.[0].length||0;
+  const input=$("#player-loop-"+edge),frames=sourceFrames();
   const value=Number(raw);
   // The user's chosen endpoint takes precedence. Crossing the OTHER
   // endpoint is a normal interval-edit operation, not an input error:
@@ -449,13 +454,13 @@ for(const edge of ["a","b"]){
   input.addEventListener("change",()=>editAB(edge,input.value));
   input.addEventListener("keydown",e=>{if(e.key==="Enter")input.blur();});
   $("#player-loop-"+edge+"-now").addEventListener("click",()=>{
-    if(!state.dry)return;
+    if(!hasAudioSource())return;
     const frame=Math.round(playPosition()*state.decoded.sampleRate);
-    editAB(edge,String(Math.min(state.dry[0].length,Math.max(0,frame))));
+    editAB(edge,String(Math.min(sourceFrames(),Math.max(0,frame))));
   });
 }
 $("#player-loop-enabled").addEventListener("change",event=>{
-  if(!state.dry)return;
+  if(!hasAudioSource())return;
   ab.enabled=event.target.checked;
   $("#player-loop-hint").textContent=ab.enabled?
     "区間をループします（最短1サンプル）。":"区間ループをOFFにしました。";
@@ -810,23 +815,61 @@ function updateEngineInfo(){
 }
 
 function drawAudio(){
-  const signal=state.dry?.[0];
   const canvas=$("#wave"),ratio=Math.min(devicePixelRatio||1,2);
   canvas.width=Math.max(240,Math.round(canvas.getBoundingClientRect().width*ratio));
   canvas.height=120*ratio;
   const ctx=canvas.getContext("2d");
   ctx.clearRect(0,0,canvas.width,canvas.height);
-  if(!signal)return;
+  const summary=state.overviewPeaks;
+  if(!summary?.length){
+    ctx.strokeStyle="#33595f";ctx.lineWidth=ratio;ctx.beginPath();
+    ctx.moveTo(0,canvas.height/2);ctx.lineTo(canvas.width,canvas.height/2);
+    ctx.stroke();return;
+  }
   ctx.strokeStyle="#4ed2b2";ctx.lineWidth=ratio;ctx.beginPath();
   for(let x=0;x<canvas.width;x++){
-    const from=Math.floor(x*signal.length/canvas.width);
-    const to=Math.max(from+1,Math.floor((x+1)*signal.length/canvas.width));
+    const from=Math.floor(x*summary.length/canvas.width);
+    const to=Math.max(from+1,Math.floor((x+1)*summary.length/canvas.width));
     let lo=1,hi=-1;
-    for(let i=from;i<to;i++){lo=Math.min(lo,signal[i]);hi=Math.max(hi,signal[i]);}
+    for(let i=from;i<to;i++)if(summary[i]){
+      lo=Math.min(lo,summary[i][0]);hi=Math.max(hi,summary[i][1]);
+    }
+    if(lo===1&&hi===-1)continue;
     ctx.moveTo(x,(1-hi)*canvas.height/2);
     ctx.lineTo(x,(1-lo)*canvas.height/2);
   }
   ctx.stroke();
+}
+async function sampleSourceOverview(source,token){
+  const bins=96,peaks=Array.from({length:bins},()=>null);
+  source.overviewPeaks=peaks;
+  if(state.source===source)state.overviewPeaks=peaks;
+  const frames=source.sourceFrames,windowFrames=source.windowFrames;
+  for(let bin=0;bin<bins;bin++){
+    if(state.source!==source||token!==state.loadToken)return;
+    const target=Math.min(frames-1,
+      Math.floor((bin+.5)*frames/bins));
+    const start=Math.floor(target/windowFrames)*windowFrames;
+    const count=Math.min(windowFrames,frames-start);
+    let result=null;
+    for(let attempt=0;attempt<4&&!result;attempt++){
+      if(state.source!==source||token!==state.loadToken)return;
+      try{result=await source.read(start,count,{priority:"waveform"});}
+      catch{
+        if(attempt<3)await new Promise(resolve=>setTimeout(resolve,120));
+      }
+    }
+    if(!result)continue;
+    let low=1,high=-1;
+    for(const channel of result.channels)for(const sample of channel){
+      if(sample<low)low=sample;if(sample>high)high=sample;
+    }
+    peaks[bin]=[low===1&&high===-1?0:low,high===-1&&low===1?0:high];
+    if(bin%4===3||bin===bins-1){
+      if(state.source===source){drawAudio();detailWaveEditor?.refresh(true);}
+      await new Promise(resolve=>setTimeout(resolve,0));
+    }
+  }
 }
 let activeWavePointer=null;
 function playPosition(){
@@ -857,7 +900,7 @@ function playPosition(){
 function displayPlayPosition(){
   const p=state.player;
   if(activeWavePointer!==null||detailWaveScrubbing||hoverWave!==null||
-     !p?.rawPCM||p.paused||!state.ctx||!state.decoded||!state.dry)
+     !p?.rawPCM||p.paused||!state.ctx||!state.decoded||!hasAudioSource())
     return playPosition();
   const progress=p.pcmBridge?.latest;
   const applied=p.lastAppliedFrame;
@@ -866,7 +909,7 @@ function displayPlayPosition(){
   const sample=displaySourceFrameFromProgress(progress,{
     audioTime:state.ctx.currentTime,
     sourceRate:state.decoded.sampleRate,
-    sourceFrames:state.dry[0].length
+    sourceFrames:sourceFrames()
   });
   return Number.isFinite(sample)?sample/state.decoded.sampleRate:playPosition();
 }
@@ -888,7 +931,7 @@ function waveHoverSample(owner,sourceFrame){
   // Only a real, unpressed mouse over a playable granular track is a hover.
   // Never silently switch a selected Rust/Worker/Dry engine, or unpause after
   // the user explicitly paused playback.
-  if(!state.dry||activeWavePointer!==null||detailWaveScrubbing||
+  if(!hasAudioSource()||activeWavePointer!==null||detailWaveScrubbing||
      !isPCMModel(lab.mode)||
      (!state.player&&mainTab()!=="player")||
      (state.player&&(!state.player.rawPCM||!state.player.granular||
@@ -899,7 +942,7 @@ function waveHoverSample(owner,sourceFrame){
     setPlayerProcessingDetail("ブラウザの音声開始制限。最初に再生を押してください。");
     return false;
   }
-  const frame=clamp(Math.round(sourceFrame),0,state.dry[0].length-1);
+  const frame=clamp(Math.round(sourceFrame),0,sourceFrames()-1);
   const now=performance.now();
   if(hoverWave?.owner!==owner){
     if(hoverWave)waveHoverEnd(hoverWave.owner,false);
@@ -931,14 +974,14 @@ function waveHoverSample(owner,sourceFrame){
   return true;
 }
 function waveFrameFromPointer(e){
-  if(!state.dry)return 0;
+  if(!hasAudioSource())return 0;
   const rect=$("#wave").getBoundingClientRect();
   const fraction=clamp((e.clientX-rect.left)/rect.width,0,.999999);
-  return Math.min(state.dry[0].length-1,
-    Math.max(0,Math.round(fraction*state.dry[0].length)));
+  return Math.min(sourceFrames()-1,
+    Math.max(0,Math.round(fraction*sourceFrames())));
 }
 function playheadFromPointer(e,startIfStopped=true,scrub=false){
-  if(!state.dry)return;
+  if(!hasAudioSource())return;
   const rect=$("#wave").getBoundingClientRect();
   const frac=clamp((e.clientX-rect.left)/rect.width,0,.999999);
   state.seek=frac*duration();
@@ -965,7 +1008,7 @@ function refreshStatusSeek(){
 let overviewGesture=null;
 const waveSurface=$("#wave");
 waveSurface.addEventListener("pointerdown",e=>{
-  if(!state.dry||(e.pointerType==="mouse"&&e.button!==0))return;
+  if(!hasAudioSource()||(e.pointerType==="mouse"&&e.button!==0))return;
   if(activeWavePointer!==null)return;
   if((GRANULAR_EXPERIMENT||mainTab()==="player"&&isPCMModel(lab.mode))&&e.isTrusted&&
      (!state.player||(state.player.rawPCM&&state.player.granular))){
@@ -1077,14 +1120,14 @@ detailWaveEditor=createPlayerWaveEditor({
     detailWaveScrubbing=active;
   },
   onStart:seconds=>{
-    if(!state.dry||state.player)return;
+    if(!hasAudioSource()||state.player)return;
     // A non-hover gesture begins audible preview only after actual movement.
     // Start at its moved sample, not the stale pre-touch cursor.
     void play(preferredWaveMode(),Number.isFinite(seconds)?seconds:state.seek)
       .catch(error=>message("スクラブ再生失敗: "+error.message,"error"));
   },
   onPosition:(seconds,{scrub=false}={})=>{
-    if(!state.dry)return;
+    if(!hasAudioSource())return;
     state.seek=clamp(seconds,0,Math.max(0,duration()-1/state.decoded.sampleRate));
     // Scratch already sends cursor+velocity atomically to the Worklet.
     // The old extra seek-window here reset grains on every pointermove.
@@ -1099,7 +1142,7 @@ detailWaveEditor=createPlayerWaveEditor({
   }
 });
 $("#wave").addEventListener("keydown",e=>{
-  if(!state.dry)return;
+  if(!hasAudioSource())return;
   if(e.key==="Enter"||e.key===" "){
     e.preventDefault();play(preferredWaveMode(),state.seek).catch(err=>message(err.message,"error"));
   }else if(e.key==="ArrowLeft"||e.key==="ArrowRight"){
@@ -1131,6 +1174,7 @@ async function prepareCore(){
 function makeBuffer(useLab=false){
   const ctx=state.ctx;
   const channels=useLab&&labReady()?lab.processed.channels:state.dry;
+  if(!channels)throw Error("この音源は段階読込中です。共有Playerから再生してください。");
   const audio=ctx.createBuffer(channels.length,channels[0].length,state.decoded.sampleRate);
   channels.forEach((ch,i)=>audio.copyToChannel(ch,i));
   return audio;
@@ -1242,13 +1286,13 @@ function seek(seconds){
   if(!p)return;
   if(p.labStream){
     p.offset=where;
-    scheduleModelSeek(p,Math.min(state.dry[0].length-1,
+    scheduleModelSeek(p,Math.min(sourceFrames()-1,
       Math.max(0,Math.round(where*state.decoded.sampleRate))));
     return;
   }
   if(p.rawPCM){
     p.offset=where;
-    schedulePCMSeek(p,Math.min(state.dry[0].length-1,
+    schedulePCMSeek(p,Math.min(sourceFrames()-1,
       Math.max(0,Math.round(where*state.decoded.sampleRate))));
     return;
   }
@@ -1397,7 +1441,7 @@ async function stop(){
   const p=state.player;
   if(!p){
     controls.stop.disabled=true;
-    controls.main.disabled=!state.dry;
+    controls.main.disabled=!hasAudioSource();
     mediaStatus(false);
     indicator("停止中");
     setPlayerProcessingStatus("saved",{transport:"stopped"});
@@ -1437,7 +1481,7 @@ async function stop(){
   refreshStatusSeek();
 }
 async function play(mode="wet",offset=null){
-  if(!state.dry)return;
+  if(!hasAudioSource())return;
   if(mode==="wet"&&isPCMModel(lab.mode))return play("player",offset);
   if(mode==="wet"&&!primaryModelCapability(lab.mode,granular.speed,{individual:lab.individual}).supported){
     const note=primaryModelCapability(lab.mode,granular.speed,{individual:lab.individual}).reason;
@@ -1505,7 +1549,7 @@ async function play(mode="wet",offset=null){
   }
   const launchEpoch=++state.transportEpoch;
   controls.main.disabled=true;controls.dry.disabled=true;controls.wet.disabled=true;
-  if(mode==="player"||(mode==="dry"&&RAW_PCM_EXPERIMENT)){
+  if(mode==="player"||mode==="dry"){
     // Existing Worklet owns the same signed source clock for both renderers.
     // p.granular is the legacy boolean meaning "PCM time/pitch synth active".
     const granularActive=mode==="player"||GRANULAR_EXPERIMENT;
@@ -1531,7 +1575,8 @@ async function play(mode="wet",offset=null){
         rustSettings=settings();
       }
       bridge=await createSourcePCMBridge({
-        ctx,sourceChannels:state.dry,sourceSampleRate:sourceRate,
+        ctx,source:state.source,sourceChannels:state.dry,
+        sourceSampleRate:sourceRate,
         speed:initialSpeed,
         processingMode:granularActive?activeSynthMode:"raw",
         pitchSemitones:initialPitch,
@@ -1540,7 +1585,7 @@ async function play(mode="wet",offset=null){
         dualShortFrames:lab.shortFftSize,
         dualLongFrames:lab.longFftSize,
         startFrame:Math.round(at*sourceRate),loopEnabled:initialLoop.enabled,
-        loopStartFrame:initialLoop.a,loopEndFrame:initialLoop.b||state.dry[0].length,
+        loopStartFrame:initialLoop.a,loopEndFrame:initialLoop.b||sourceFrames(),
         onEvent:data=>{
           if(data.type==="render-applied"&&state.player?.pcmBridge===bridge&&
              Number.isSafeInteger(data.revision)&&Number.isFinite(data.sourceFrame)){
@@ -1597,8 +1642,8 @@ async function play(mode="wet",offset=null){
               if(state.player||state.transportEpoch!==failedEpoch+1)return;
               // A processor can fail before await bridge.play() settles, while
               // the launch has temporarily disabled both playback buttons.
-              controls.main.disabled=!state.dry;controls.dry.disabled=!state.dry;
-              controls.wet.disabled=!state.dry;
+              controls.main.disabled=!hasAudioSource();controls.dry.disabled=!hasAudioSource();
+              controls.wet.disabled=!hasAudioSource();
               setPlayerProcessingStatus("failed",{transport:"stopped"});
               setPlayerProcessingDetail("PCM再生エンジン異常終了: "+data.message);
               indicator("PCM実験再生エンジンの異常終了");
@@ -1655,7 +1700,7 @@ async function play(mode="wet",offset=null){
       // cannot starve audio startup indefinitely.
       for(let pass=0;granularActive&&pass<2&&state.seek!==initializedAt;pass++){
         const latestAt=state.seek;
-        await bridge.seek(Math.min(state.dry[0].length-1,
+        await bridge.seek(Math.min(sourceFrames()-1,
           Math.max(0,Math.round(latestAt*sourceRate))));
         if(launchEpoch!==state.transportEpoch||state.player!==player)return;
         initializedAt=latestAt;
@@ -1722,8 +1767,8 @@ async function play(mode="wet",offset=null){
       // stop() fences this failed launch by incrementing transportEpoch.
       // Restore controls only if no newer launch/replacement has taken over.
       if(state.transportEpoch===launchEpoch+1){
-        controls.main.disabled=!state.dry;controls.dry.disabled=!state.dry;
-        controls.wet.disabled=!state.dry;
+        controls.main.disabled=!hasAudioSource();controls.dry.disabled=!hasAudioSource();
+        controls.wet.disabled=!hasAudioSource();
       }
       if(granularActive){
         setPlayerProcessingStatus("failed",{transport:"stopped",model:activeSynthMode});
@@ -1732,7 +1777,7 @@ async function play(mode="wet",offset=null){
       message("PCM実験経路の起動失敗（原音再生に自動置換しません）: "+err.message,"error");
     }finally{
       if(launchEpoch===state.transportEpoch){
-        controls.main.disabled=!state.dry;controls.dry.disabled=!state.dry;controls.wet.disabled=!state.dry;
+        controls.main.disabled=!hasAudioSource();controls.dry.disabled=!hasAudioSource();controls.wet.disabled=!hasAudioSource();
       }
     }
     return;
@@ -1770,9 +1815,9 @@ async function play(mode="wet",offset=null){
       indicator("原音起動失敗");
     }finally{
       if(launchEpoch===state.transportEpoch){
-        controls.main.disabled=!state.dry;
-        controls.dry.disabled=!state.dry;
-        controls.wet.disabled=!state.dry;
+        controls.main.disabled=!hasAudioSource();
+        controls.dry.disabled=!hasAudioSource();
+        controls.wet.disabled=!hasAudioSource();
       }
     }
     return;
@@ -1786,7 +1831,7 @@ async function play(mode="wet",offset=null){
     const current=preflight.settings;
     const worklet=new AudioWorkletNode(ctx,"frequency-warp-rust",{
       numberOfInputs:1,numberOfOutputs:2,
-      outputChannelCount:[state.dry.length,state.dry.length]
+      outputChannelCount:[sourceChannels(),sourceChannels()]
     });
     const dry=ctx.createGain(),wet=ctx.createGain(),master=ctx.createGain();
     worklet.connect(wet,0);worklet.connect(dry,1);
@@ -1820,7 +1865,7 @@ async function play(mode="wet",offset=null){
     startSource(player,start);
     mediaStatus(true);
     void mediaBridge(player);
-    worklet.port.postMessage({type:"init",bytes:module,channels:state.dry.length,settings:current});
+    worklet.port.postMessage({type:"init",bytes:module,channels:sourceChannels(),settings:current});
     const result=await ready;
     if(state.player!==player||launchEpoch!==state.transportEpoch)return;
     player.feedback.ready();
@@ -1851,9 +1896,9 @@ async function play(mode="wet",offset=null){
     }
   }finally{
     if(launchEpoch===state.transportEpoch){
-      controls.main.disabled=!state.dry;
-      controls.dry.disabled=!state.dry;
-      controls.wet.disabled=!state.dry;
+      controls.main.disabled=!hasAudioSource();
+      controls.dry.disabled=!hasAudioSource();
+      controls.wet.disabled=!hasAudioSource();
     }
   }
 }
@@ -2194,88 +2239,63 @@ controls.dry.addEventListener("click",()=>play("dry"));
 controls.wet.addEventListener("click",()=>play("wet"));
 controls.stop.addEventListener("click",()=>stop());
 window.addEventListener("resize",()=>{drawCurve();drawAudio();detailWaveEditor?.refresh(true);});
-window.addEventListener("pagehide",()=>{if(state.rebuildTimer)clearTimeout(state.rebuildTimer);stop();if(state.offlineWorker)state.offlineWorker.terminate();});
-// Cold-start audio decode on iOS can stall after the file picker closes.
-// A single OfflineAudioContext promise with a 45s timeout produced the
-// reported "loading forever" appearance; do not require a second picker tap.
-async function withDecodeDeadline(promise,ms,phase){
-  let timer;
-  try{
-    return await Promise.race([promise,new Promise((_,reject)=>{
-      timer=setTimeout(()=>reject(Error(phase+"が応答しませんでした")),ms);
-    })]);
-  }finally{clearTimeout(timer);}
-}
-async function decodeFileWithoutPlayback(file,token){
-  // Read once; decodeAudioData can detach its source buffer. Retry with a copy.
-  const bytes=await withDecodeDeadline(file.arrayBuffer(),20000,"ファイル読み込み");
-  if(token!==state.loadToken)return null;
-  const Native=window.AudioContext||window.webkitAudioContext;
-  const Offline=window.OfflineAudioContext||window.webkitOfflineAudioContext;
-  const candidates=[
-    ...(Native?[["通常",()=>new Native()]]:[]),
-    ...(Offline?[["オフライン",()=>new Offline(1,1,44100)]]:[])
-  ];
-  if(!candidates.length)throw Error("このブラウザでは音声を解析できません");
-  const failures=[];
-  for(const [index,[name,create]] of candidates.entries()){
-    if(token!==state.loadToken)return null;
-    let ctx;
-    try{
-      message(index?"別の音声デコーダで再試行しています…":"音声を解析中…");
-      ctx=create();
-      const decoded=await withDecodeDeadline(ctx.decodeAudioData(bytes.slice(0)),20000,name+"デコード");
-      return token===state.loadToken?decoded:null;
-    }catch(error){failures.push(name+": "+(error?.message||String(error)));}
-    finally{if(ctx?.close)void ctx.close().catch(()=>{});}
-  }
-  throw Error("音声形式・コーデック・ブラウザの対応状況を確認してください。"+failures.join(" / "));
-}
+window.addEventListener("pagehide",()=>{
+  if(state.rebuildTimer)clearTimeout(state.rebuildTimer);
+  stop();state.loadingSource?.dispose();state.source?.dispose();
+  if(state.offlineWorker)state.offlineWorker.terminate();
+});
 async function load(file){
   if(!file)return;
   const token=++state.loadToken;
-  const previousReady=Boolean(state.dry);
-  // Never discard the current song merely because a *replacement* failed.
-  // Decode/validate into local state, then commit only after full success.
+  state.loadingSource?.dispose();state.loadingSource=null;
+  const previousReady=hasAudioSource();
+  let candidate=null;
   try{
-    if(file.size>75_000_000)throw Error("最大75MBです");
+    if(file.size>75_000_000&&!window.confirm(
+      `この音源は ${(file.size/1_000_000).toFixed(0)} MB です。\n`+
+      "再生位置を優先して段階読込します。続けますか?"))return;
     $("#file-meta").textContent=file.name+" · 読み込み中"+(previousReady?"（現在の音声は保持）":"");
     message("音声を開いています…"+(previousReady?" 現在の音声はそのまま使えます。":""));
-    const data=await decodeFileWithoutPlayback(file,token);
-    if(token!==state.loadToken||!data)return;
-    const count=Math.min(2,data.numberOfChannels);
-    const length=Math.min(data.length,Math.floor(data.sampleRate*MAX_PREVIEW_SECONDS));
-    if(length<4096)throw Error("短すぎる音声です");
-    const dry=Array.from({length:count},(_,i)=>data.getChannelData(i).slice(0,length));
-    if(token!==state.loadToken)return;
+    candidate=await createProgressiveAudioSource(file);
+    state.loadingSource=candidate;
+    if(token!==state.loadToken){candidate.dispose();state.loadingSource=null;return;}
+    // Probe the first PCM range before replacing the last playable source.
+    await candidate.read(0,Math.min(4096,candidate.sourceFrames),
+      {priority:"playback"});
+    if(token!==state.loadToken){candidate.dispose();state.loadingSource=null;return;}
 
-    // Atomic replacement boundary: old playable audio and completed offline
-    // WAV survive until the new source is guaranteed to be usable.
+    // Commit only after format, duration and a real PCM window all validate.
     await stop();
-    if(token!==state.loadToken)return;
+    if(token!==state.loadToken){candidate.dispose();return;}
     if(state.rebuildTimer){clearTimeout(state.rebuildTimer);state.rebuildTimer=null;}
     if(state.offlineWorker){state.offlineWorker.terminate();state.offlineWorker=null;}
-    state.offline=null;state.decoded={sampleRate:data.sampleRate};
+    const previousSource=state.source;
+    state.source=candidate;state.loadingSource=null;candidate=null;
+    previousSource?.dispose();
+    state.offline=null;state.decoded={sampleRate:state.source.sampleRate};
     lab.job++;lab.worker?.terminate();lab.worker=null;lab.processed=null;
-    state.dry=dry;state.seek=0;
-    // Preserve the last playable song on decode failure; a successful new
-    // source starts with its own valid exact-sample A/B boundaries.
-    ab.a=0;ab.b=dry[0].length;ab.enabled=true;
-    detailWaveEditor?.setSource(dry,data.sampleRate);
+    state.dry=null;state.overviewPeaks=Array.from({length:96},()=>null);
+    state.seek=0;
+    ab.a=0;ab.b=state.source.sourceFrames;ab.enabled=true;
+    detailWaveEditor?.setSource(state.source,state.source.sampleRate);
     refreshAB();
     labRefresh();state.lastStats=null;
     state.name=file.name.replace(/\.[^.]+$/,"");
     mediaStatus(false);
-    state.fileMeta=file.name+" · "+duration().toFixed(1)+"秒 · "+data.sampleRate+"Hz · "+count+"ch";
+    state.fileMeta=file.name+" · "+duration().toFixed(1)+"秒 · "+
+      state.source.sampleRate+"Hz · "+state.source.channelCount+"ch";
     $("#file-meta").textContent=state.fileMeta;
     labels("high");drawCurve();drawAudio();refreshStatusSeek();
     controls.main.disabled=false;controls.dry.disabled=false;controls.wet.disabled=false;
     controls.stop.disabled=true;
-    controls.render.disabled=false;controls.download.disabled=true;
+    controls.render.disabled=true;controls.download.disabled=true;
     $("#progress").value=0;
     indicator("停止中 · 音声選択済み");
-    message("読み込み完了。再生できます。");
+    message("再生できます。");
+    void sampleSourceOverview(state.source,token);
   }catch(error){
+    candidate?.dispose();
+    if(state.loadingSource===candidate)state.loadingSource=null;
     if(token!==state.loadToken)return;
     $("#file-meta").textContent=previousReady?state.fileMeta:"読み込み失敗（ファイルを選び直せます）";
     message("音声を開けませんでした: "+error.message+
@@ -2711,7 +2731,7 @@ async function labSettingsChanged(){
         shortFftSize:nextShort,longFftSize:nextLong,
         referenceWindows:nextWindows,periodCycles:nextCycles});
       await player.stream.updateSettings({
-        frame:Math.max(0,Math.min(state.dry[0].length-1,
+        frame:Math.max(0,Math.min(sourceFrames()-1,
           Math.round(currentTime*state.decoded.sampleRate))),
         speed:nextSpeed,semitones:nextSemi,
         model:nextIndividual?"period-joint":nextMode,
@@ -2757,7 +2777,7 @@ async function labSettingsChanged(){
       state.seek=currentTime;void play("wet",currentTime);
     }
   }
-  if(state.dry&&lab.mode==="live"&&!state.player)updateParams("lab");
+  if(hasAudioSource()&&lab.mode==="live"&&!state.player)updateParams("lab");
 }
 [labModel,labShort,labLong,labWindows,labIndividual,labPeriod]
   .forEach(node=>node.addEventListener("change",()=>void labSettingsChanged()));
@@ -2817,7 +2837,8 @@ async function startModelPlayback(offset=null,appliedOverride=null){
   let player;
   try{
     const stream=await createModelStream({
-      ctx,sourceChannels:state.dry,sampleRate:state.decoded.sampleRate,
+      ctx,source:state.source,sourceChannels:state.dry,
+      sampleRate:state.decoded.sampleRate,
       speed:applied.speed,semitones:applied.semitones,
       model:applied.individual?"period-joint":applied.mode,
       jointBackend:applied.individual?applied.mode:null,
@@ -2825,7 +2846,7 @@ async function startModelPlayback(offset=null,appliedOverride=null){
       longFftSize:applied.longFftSize,referenceWindows:applied.referenceWindows,
       periodCycles:applied.periodCycles,startSeconds:where,
       loopStartFrame:ab.a,
-      loopEndFrame:ab.b||state.dry[0].length,
+      loopEndFrame:ab.b||sourceFrames(),
       loopEnabled:ab.enabled,
       onStatus:text=>{
         if(state.player!==player)return;
@@ -2868,7 +2889,7 @@ async function startModelPlayback(offset=null,appliedOverride=null){
     player={labStream:true,stream,mode:"wet",appliedLabMode:applied.mode,
       appliedConfig:applied,offset:where,at:ctx.currentTime,
       sourceTimeRate:applied.speed,master:stream.master,
-      appliedLoop:{a:ab.a,b:ab.b||state.dry[0].length,
+      appliedLoop:{a:ab.a,b:ab.b||sourceFrames(),
         enabled:ab.enabled}};
     state.player=player;controls.stop.disabled=false;
     refreshAB();

@@ -8,7 +8,7 @@ import {resolve,join,dirname,relative,isAbsolute,sep,posix} from "node:path";
 import {fileURLToPath} from "node:url";
 
 const here=dirname(fileURLToPath(import.meta.url));
-const assetReference=/["']\.\/([A-Za-z0-9_./-]+\.(?:mjs|js|css|wasm|html|svg|png|jpe?g|webp|gif|ico|json|woff2?))["']/gi;
+const assetReference=/["']\.\/([A-Za-z0-9_./-]+\.(?:mjs|js|css|wasm|html|svg|png|jpe?g|webp|gif|ico|json|md|txt|woff2?))["']/gi;
 const cssReference=/url\(\s*["']?\.\/([A-Za-z0-9_./-]+\.(?:svg|png|jpe?g|webp|gif|ico|woff2?))["']?\s*\)/gi;
 
 function safePath(name){

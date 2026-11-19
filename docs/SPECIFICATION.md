@@ -21,5 +21,15 @@ Ground truth synthetic corpus plus representative recordings. Same source/crop/g
 Static native WebAudio + ESM browser UI; offline AudioBuffer processor in worker when feasible; DSP isolated behind typed contract {id, render(decodedPCM, sampleRate, speed, semitones)->PCM}. Reuse or adapt only actual relevant source/UX from frequency-warp-vst/web-demo with explicit provenance and compatibility tests; no duplicate heavy VST3 build. Common UI/UX may later import kinotch-site-kit, but no blocked dependency.
 ## Scope boundaries
 No microphone/live/streaming required in v1; no source separation guarantee, no claimed uncertainty-principle bypass, no unattended deployment, credentials, paid API or new external data service. No inclusion of user audio in tests/public repository.
+
+## Progressive local source loading (accepted 2026-11-19)
+- Player loading must not call `File.arrayBuffer()` or `decodeAudioData()` for the complete source and must not impose the previous 75 MB or 600-second player caps. For files above 75 MB, show one confirmation before opening; after the user continues, retain the file locally and decode only bounded PCM ranges.
+- Reuse the source-frame clock and the existing AudioWorklet bridge. Playback, seek, scrub and A/B endpoint reads have priority over waveform detail/overview reads. Keep compressed source bytes in the browser File and decode to Float32 PCM windows; do not lossily transcode the source.
+- Preserve the existing model DSPs. The individual-period PV/WSOLA/Dual/AM Worker requests only the source ranges needed for each processing chunk; it continues to send rendered output to the shared source clock.
+- Use a locally shipped, pinned, no-cost demuxer. A format is available only when the target browser reports a usable decoder; unsupported formats fail clearly instead of silently decoding the whole file through another path.
+- Loading a replacement is transactional: the prior valid source stays playable until format metadata and an actual PCM range from the new file have succeeded. Cancellation, unsupported codecs, malformed metadata or decode failure preserve the prior source. Stale reads are canceled or ignored on replacement and disposal.
+- Keep decoded source PCM residency bounded independently of duration, and keep waveform summaries bounded. A waveform request may not delay a playback read; detail reads that lose priority are retried only while the same source remains active.
+- WAV rendering/export remains held as already recorded in Owner #36. The progressive player does not imply that held full-file rendering is complete.
+
 ## Acceptance
 R1 actual repo and parent Issues/control created through devflow native workflow; R2 independently adjustable preview and WAV export; R3 at least two independently implemented DSP models audibly different, B0 plus tests showing time/pitch independence; R4 test metrics; R5 optional advanced hybrid and AM model with objective measurements before labeling implemented; R6 reviewed PR and authorized publish when explicitly approved.
