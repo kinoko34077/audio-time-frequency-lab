@@ -150,6 +150,7 @@ test('legacy Worker PCM is rendered by one shared Worklet source clock',async()=
    jointBackend:'pv',fftSize:2048,shortFftSize:512,longFftSize:2048,
    referenceWindows:8,periodCycles:8,startSeconds:4});
   stream.start();
+  await settle();
   assert.equal(workers.length,1);
   assert.equal(workers[0].requests.length,1);
   assert.equal(stream.sourcePositionAt(),4);
