@@ -148,6 +148,50 @@ test("A/B endpoint reads retry when a scrub preempts a shared PCM decode",async(
   });
 });
 
+test("a newer waveform scrub invalidates an in-flight seek",async()=>{
+  await withFakeWorklet(async nodes=>{
+    let releaseSeek,releaseScrub;
+    let reads=0;
+    const source=pcmSource((startFrame,frameCount)=>{
+      reads++;
+      if(reads===1)return Promise.resolve(range(startFrame,frameCount));
+      if(reads===2)return new Promise(resolve=>{
+        releaseSeek=()=>resolve(range(startFrame,frameCount));
+      });
+      if(reads===3)return new Promise(resolve=>{
+        releaseScrub=()=>resolve(range(startFrame,frameCount));
+      });
+      return Promise.resolve(range(startFrame,frameCount));
+    });
+    const bridge=await createSourcePCMBridge({ctx:context(),source,
+      sourceSampleRate:48_000,startFrame:10_000});
+    const seek=bridge.seek(100_000).then(result=>({ok:true,result}),
+      error=>({ok:false,error}));
+    await waitFor(()=>typeof releaseSeek==="function");
+    const scrub=bridge.scrub(200_000,1).then(result=>({ok:true,result}),
+      error=>({ok:false,error}));
+    await waitFor(()=>typeof releaseScrub==="function");
+    releaseScrub();
+    const node=nodes[0];
+    await waitFor(()=>node.sent.some(message=>message.type==="scrub"));
+    const scrubMessage=node.sent.findLast(message=>message.type==="scrub");
+    node.port.onmessage({data:{type:"command-accepted",
+      requestId:scrubMessage.requestId}});
+    assert.equal((await scrub).ok,true);
+
+    releaseSeek();
+    await new Promise(resolve=>setTimeout(resolve,0));
+    const obsoleteSeek=node.sent.findLast(message=>
+      message.type==="seek-window"&&message.frame===100_000);
+    if(obsoleteSeek)node.port.onmessage({data:{type:"command-accepted",
+      requestId:obsoleteSeek.requestId}});
+    assert.deepEqual(await seek,{ok:true,result:{stale:true}});
+    assert.equal(obsoleteSeek,undefined,
+      "the older keyboard seek must not replace the newer waveform position");
+    bridge.dispose();
+  });
+});
+
 test("an in-flight seek preserves the processor failure after an asynchronous read",async()=>{
   await withFakeWorklet(async nodes=>{
     let finishSeekRead;

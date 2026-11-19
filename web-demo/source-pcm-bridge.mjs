@@ -250,7 +250,7 @@ export async function createSourcePCMBridge({
     }
   }
   const command=(op,params={})=>submit({type:"command",op,...params});
-  let seekRevision=0,scrubRevision=0,loopRevision=0;
+  let cursorRevision=0,loopRevision=0;
   const updateLoop=(a,b,enabled,op)=>{
     if(closed)return Promise.reject(Error("PCM bridge disposed"));
     refillRevision++;
@@ -294,11 +294,11 @@ export async function createSourcePCMBridge({
         return Promise.reject(RangeError("invalid source-frame seek"));
       if(closed)return Promise.reject(Error("PCM bridge disposed"));
       refillRevision++;
-      const revision=++seekRevision;
+      const revision=++cursorRevision;
       const {start,channels}=await windowSlice(frame===frames?frames-1:frame,
         currentSpeed,"playback");
       if(closed)throw closedFailure();
-      if(revision!==seekRevision)return {stale:true};
+      if(revision!==cursorRevision)return {stale:true};
       // The source window and seek become one Worklet message, so prefetch
       // eviction cannot discard the target while protecting the old cursor.
       return submit({type:"seek-window",start,channels,frame,op:"seek"},
@@ -318,7 +318,7 @@ export async function createSourcePCMBridge({
       if(closed)throw Error("PCM bridge disposed");
       refillRevision++;
       currentSpeed=wantedSpeed;
-      const revision=++scrubRevision;
+      const revision=++cursorRevision;
       // No 64k-frame PCM copy for each pointermove. The first scratch
       // positions the source cache, subsequent moves within that interval
       // transmit just a frame+speed pair (tens of bytes).
@@ -330,7 +330,7 @@ export async function createSourcePCMBridge({
         return (async()=>{
           const {start,channels}=await windowSlice(frame,wantedSpeed,"scrub");
           if(closed)throw closedFailure();
-          if(revision!==scrubRevision)return {stale:true};
+          if(revision!==cursorRevision)return {stale:true};
           scratchCached={start,end:start+channels[0].length};
           return submit({type:"scrub",op:"scrub",start,channels,
             frame,speed:wantedSpeed},channels.map(c=>c.buffer));
@@ -338,7 +338,7 @@ export async function createSourcePCMBridge({
       };
       if(needsCache)return send();
       try{
-        if(revision!==scrubRevision)return {stale:true};
+        if(revision!==cursorRevision)return {stale:true};
         return await submit({type:"scrub",op:"scrub",frame,speed:wantedSpeed});
       }catch(error){
         // The AudioWorklet cache can evict a former pointer window while
