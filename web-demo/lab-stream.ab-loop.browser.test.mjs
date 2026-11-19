@@ -484,13 +484,35 @@ test("individual-period Worker applies and wraps edited source-frame A/B without
         input.value=String(b);input.dispatchEvent(new Event("change",
           {bubbles:true}));
       },totalFrames);
-      await page.waitForFunction(({a,b})=>{
-        const hint=document.querySelector("#player-loop-hint")?.textContent||"";
-        return hint.includes("反映しました")&&window.__labAudit.messages.some(message=>
-          message.type==="progress"&&message.processingMode==="worker"&&
-          message.loopEnabled&&message.loopStartFrame===a&&
-          message.loopEndFrame===b);
-      },{timeout:20000},{a:shiftedA,b:totalFrames});
+      try{
+        await page.waitForFunction(({a,b})=>{
+          const hint=document.querySelector("#player-loop-hint")?.textContent||"";
+          return hint.includes("反映しました")&&window.__labAudit.messages.some(message=>
+            message.type==="progress"&&message.processingMode==="worker"&&
+            message.loopEnabled&&message.loopStartFrame===a&&
+            message.loopEndFrame===b);
+        },{timeout:20000},{a:shiftedA,b:totalFrames});
+      }catch(error){
+        const diagnostic=await page.evaluate(({a,b,errors})=>{
+          const audit=window.__labAudit;
+          const meta=document.querySelector("#file-meta")?.textContent||"";
+          const sourceRate=Number(meta.match(/· ([0-9.]+)秒 · ([0-9]+)Hz/)?.[2]);
+          const progress=audit.messages.filter(message=>
+            message.type==="progress"&&message.processingMode==="worker");
+          return {a,b,sourceRate,contextRate:audit.audioContext?.sampleRate,
+            selectedA:document.querySelector("#player-loop-a")?.value,
+            selectedB:document.querySelector("#player-loop-b")?.value,
+            maxB:document.querySelector("#player-loop-b")?.max,
+            hint:document.querySelector("#player-loop-hint")?.textContent,
+            status:document.querySelector("#lab-status")?.textContent,
+            progress:progress.slice(-8),
+            states:audit.messages.filter(message=>
+              message.type.includes("worker-state")).slice(-8),
+            jobs:audit.jobs.slice(-8),results:audit.results.slice(-8),errors};
+        },{a:shiftedA,b:totalFrames,errors});
+        throw Error("A/B B-to-source-end update did not reach Worker PCM: "+
+          JSON.stringify(diagnostic),{cause:error});
+      }
       await page.evaluate(a=>{
         const input=document.querySelector("#player-loop-a");
         input.value=String(a);input.dispatchEvent(new Event("change",
