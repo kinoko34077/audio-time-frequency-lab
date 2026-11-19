@@ -256,7 +256,8 @@ export async function createModelStream({ctx,sourceChannels,sampleRate,speed,sem
         cursorFrame=accepted.sourceFrame;
         sequenceCursor=accepted.sequence;
         bufferedSegments=accepted.bufferedSegments??bufferedSegments;
-        if(pending&&handoffUnavailableGeneration!==requestedGeneration)
+        if(pending&&handoffUnavailableGeneration!==requestedGeneration&&
+           !accepted.terminal)
           startHandoffJob(requestedGeneration,requestedConfig,
             accepted.sourceFrame,accepted.sequence);
       }).catch(error=>{
@@ -429,8 +430,11 @@ export async function createModelStream({ctx,sourceChannels,sampleRate,speed,sem
         longFftSize:next.longFftSize,referenceWindows:next.referenceWindows,
         jointBackend:next.jointBackend,loopStartFrame:next.loopStartFrame,
         loopEndFrame:next.loopEndFrame,loopEnabled:next.loopEnabled});
-      const requiredChunks=seekPlan.core<Math.ceil(CHUNK_SECONDS*sampleRate)||
-        next.speed>1.5?2:1;
+      const terminalUnlooped=!next.loopEnabled&&
+        seekPlan.nextFrame>=totalFrames;
+      const requiredChunks=terminalUnlooped?1:
+        seekPlan.core<Math.ceil(CHUNK_SECONDS*sampleRate)||
+          next.speed>1.5?2:1;
       stagingOperations++;
       try{
         const staged=await bridge.stageWorkerSeekPlayback({frame:seekPlan.start,

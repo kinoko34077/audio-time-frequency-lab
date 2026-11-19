@@ -98,6 +98,7 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
             speed:m.speed,
             pitchSemitones:m.pitchSemitones,
             bufferedSegments:staged.bufferedSegments,
+            terminal:staged.terminal===true,
             stageRequestAudioTime:m.requestAudioTime,
             stageAudioTime:currentTime});
           return;

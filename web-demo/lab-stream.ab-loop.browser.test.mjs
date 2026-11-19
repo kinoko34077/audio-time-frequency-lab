@@ -71,10 +71,19 @@ test("individual-period Worker applies and wraps edited source-frame A/B without
       });
       await page.evaluateOnNewDocument(guardSource=>{
         const audit={messages:[],jobs:[],results:[],worklets:[],workers:[],
+          commands:[],
           probe:null,mutedOutputRoutes:0,audioOutputMuteGain:null,
           audioOutputMuteGains:[]};
         Object.defineProperty(window,"__labAudit",{value:audit});
         (0,eval)(`(${guardSource})`)(window,audit);
+        const nativePortPostMessage=MessagePort.prototype.postMessage;
+        MessagePort.prototype.postMessage=function(message,...args){
+          if(message?.type==="worker-seek-stage")
+            audit.commands.push({type:message.type,frame:message.frame,
+              generation:message.generation,requestId:message.requestId,
+              requiredChunks:message.requiredChunks});
+          return nativePortPostMessage.call(this,message,...args);
+        };
         const NativeWorklet=window.AudioWorkletNode;
         const guardedConnect=NativeWorklet.prototype.connect;
         NativeWorklet.prototype.connect=function(destination,...args){
@@ -464,6 +473,113 @@ test("individual-period Worker applies and wraps edited source-frame A/B without
           message.sourceFrame<a+4096&&progress[index-1].sourceFrame>b-4096);
       },{timeout:15000},{a:shiftedA,b:extendedB,
         generation:extendedLoop.generation});
+
+      const totalFrames=before.sampleRate*30;
+      const terminalA=totalFrames-12000;
+      await page.evaluate(b=>{
+        const input=document.querySelector("#player-loop-b");
+        input.value=String(b);input.dispatchEvent(new Event("change",
+          {bubbles:true}));
+      },totalFrames);
+      await page.waitForFunction(({a,b})=>{
+        const hint=document.querySelector("#player-loop-hint")?.textContent||"";
+        return hint.includes("反映しました")&&window.__labAudit.messages.some(message=>
+          message.type==="progress"&&message.processingMode==="worker"&&
+          message.loopEnabled&&message.loopStartFrame===a&&
+          message.loopEndFrame===b);
+      },{timeout:20000},{a:shiftedA,b:totalFrames});
+      await page.evaluate(a=>{
+        const input=document.querySelector("#player-loop-a");
+        input.value=String(a);input.dispatchEvent(new Event("change",
+          {bubbles:true}));
+      },terminalA);
+      await page.waitForFunction(({a,b})=>{
+        const audit=window.__labAudit;
+        const progress=audit.messages.filter(message=>
+          message.type==="progress"&&message.processingMode==="worker"&&
+          message.loopEnabled&&message.loopStartFrame===a&&
+          message.loopEndFrame===b);
+        const generation=progress.at(-1)?.workerGeneration;
+        return document.querySelector("#player-loop-hint")?.textContent
+          .includes("反映しました")&&audit.jobs.some(job=>
+            job.generation===generation&&job.start===a&&job.end===b&&
+            audit.results.some(result=>result.job===job.job&&
+              result.generation===generation&&result.ok===true));
+      },{timeout:20000},{a:terminalA,b:totalFrames});
+      const terminalLoopBefore=await page.evaluate(()=>{
+        const audit=window.__labAudit;
+        const progress=audit.messages.filter(message=>
+          message.type==="progress"&&message.processingMode==="worker").at(-1);
+        return {generation:progress?.workerGeneration,
+          missingFrames:progress?.missingFrames||0,
+          worklets:audit.worklets.length};
+      });
+      await page.evaluate(()=>{
+        const loop=document.querySelector("#player-loop-enabled");
+        loop.checked=false;
+        loop.dispatchEvent(new Event("change",{bubbles:true}));
+      });
+      await page.waitForFunction(({a,b,generation})=>{
+        const audit=window.__labAudit;
+        const activated=audit.messages.some(message=>
+          message.type==="worker-state-activated"&&
+          message.generation>generation);
+        const progress=audit.messages.some(message=>
+          message.type==="progress"&&message.processingMode==="worker"&&
+          !message.loopEnabled&&message.loopStartFrame===a&&
+          message.loopEndFrame===b);
+        return !document.querySelector("#player-loop-enabled")?.checked&&
+          activated&&progress&&document.querySelector("#player-loop-hint")
+            ?.textContent.includes("反映しました");
+      },{timeout:12000},{a:terminalA,b:totalFrames,
+        generation:terminalLoopBefore.generation});
+      const terminalGeneration=await page.evaluate(()=>{
+        const event=window.__labAudit.messages.filter(message=>
+          message.type==="worker-state-activated").at(-1);
+        return event?.generation;
+      });
+      assert.equal(await page.evaluate(generation=>window.__labAudit.jobs.some(job=>
+        job.generation===generation),terminalGeneration),false,
+        "disabling a loop at EOF must not render a replacement chunk from A");
+      assert.equal(await page.evaluate(()=>window.__labAudit.worklets.length),
+        terminalLoopBefore.worklets,
+        "terminal loop-off keeps the existing source-clock Worklet");
+      await page.waitForFunction(({end,missingBefore})=>{
+        const progress=window.__labAudit.messages.filter(message=>
+          message.type==="progress"&&message.processingMode==="worker");
+        const atEnd=progress.filter(message=>message.sourceFrame===end);
+        return atEnd.length>0&&atEnd.at(-1).missingFrames===missingBefore&&
+          progress.slice(progress.lastIndexOf(atEnd[0])).every(message=>
+            message.sourceFrame===end);
+      },{timeout:12000},{end:totalFrames,
+        missingBefore:terminalLoopBefore.missingFrames});
+
+      const missingBeforeEndSeek=await page.evaluate(()=>
+        window.__labAudit.messages.filter(message=>
+          message.type==="progress"&&message.processingMode==="worker")
+          .at(-1)?.missingFrames||0);
+      await page.focus("#wave-detail");
+      await page.keyboard.press("End");
+      await page.waitForFunction(({end,generation})=>
+        window.__labAudit.commands.some(command=>
+          command.type==="worker-seek-stage"&&
+          command.generation>generation&&command.frame===end-1),
+        {timeout:12000},{end:totalFrames,
+          generation:terminalGeneration});
+      const endSeek=await page.evaluate(generation=>
+        window.__labAudit.commands.findLast(command=>
+          command.type==="worker-seek-stage"&&
+          command.generation>generation),terminalGeneration);
+      assert.equal(endSeek.frame,totalFrames-1,JSON.stringify(endSeek));
+      assert.equal(endSeek.requiredChunks,1,
+        "the final unlooped seek requests only its available terminal chunk");
+      await page.waitForFunction(({generation,frame,missingBefore})=>
+        window.__labAudit.messages.some(message=>
+          message.type==="worker-state-activated"&&
+          message.generation===generation&&message.sourceFrame===frame&&
+          message.missingFrames===missingBefore),
+        {timeout:12000},{generation:endSeek.generation,
+          frame:totalFrames-1,missingBefore:missingBeforeEndSeek});
 
       assert.deepEqual(errors,[]);
       await page.evaluate(()=>document.querySelector("#stop").click());

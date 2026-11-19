@@ -370,6 +370,23 @@ export function createSourcePCMRenderer({
           position<segment.startFrame))||
         activeChunks.find(segment=>position===segment.endFrame)||
         activeChunks.find(segment=>position<segment.startFrame)||null;
+      if(!loopEnabled&&loopEndFrame===sourceFrames&&current&&
+         current.endFrame>=sourceFrames){
+        // The final source segment has no successor. Turning off a loop whose
+        // B is EOF must drain this retained PCM to EOF instead of staging A.
+        timeline.setLoopConfiguration(loopStartFrame,loopEndFrame,false);
+        renderedChunks.splice(0,renderedChunks.length,current);
+        const sequence=current.sequence+1;
+        nextRenderedSequence=sequence;
+        stagedWorkerState={kind:"terminal",generation,
+          frame:sourceFrames,sequence:current.sequence,speed,pitchSemitones,
+          loopStartFrame,loopEndFrame,loopEnabled:false,
+          firstChunkAccepted:true};
+        workerMode=true;
+        return {sourceFrame:sourceFrames,sequence,
+          bufferedSegments:renderedChunks.length,terminal:true,
+          activated:false};
+      }
       let frame,sequence;
       if(current){
         const currentIndex=activeChunks.indexOf(current);
@@ -546,6 +563,20 @@ export function createSourcePCMRenderer({
       const fadeFrames=Math.max(1,Math.round(.018*outputSampleRate));
       for(let i=0;i<len;i++){
         state=timeline.state;
+        if(stagedWorkerState?.kind==="terminal"&&state.ended&&
+           !state.loopEnabled){
+          const staged=stagedWorkerState;
+          const activated=timeline.setSpeed(staged.speed);
+          renderedChunks.length=0;
+          previousRendered=null;
+          renderedGeneration=staged.generation;
+          workerState={generation:staged.generation,speed:staged.speed,
+            pitchSemitones:staged.pitchSemitones};
+          stagedWorkerState=null;
+          workerActivation={...workerState,sourceFrame:sourceFrames,
+            revision:activated.revision,sampleOffset:i,terminal:true};
+          state=timeline.state;
+        }
         let position=timeline.sourceFrameAt(0);
         if(position===null){for(const ch of output)ch[i]=0;continue;}
         const seek=stagedWorkerState?.kind==="seek"&&

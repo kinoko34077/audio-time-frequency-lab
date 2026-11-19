@@ -272,6 +272,57 @@ test("disabling a Worker A/B loop exits at B without restarting the Worklet cloc
   assert.equal(p.statistics.missingFrames,0);
 });
 
+test("disabling a full-track Worker loop at its terminal chunk drains to EOF",()=>{
+  const p=createSourcePCMRenderer({sourceFrames:32,sourceSampleRate:8,
+    outputSampleRate:8,channelCount:1,speed:1,startFrame:28,
+    loopStartFrame:0,loopEndFrame:32,loopEnabled:true});
+  p.installRenderedChunk({generation:0,sequence:0,startFrame:28,endFrame:32,
+    speed:1,coreFrames:4,channels:[new Float32Array(6).fill(1)]});
+
+  const staged=p.stageRenderedState({generation:1,speed:1,
+    pitchSemitones:0,loopStartFrame:0,loopEndFrame:32,loopEnabled:false});
+  assert.equal(staged.terminal,true);
+  assert.equal(staged.sourceFrame,32,
+    "a terminal loop exit must not render a replacement from A");
+  assert.equal(staged.activated,false,
+    "the terminal generation waits for the retained final PCM to drain");
+  assert.equal(p.timeline.state.loopEnabled,false,
+    "the source clock stops wrapping as soon as loop-off is requested");
+
+  const output=[new Float32Array(8)];
+  assert.equal(p.renderBuffered(output),0);
+  assert.deepEqual(Array.from(output[0].slice(0,4)),[1,1,1,1]);
+  assert.deepEqual(Array.from(output[0].slice(4)),[0,0,0,0],
+    "the source clock exhausts instead of playing another loop lap");
+  assert.equal(p.workerState.generation,1);
+  assert.equal(p.timeline.state.sourceFrame,32);
+  assert.equal(p.timeline.state.ended,true);
+  assert.equal(p.takeWorkerActivation().sourceFrame,32);
+  assert.equal(p.statistics.missingFrames,0);
+});
+
+test("terminal loop exit applies changed Worker settings after the final PCM",()=>{
+  const p=createSourcePCMRenderer({sourceFrames:32,sourceSampleRate:8,
+    outputSampleRate:8,channelCount:1,speed:1,startFrame:28,
+    loopStartFrame:0,loopEndFrame:32,loopEnabled:true});
+  p.installRenderedChunk({generation:0,sequence:0,startFrame:28,endFrame:32,
+    speed:1,coreFrames:4,channels:[new Float32Array(6).fill(1)]});
+  const staged=p.stageRenderedState({generation:1,speed:1.5,
+    pitchSemitones:3,loopStartFrame:0,loopEndFrame:32,loopEnabled:false});
+  assert.equal(staged.terminal,true);
+  assert.equal(p.workerState.generation,0,
+    "the old generation remains active while its final PCM is audible");
+  const output=[new Float32Array(8)];
+  assert.equal(p.renderBuffered(output),0);
+  assert.deepEqual(Array.from(output[0].slice(0,4)),[1,1,1,1]);
+  assert.deepEqual(Array.from(output[0].slice(4)),[0,0,0,0]);
+  assert.deepEqual(p.workerState,{generation:1,speed:1.5,pitchSemitones:3});
+  assert.equal(p.timeline.state.speed,1.5);
+  assert.equal(p.timeline.state.ended,true);
+  assert.equal(p.takeWorkerActivation().terminal,true);
+  assert.equal(p.statistics.missingFrames,0);
+});
+
 test("staged Worker settings target the next chunk and keep its PCM fallback",()=>{
   const p=createSourcePCMRenderer({sourceFrames:32,sourceSampleRate:4,
     outputSampleRate:4,channelCount:1,speed:1,startFrame:0});
