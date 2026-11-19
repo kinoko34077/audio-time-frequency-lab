@@ -188,6 +188,7 @@ test("individual-period Worker applies and wraps edited source-frame A/B without
         const probe=audit.probe,pcm=new Float32Array(probe?.fftSize||0);
         probe?.getFloatTimeDomainData(pcm);
         return {sampleRate:audit.audioContext?.sampleRate,
+          sourceFrames:Number(document.querySelector("#player-loop-b")?.max),
           sourceFrame:progress?.sourceFrame,
           missingFrames:progress?.missingFrames||0,
           worklets:audit.worklets.length,model:document.querySelector("#lab-model")?.value,
@@ -477,7 +478,8 @@ test("individual-period Worker applies and wraps edited source-frame A/B without
       },{timeout:15000},{a:shiftedA,b:extendedB,
         generation:extendedLoop.generation});
 
-      const totalFrames=before.sampleRate*30;
+      const totalFrames=before.sourceFrames;
+      assert.ok(Number.isSafeInteger(totalFrames)&&totalFrames>0,before);
       const terminalA=totalFrames-12000;
       await page.evaluate(b=>{
         const input=document.querySelector("#player-loop-b");
