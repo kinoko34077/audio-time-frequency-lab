@@ -88,8 +88,10 @@ export async function createSourcePCMBridge({
     }
   });
   // Do not copy entire track to the worklet; these small snapshots are moved.
-  let requestId=0,closed=false,latest=null,scratchCached=null;
+  let requestId=0,closed=false,closureError=null,latest=null,scratchCached=null;
+  let refillRevision=0;
   const pending=new Map();
+  const closedFailure=()=>closureError??Error("PCM bridge disposed");
   let rustReadyResolve=null,rustReadyReject=null;
   const rejectPending=error=>{
     for(const ticket of pending.values()){
@@ -104,6 +106,7 @@ export async function createSourcePCMBridge({
     // Ask the processor to terminate before suppressing normal dispose().
     try{node.port.postMessage({type:"dispose"});}catch{}
     closed=true;
+    closureError=error;
     rustReadyReject?.(error);rustReadyResolve=null;rustReadyReject=null;
     node.port.onmessage=null;
     node.removeEventListener("processorerror",onProcessorError);
@@ -160,6 +163,23 @@ export async function createSourcePCMBridge({
     if(closed)return;
     postWindow(window,pin,refillId);
   };
+  const requestRefill=(frame,refillId,revision,attempt=0)=>{
+    void sendWindow(frame,null,currentSpeed,refillId).catch(error=>{
+      if(closed)return;
+      const preempted=error?.name==="AbortError"||
+        error?.message==="PCM window decode aborted";
+      if(preempted){
+        if(revision!==refillRevision)return;
+        if(attempt>=1){failProcessor(error);return;}
+        queueMicrotask(()=>{
+          if(!closed&&revision===refillRevision)
+            requestRefill(frame,refillId,revision,attempt+1);
+        });
+        return;
+      }
+      failProcessor(error);
+    });
+  };
   const primeLoop=async()=>{
     if(!loop)return;
     const endpoints=await Promise.all([
@@ -172,8 +192,7 @@ export async function createSourcePCMBridge({
     if(closed)return;
     const data=event.data||{};
     if(data.type==="need-window"){
-      void sendWindow(data.frame,null,currentSpeed,data.refillId)
-        .catch(error=>failProcessor(error));
+      requestRefill(data.frame,data.refillId,refillRevision);
     }else if(data.type==="rust-ready"){
       rustReadyResolve?.();rustReadyResolve=null;rustReadyReject=null;
     }else if(data.type==="rust-error"){
@@ -234,6 +253,7 @@ export async function createSourcePCMBridge({
   let seekRevision=0,scrubRevision=0,loopRevision=0;
   const updateLoop=(a,b,enabled,op)=>{
     if(closed)return Promise.reject(Error("PCM bridge disposed"));
+    refillRevision++;
     // Transfer both endpoint PCM windows and target loop configuration as
     // one message. No render quantum can see new pins with old A/B bounds.
     const revision=++loopRevision;
@@ -241,7 +261,7 @@ export async function createSourcePCMBridge({
       const endpoints=enabled?await Promise.all([
         windowSlice(a,1,"playback"),windowSlice(b-1,-1,"playback")
       ]):[];
-      if(closed)throw Error("PCM bridge disposed");
+      if(closed)throw closedFailure();
       if(revision!==loopRevision)return {stale:true};
       return submit({type:"loop-config",op,a,b,enabled,endpoints},
         endpoints.flatMap(w=>w.channels.map(ch=>ch.buffer)));
@@ -258,10 +278,11 @@ export async function createSourcePCMBridge({
       if(!Number.isSafeInteger(frame)||frame<0||frame>frames)
         return Promise.reject(RangeError("invalid source-frame seek"));
       if(closed)return Promise.reject(Error("PCM bridge disposed"));
+      refillRevision++;
       const revision=++seekRevision;
       const {start,channels}=await windowSlice(frame===frames?frames-1:frame,
         currentSpeed,"playback");
-      if(closed)throw Error("PCM bridge disposed");
+      if(closed)throw closedFailure();
       if(revision!==seekRevision)return {stale:true};
       // The source window and seek become one Worklet message, so prefetch
       // eviction cannot discard the target while protecting the old cursor.
@@ -280,6 +301,7 @@ export async function createSourcePCMBridge({
         throw RangeError("invalid scratch sample frame");
       const wantedSpeed=validatePlaybackSpeed(speed);
       if(closed)throw Error("PCM bridge disposed");
+      refillRevision++;
       currentSpeed=wantedSpeed;
       const revision=++scrubRevision;
       // No 64k-frame PCM copy for each pointermove. The first scratch
@@ -292,7 +314,7 @@ export async function createSourcePCMBridge({
       const send=()=>{
         return (async()=>{
           const {start,channels}=await windowSlice(frame,wantedSpeed,"scrub");
-          if(closed)throw Error("PCM bridge disposed");
+          if(closed)throw closedFailure();
           if(revision!==scrubRevision)return {stale:true};
           scratchCached={start,end:start+channels[0].length};
           return submit({type:"scrub",op:"scrub",start,channels,

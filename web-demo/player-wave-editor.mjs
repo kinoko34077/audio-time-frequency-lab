@@ -5,6 +5,8 @@
 // or proprietary UI imagery are copied.
 import {scrubSpeed,releaseScrubSpeed} from "./scrub-kinetics.mjs";
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const DETAIL_PEAK_FRAMES=128;
+const DETAIL_READ_FRAMES=32_768;
 const timestamp=seconds=>{
   const value=Math.max(0,seconds);
   return Math.floor(value/60)+":"+(value%60).toFixed(2).padStart(5,"0");
@@ -41,8 +43,10 @@ export function createPlayerWaveEditor({
   visibleStart,visibleEnd,getPosition,onPosition,onStart,onAB,onScrubState,
   onScrubMotion=()=>{},onHoverFrame=()=>false,onHoverEnd=()=>{}
 }){
-  let channels=null,source=null,detailChannels=null,detailStart=0,detailEnd=0;
-  let detailPending=null,detailFailedKey=null,detailRevision=0;
+  let channels=null,source=null,detailPeaks=null,detailStart=0,detailEnd=0;
+  let detailBlockFrames=0;
+  let detailPending=null,detailFailedKey=null,detailRetriedKey=null;
+  let detailRetryTimer=null,detailRevision=0;
   let rate=48000,levels=null,frames=0,spanFrames=rate*8;
   let lastFrame=NaN,lastSpan=NaN,lastWidth=0,lastHeight=0;
   const pointers=new Map();
@@ -56,8 +60,11 @@ export function createPlayerWaveEditor({
     source=nextChannels&&typeof nextChannels.read==='function'?
       nextChannels:null;
     channels=source?null:nextChannels;
-    detailChannels=null;detailStart=detailEnd=0;detailPending=null;
-    detailFailedKey=null;detailRevision++;
+    if(detailRetryTimer!==null)clearTimeout(detailRetryTimer);
+    detailRetryTimer=null;
+    detailPeaks=null;detailStart=detailEnd=0;detailBlockFrames=0;
+    detailPending=null;
+    detailFailedKey=null;detailRetriedKey=null;detailRevision++;
     rate=nextRate||48000;
     frames=source?.sourceFrames||channels?.[0]?.length||0;
     levels=channels&&frames?peakHierarchy(channels):null;
@@ -71,10 +78,14 @@ export function createPlayerWaveEditor({
     if(to<=from)return [0,0];
     let low=1,high=-1;
     if(source){
-      if(detailChannels&&from>=detailStart&&to<=detailEnd){
-        const begin=from-detailStart,end=to-detailStart;
-        for(let i=begin;i<end;i++)for(const channel of detailChannels){
-          const value=channel[i];low=Math.min(low,value);high=Math.max(high,value);
+      if(detailPeaks&&from>=detailStart&&to<=detailEnd){
+        const begin=clamp(Math.floor((from-detailStart)/detailBlockFrames),
+          0,detailPeaks.low.length-1);
+        const end=clamp(Math.floor((to-1-detailStart)/detailBlockFrames),
+          begin,detailPeaks.low.length-1);
+        for(let i=begin;i<=end;i++){
+          low=Math.min(low,detailPeaks.low[i]);
+          high=Math.max(high,detailPeaks.high[i]);
         }
       }else if(source.overviewPeaks?.length){
         const peaks=source.overviewPeaks;
@@ -107,19 +118,79 @@ export function createPlayerWaveEditor({
     return [low===1&&high===-1?0:low,high===-1&&low===1?0:high];
   }
   function requestDetail(start,end){
-    if(!source||detailPending||spanFrames>(source.maxReadFrames||262_144)||
-       detailChannels&&start>=detailStart&&end<=detailEnd)return;
+    if(!source||detailPending)return;
     const from=clamp(Math.floor(start),0,Math.max(0,frames-1));
     const to=clamp(Math.ceil(end),from+1,frames);
     const key=from+':'+to;
     if(detailFailedKey===key)return;
+    const blockFrames=Math.max(1,Math.min(DETAIL_PEAK_FRAMES,
+      Math.floor(spanFrames/Math.max(1,canvas.clientWidth*2))));
+    if(detailPeaks&&from>=detailStart&&to<=detailEnd&&
+       detailBlockFrames<=blockFrames)return;
     const reader=source,revision=++detailRevision;
-    detailPending=reader.read(from,to-from,{priority:'waveform'}).then(range=>{
+    const summaryStart=Math.floor(from/blockFrames)*blockFrames;
+    const summaryEnd=Math.min(frames,
+      Math.ceil(to/blockFrames)*blockFrames);
+    const summaryCount=Math.ceil((summaryEnd-summaryStart)/blockFrames);
+    const low=new Float32Array(summaryCount),high=new Float32Array(summaryCount);
+    low.fill(Infinity);high.fill(-Infinity);
+    const maxRead=Number.isSafeInteger(reader.maxReadFrames)?
+      reader.maxReadFrames:DETAIL_READ_FRAMES;
+    const readFrames=Math.max(1,Math.min(DETAIL_READ_FRAMES,maxRead));
+    detailPending=(async()=>{
+      let chunkIndex=0;
+      for(let chunkStart=summaryStart;chunkStart<summaryEnd;){
+        if(source!==reader||revision!==detailRevision)return;
+        const count=Math.min(readFrames,summaryEnd-chunkStart);
+        const range=await reader.read(chunkStart,count,{priority:'waveform'});
+        if(source!==reader||revision!==detailRevision)return;
+        if(range?.startFrame!==chunkStart||!Array.isArray(range.channels)||
+           !range.channels.length||
+           !range.channels.every(channel=>channel instanceof Float32Array&&
+             channel.length===count))
+          throw Error('progressive waveform source returned an invalid PCM range');
+        for(let offset=0;offset<count;offset++){
+          const bucket=Math.floor((chunkStart+offset-summaryStart)/
+            blockFrames);
+          for(const channel of range.channels){
+            const value=channel[offset];
+            if(value<low[bucket])low[bucket]=value;
+            if(value>high[bucket])high[bucket]=value;
+          }
+        }
+        chunkStart+=count;
+        chunkIndex++;
+        // Let play, scrub and paint work run before summarizing another block.
+        if(chunkIndex%4===0&&chunkStart<summaryEnd)
+          await new Promise(resolve=>setTimeout(resolve,0));
+      }
       if(source!==reader||revision!==detailRevision)return;
-      detailStart=range.startFrame;detailEnd=range.startFrame+range.channels[0].length;
-      detailChannels=range.channels;detailFailedKey=null;
-    }).catch(()=>{
-      if(source===reader&&revision===detailRevision)detailFailedKey=key;
+      for(let i=0;i<summaryCount;i++){
+        if(!Number.isFinite(low[i]))low[i]=0;
+        if(!Number.isFinite(high[i]))high[i]=0;
+      }
+      detailStart=summaryStart;detailEnd=summaryEnd;
+      detailBlockFrames=blockFrames;detailPeaks={low,high};
+      detailFailedKey=null;detailRetriedKey=null;
+      if(detailRetryTimer!==null)clearTimeout(detailRetryTimer);
+      detailRetryTimer=null;
+    })().catch(error=>{
+      if(source!==reader||revision!==detailRevision)return;
+      detailFailedKey=key;
+      if(error?.name==='AbortError'&&detailRetriedKey!==key){
+        if(detailRetryTimer!==null)clearTimeout(detailRetryTimer);
+        detailRetryTimer=setTimeout(()=>{
+          detailRetryTimer=null;
+          const rawStart=center()-spanFrames/2;
+          const currentFrom=clamp(Math.floor(Math.max(0,rawStart)),
+            0,Math.max(0,frames-1));
+          const currentTo=clamp(Math.ceil(Math.min(frames,
+            rawStart+spanFrames)),currentFrom+1,frames);
+          if(source!==reader||revision!==detailRevision||
+             currentFrom+':'+currentTo!==key)return;
+          detailRetriedKey=key;detailFailedKey=null;refresh(true);
+        },160);
+      }
     }).finally(()=>{
       if(source===reader&&revision===detailRevision){
         detailPending=null;refresh(true);
