@@ -92,3 +92,44 @@ test('replacement disposal prevents later reads from using the previous file',as
   source.dispose();
   await assert.rejects(source.read(0,16),/disposed/);
 });
+
+test('closes an AudioSample that resolves after its PCM read is aborted',async()=>{
+  let resolveNext,markNextCalled;
+  const nextCalled=new Promise(resolve=>{markNextCalled=resolve;});
+  let closeCount=0;
+  const track={canDecode:async()=>true,getSampleRate:async()=>48_000,
+    getNumberOfChannels:async()=>1};
+  const media={ALL_FORMATS:[],
+    Input:class{
+      async canRead(){return true;}
+      async getPrimaryAudioTrack(){return track;}
+      async getFirstTimestamp(){return 0;}
+      async getDurationFromMetadata(){return 8192/48_000;}
+      dispose(){}
+    },
+    BlobSource:class{},
+    AudioSampleSink:class{
+      samples(){
+        return {[Symbol.asyncIterator](){return this;},
+          next(){markNextCalled();return new Promise(resolve=>{resolveNext=resolve;});},
+          return(){return Promise.resolve({done:true});}};
+      }
+    }
+  };
+  const source=await createProgressiveAudioSource({name:'pending.wav'},
+    {media,windowFrames:1024});
+  const read=source.read(0,1024,{priority:'playback'});
+  try{
+    await nextCalled;
+    source.dispose();
+    await assert.rejects(read,/disposed/);
+    resolveNext({done:false,value:{timestamp:0,sampleRate:48_000,
+      numberOfFrames:1024,numberOfChannels:1,
+      copyTo(){},close(){closeCount++;}}});
+    await Promise.resolve();
+    await Promise.resolve();
+    assert.equal(closeCount,1);
+  }finally{
+    source.dispose();
+  }
+});

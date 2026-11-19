@@ -64,10 +64,13 @@ async function collectWindow({sink,sourceStartTime,sampleRate,startFrame,
     if(signal?.aborted)abortHandler();
     else signal?.addEventListener('abort',abortHandler,{once:true});
   });
+  let pendingNext=null;
   try{
     while(true){
       if(signal?.aborted)throw new DOMException('PCM window decode aborted','AbortError');
-      const next=await Promise.race([samples.next(),aborted]);
+      pendingNext=samples.next();
+      const next=await Promise.race([pendingNext,aborted]);
+      pendingNext=null;
       if(next.done)break;
       decoded.push(next.value);
     }
@@ -75,6 +78,13 @@ async function collectWindow({sink,sourceStartTime,sampleRate,startFrame,
       startFrame,channels});
   }catch(error){
     for(const sample of decoded)sample?.close?.();
+    if(pendingNext){
+      void pendingNext.then(next=>{
+        if(!next.done){
+          try{next.value?.close?.();}catch{}
+        }
+      },()=>{});
+    }
     throw error;
   }finally{
     signal?.removeEventListener('abort',abortHandler);
