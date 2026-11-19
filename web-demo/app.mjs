@@ -2297,7 +2297,7 @@ async function load(file){
     controls.render.disabled=true;controls.download.disabled=true;
     $("#progress").value=0;
     indicator("停止中 · 音声選択済み");
-    message("再生できます。");
+    message("読み込み完了。再生できます。");
     void sampleSourceOverview(state.source,token);
   }catch(error){
     candidate?.dispose();
