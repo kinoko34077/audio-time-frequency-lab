@@ -1016,6 +1016,8 @@ test("shared A/B updates every realtime model and compact numeric controls stay 
     await (await page.$("#audio-file")).uploadFile(recording);
     await page.waitForSelector("#play-main:not([disabled])",{timeout:20000});
     await page.click("#play-main");
+    await page.waitForFunction(()=>document.querySelector("#rt-telemetry")
+      ?.dataset.pcmTransport==="pv-phase-locked",{timeout:20000});
     const routes={spectral:"spectral-realtime",pv:"pv-phase-locked",
       wsola:"wsola-source-time",dual:"dual-transient-source-time",
       am:"am-envelope-source-time",granular:"granular-experimental"};
