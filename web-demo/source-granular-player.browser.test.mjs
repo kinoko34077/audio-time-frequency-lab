@@ -165,6 +165,8 @@ test("R3 opt-in real page applies precise signed speed/pitch without replacing t
     });
     await page.waitForFunction(()=>document.querySelector("#granular-optin-status")
       ?.dataset.renderPitch==="7.1234",{timeout:20000});
+    await page.waitForFunction(()=>document.querySelector("#granular-optin-status")
+      ?.dataset.processingState==="applied",{timeout:20000});
     await page.evaluate(()=>{
       const wave=document.querySelector("#wave"),r=wave.getBoundingClientRect();
       wave.dispatchEvent(new PointerEvent("pointerdown",{
@@ -186,7 +188,8 @@ test("R3 opt-in real page applies precise signed speed/pitch without replacing t
     assert.equal(after.pitch,"7.1234");
     assert.equal(after.speed,"0");
     assert.ok(Number.isFinite(Number(after.renderRevision)));
-    assert.match(after.note,/音声処理済み|音声反映前に上書き/);
+    assert.equal(after.note,
+      "再生中・反映済み・Granular\n0.000×・+7.123半音");
 
     // Actual browser pointer movement, not a synthetic pointerdown fixture:
     // scrub a still-audible 0× granular stream across the waveform. It must
