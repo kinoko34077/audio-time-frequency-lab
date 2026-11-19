@@ -1020,7 +1020,8 @@ test("shared A/B updates every realtime model and compact numeric controls stay 
       wsola:"wsola-source-time",dual:"dual-transient-source-time",
       am:"am-envelope-source-time",granular:"granular-experimental"};
     for(const [index,[mode,route]] of Object.entries(routes).entries()){
-      if(mode!=="spectral")await page.evaluate(selected=>{
+      // Keep this route matrix independent of the user's current default model.
+      await page.evaluate(selected=>{
         const input=document.getElementById("lab-model");
         input.value=selected;input.dispatchEvent(new Event("change",{bubbles:true}));
       },mode);
