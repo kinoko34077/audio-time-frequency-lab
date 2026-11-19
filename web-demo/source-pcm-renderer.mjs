@@ -386,10 +386,9 @@ export function createSourcePCMRenderer({
           position<segment.startFrame))||
         activeChunks.find(segment=>position===segment.endFrame)||
         activeChunks.find(segment=>position<segment.startFrame)||null;
-      if(!loopEnabled&&loopEndFrame===sourceFrames&&current&&
-         current.endFrame>=sourceFrames){
-        // The final source segment has no successor. Turning off a loop whose
-        // B is EOF must drain this retained PCM to EOF instead of staging A.
+      if(!loopEnabled&&current&&current.endFrame>=sourceFrames){
+        // The final source segment has no successor. Apply any unlooped
+        // settings after its retained PCM drains, even if saved B is earlier.
         timeline.setLoopConfiguration(loopStartFrame,loopEndFrame,false);
         renderedChunks.splice(0,renderedChunks.length,current);
         const sequence=current.sequence+1;

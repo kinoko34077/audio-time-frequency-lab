@@ -348,6 +348,37 @@ test("terminal loop exit applies changed Worker settings after the final PCM",()
   assert.equal(p.statistics.missingFrames,0);
 });
 
+test("unlooped Worker settings at EOF activate after the retained final PCM drains",()=>{
+  const p=createSourcePCMRenderer({sourceFrames:32,sourceSampleRate:8,
+    outputSampleRate:8,channelCount:1,speed:1,startFrame:28,
+    loopStartFrame:4,loopEndFrame:12,loopEnabled:false});
+  p.installRenderedChunk({generation:0,sequence:0,startFrame:28,endFrame:32,
+    speed:1,coreFrames:4,channels:[new Float32Array(4).fill(1)]});
+  p.renderBuffered([new Float32Array(3)]);
+  assert.equal(p.timeline.state.sourceFrame,31);
+
+  const staged=p.stageRenderedState({generation:1,speed:1.25,
+    pitchSemitones:2,loopStartFrame:4,loopEndFrame:16,loopEnabled:false});
+  assert.equal(staged.terminal,true);
+  assert.equal(staged.sourceFrame,32);
+  p.renderBuffered([new Float32Array(2)]);
+  assert.deepEqual(p.workerState,{generation:1,speed:1.25,pitchSemitones:2});
+  assert.equal(p.takeWorkerActivation().terminal,true);
+  assert.equal(p.timeline.state.ended,true);
+  assert.equal(p.statistics.missingFrames,0);
+
+  const reenabled=p.stageRenderedState({generation:2,speed:1.25,
+    pitchSemitones:2,loopStartFrame:4,loopEndFrame:16,loopEnabled:true});
+  assert.equal(reenabled.sourceFrame,4);
+  p.installRenderedChunk({generation:2,sequence:reenabled.sequence,
+    startFrame:4,endFrame:16,speed:1.25,coreFrames:12,
+    channels:[new Float32Array(12).fill(2)]});
+  p.renderBuffered([new Float32Array(1)]);
+  assert.equal(p.workerState.generation,2);
+  assert.equal(p.timeline.state.loopEnabled,true);
+  assert.equal(p.statistics.missingFrames,0);
+});
+
 test("a Worker loop can be re-enabled after terminal loop-off drains",()=>{
   const p=createSourcePCMRenderer({sourceFrames:32,sourceSampleRate:8,
     outputSampleRate:8,channelCount:1,speed:1,startFrame:28,
