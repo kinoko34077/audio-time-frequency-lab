@@ -223,6 +223,22 @@ test('full Chrome: inherited Rust AudioWorklet live independent speed/pitch UI',
    startupOutputIsolation.gains.every(value=>value===0),
    'all device and MediaStream output routes must be muted before PCM verification: '+
     JSON.stringify(startupOutputIsolation));
+  await page.click('#play-main');
+  await page.waitForFunction(()=>{
+    const status=document.querySelector('#granular-optin-status');
+    return status?.dataset.renderRunning==='false'&&
+      status.textContent.startsWith('一時停止中・');
+  },{timeout:10000});
+  await sleep(100);
+  assert.ok((await page.$eval('#granular-optin-status',e=>e.textContent))
+    .startsWith('一時停止中・'),
+    'a late silent receipt must not replace paused with stopped');
+  await page.click('#play-main');
+  await page.waitForFunction(()=>{
+    const status=document.querySelector('#granular-optin-status');
+    return status?.dataset.renderRunning==='true'&&
+      status.textContent.startsWith('再生中・');
+  },{timeout:10000});
   const setSpeed=async speed=>{
    const previous=Number(await page.$eval('#granular-optin-status',
     e=>e.dataset.renderRevision||0));
@@ -234,6 +250,7 @@ test('full Chrome: inherited Rust AudioWorklet live independent speed/pitch UI',
     return Number(document.querySelector('#granular-speed-value')?.value)===speed&&
       status?.dataset.processingState==='applied'&&
       status?.dataset.renderRunning==='true'&&
+      Number(status?.dataset.renderSpeed)===speed&&
       Number(status?.dataset.renderRevision)>previous;
    },{timeout:10000},{speed,previous});
    const statusText=await page.$eval('#granular-optin-status',e=>e.textContent);

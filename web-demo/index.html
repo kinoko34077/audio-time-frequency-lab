@@ -108,7 +108,7 @@
             <button id="play-wet" disabled>▶ モデルで再生</button>
           </div>
           <div class="audio-status-row">
-            <span id="audio-state-summary" role="status" aria-live="polite">停止中</span>
+            <p id="granular-optin-status" class="player-processing-status" role="status" aria-live="polite">停止中・次回再生で設定を適用</p>
             <button type="button" id="audio-diagnostics-toggle" aria-controls="runtime-hud" aria-expanded="false">詳細</button>
           </div>
         </div></div>
@@ -135,7 +135,6 @@
             <p class="lab-note player-quality-note">速度−8〜+8倍、0倍も発音。音程±12半音。極短ループのクリックや実機音質は検証中です。</p>
           </details>
           <p id="granular-rail-note" class="lab-note" aria-live="polite"></p>
-          <p id="granular-optin-status" class="lab-note player-processing-status" role="status" aria-live="polite">再生時に処理条件を適用します。</p>
         </section>
         <section class="player-loop" id="player-loop-controls" aria-label="A/B区間のループ" hidden>
           <div class="player-loop-top">

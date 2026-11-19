@@ -350,6 +350,7 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
       pitchSemitones:this.processingMode==="worker"?
         this.workerPitchSemitones:this.synth?.state.pitchSemitones??null,
       processingMode:this.processingMode,
+      speed:this.renderer.timeline.state.speed,
       outputFrame:typeof currentFrame==="number"?currentFrame:null,
       outputTime:typeof currentTime==="number"?currentTime:null,
       sourceFrame,missingFramesInBlock:missingInBlock,

@@ -20,7 +20,8 @@ import {reconcileFrequencyBounds} from "./frequency-bounds.mjs";
 import {prepareStreamSettings} from "./stream-parameter-contract.mjs";
 import {displaySourceFrameFromProgress} from "./player-display-clock.mjs";
 import {createPlaybackFeedback} from "./playback-feedback.mjs";
-import {formatPlaybackStatus} from "./playback-status.mjs";
+import {formatPlaybackStatus,rendererMatchesSelection,
+  transportFromReceipt} from "./playback-status.mjs";
 import {axisShiftUnits,axisShiftCanonical,axisShiftView} from "./axis-shift-view.mjs";
 
 const $=id=>document.querySelector(id);
@@ -1549,10 +1550,26 @@ async function play(mode="wet",offset=null){
             }else if(data.type==="render-applied"){
               status.dataset.renderRevision=String(data.revision);
               status.dataset.renderPitch=String(data.pitchSemitones);
+              status.dataset.renderSpeed=String(data.speed);
               status.dataset.renderFrame=String(data.sourceFrame);
               status.dataset.renderRunning=String(data.running);
-              setPlayerProcessingStatus("applied",{
-                transport:data.running?"playing":"stopped"});
+              const matchesSelection=rendererMatchesSelection({
+                processingMode:data.processingMode,
+                selectedMode:mode==="player"?lab.mode:activeSynthMode,
+                individual:mode==="player"&&lab.individual,speed:data.speed,
+                selectedSpeed:granular.speed,
+                pitchSemitones:data.pitchSemitones,
+                selectedPitch:granular.pitch
+              });
+              if(matchesSelection){
+                setPlayerProcessingStatus("applied",{
+                  transport:transportFromReceipt({
+                    paused:state.player?.paused===true,running:data.running
+                  })});
+              }else if(!["unsupported","failed"].includes(
+                status.dataset.processingState)){
+                setPlayerProcessingStatus("pending");
+              }
               setPlayerProcessingDetail("PCM revision "+data.revision+
                 " · sourceFrame "+data.sourceFrame+
                 " · cache不足 "+data.missingFramesInBlock);

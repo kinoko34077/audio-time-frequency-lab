@@ -26,3 +26,13 @@ export function formatPlaybackStatus({transport,phase,model,individual=false,
   return `${transportLabel}・${phaseLabel}・${selectedModel}\n`+
     `${signed(speed,3)}×・${signed(pitch,3)}半音`;
 }
+
+export function rendererMatchesSelection({processingMode,selectedMode,
+  individual=false,speed,selectedSpeed,pitchSemitones,selectedPitch}){
+  return !individual&&processingMode===selectedMode&&
+    speed===selectedSpeed&&pitchSemitones===selectedPitch;
+}
+
+export function transportFromReceipt({paused=false,running=false}){
+  return paused?'paused':running?'playing':'stopped';
+}
