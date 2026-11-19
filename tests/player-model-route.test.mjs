@@ -16,11 +16,15 @@ test("selected engine has explicit source-time and A/B capabilities, not Granula
       const cap=primaryModelCapability(model,speed,{individual:true});
       assert.equal(cap.supported,false);
       assert.match(cap.reason,/未対応/);
-      assert.equal(cap.sampleAB,false);
+      // A/B belongs to the legacy Worker route; speed support is checked separately.
+      assert.equal(cap.sampleAB,true);
       assert.equal(cap.signed,false);
     }
-    for(const speed of [.5,1,1.237,2])
-      assert.equal(primaryModelCapability(model,speed,{individual:true}).supported,true);
+    for(const speed of [.5,1,1.237,2]){
+      const cap=primaryModelCapability(model,speed,{individual:true});
+      assert.equal(cap.supported,true);
+      assert.equal(cap.sampleAB,true);
+    }
   }
   assert.equal(primaryModelCapability("spectral",0).realtime,true);
   assert.equal(primaryModelCapability("live",1).realtime,true);
@@ -32,17 +36,17 @@ test("selected engine has explicit source-time and A/B capabilities, not Granula
   assert.equal(primaryModelCapability("pv",0,{individual:true}).supported,false);
   assert.equal(primaryModelCapability("pv",0,{individual:true}).realtime,false);
   assert.equal(primaryModelCapability("pv",1,{individual:true}).supported,true);
-  assert.equal(primaryModelCapability("pv",1,{individual:true}).sampleAB,false);
+  assert.equal(primaryModelCapability("pv",1,{individual:true}).sampleAB,true);
   assert.equal(primaryModelCapability("wsola",0).realtime,true);
   assert.equal(primaryModelCapability("wsola",0,{individual:true}).supported,false);
-  assert.equal(primaryModelCapability("wsola",1,{individual:true}).sampleAB,false);
+  assert.equal(primaryModelCapability("wsola",1,{individual:true}).sampleAB,true);
   assert.equal(primaryModelCapability("dual",0).realtime,true);
   assert.equal(primaryModelCapability("dual",0,{individual:true}).supported,false);
-  assert.equal(primaryModelCapability("dual",1,{individual:true}).sampleAB,false);
+  assert.equal(primaryModelCapability("dual",1,{individual:true}).sampleAB,true);
   assert.equal(primaryModelCapability("am",0).realtime,true);
   assert.equal(primaryModelCapability("am",-1).sampleAB,true);
   assert.equal(primaryModelCapability("am",0,{individual:true}).supported,false);
-  assert.equal(primaryModelCapability("am",1,{individual:true}).sampleAB,false);
+  assert.equal(primaryModelCapability("am",1,{individual:true}).sampleAB,true);
   assert.throws(()=>primaryModelCapability("wrong",1),RangeError);
   assert.throws(()=>primaryModelCapability("live",9),RangeError);
 });

@@ -43,6 +43,10 @@ export function createSourcePCMRenderer({
   let stagedWorkerState=null,workerActivation=null;
   let workerState={generation:0,speed,pitchSemitones:0};
   let workerTransitionLeft=0;
+  const nextRenderedFrame=(endFrame,loopState=timeline.state)=>
+    loopState.loopEnabled&&endFrame>=loopState.loopEndFrame?
+      loopState.loopStartFrame:
+      !loopState.loopEnabled&&endFrame>=sourceFrames?sourceFrames:endFrame;
   const find=(index)=>{
     for(let i=windows.length-1;i>=0;i--){
       const w=windows[i];
@@ -280,7 +284,11 @@ export function createSourcePCMRenderer({
         const previous=staged.preparedChunks.at(-1)||null;
         const expectedSequence=previous?previous.sequence+1:staged.sequence;
         const expectedStart=previous?
-          (previous.endFrame>=sourceFrames?0:previous.endFrame):staged.frame;
+          nextRenderedFrame(previous.endFrame,{
+            loopEnabled:staged.loopEnabled??timeline.state.loopEnabled,
+            loopStartFrame:staged.loopStartFrame??timeline.state.loopStartFrame,
+            loopEndFrame:staged.loopEndFrame??timeline.state.loopEndFrame
+          }):staged.frame;
         if(renderedChunks.length+staged.preparedChunks.length>=
            RENDERED_CHUNK_SLOTS)return false;
         if(queueSequence!==expectedSequence||startFrame!==expectedStart)
@@ -314,14 +322,20 @@ export function createSourcePCMRenderer({
       if(renderedChunks.length>=RENDERED_CHUNK_SLOTS)
         throw RangeError("rendered PCM chunk queue full");
       const previous=renderedChunks.at(-1)||previousRendered;
+      const retiringLoopHandoff=staged&&!staged.firstChunkAccepted&&
+        previous?.retireAfterLoop&&queueSequence===previous.sequence+1&&
+        startFrame===staged.frame;
       const lateHandoffResult=
         (active&&stagedWorkerState&&stagedWorkerState.kind!=="seek"&&
           queueSequence>stagedWorkerState.sequence)||
         (staged&&!staged.firstChunkAccepted&&
           queueSequence===staged.sequence);
       if(previous){
-        const expected=previous.endFrame>=sourceFrames?0:previous.endFrame;
-        if(startFrame!==expected||queueSequence!==previous.sequence+1){
+        const expected=nextRenderedFrame(previous.endFrame,
+          staged&&staged.kind!=="seek"&&queueSequence>=staged.sequence?
+            staged:timeline.state);
+        if((startFrame!==expected&&!retiringLoopHandoff)||
+           queueSequence!==previous.sequence+1){
           if(lateHandoffResult)return false;
           throw RangeError("rendered PCM chunks are not source-contiguous");
         }
@@ -339,43 +353,123 @@ export function createSourcePCMRenderer({
       return renderedChunks.length;
     },
     /** Stage a new Worker configuration after the currently audible chunk. */
-    stageRenderedState({generation,speed,pitchSemitones}={}){
+    stageRenderedState({generation,speed,pitchSemitones,
+      loopStartFrame=timeline.state.loopStartFrame,
+      loopEndFrame=timeline.state.loopEndFrame,
+      loopEnabled=timeline.state.loopEnabled}={}){
       if(!Number.isSafeInteger(generation)||generation<=renderedGeneration||
          !Number.isFinite(speed)||speed<.5||speed>2||
-         !Number.isFinite(pitchSemitones)||pitchSemitones<-12||pitchSemitones>12)
+         !Number.isFinite(pitchSemitones)||pitchSemitones<-12||pitchSemitones>12||
+         !Number.isSafeInteger(loopStartFrame)||loopStartFrame<0||
+         !Number.isSafeInteger(loopEndFrame)||loopStartFrame>=loopEndFrame||
+         loopEndFrame>sourceFrames||typeof loopEnabled!=="boolean")
         throw RangeError("invalid staged Worker playback state");
       const state=timeline.state;
       const position=state.sourceFrame;
+      if(state.ended){
+        if(loopEnabled)
+          return api.stageRenderedSeekState({generation,
+            frame:loopStartFrame,speed,pitchSemitones,requiredChunks:1,
+            loopStartFrame,loopEndFrame,loopEnabled});
+        timeline.setLoopConfiguration(loopStartFrame,loopEndFrame,false);
+        renderedChunks.length=0;
+        previousRendered=null;
+        stagedWorkerState={kind:"terminal",generation,frame:sourceFrames,
+          sequence:nextRenderedSequence,speed,pitchSemitones,
+          loopStartFrame,loopEndFrame,loopEnabled:false,
+          firstChunkAccepted:true};
+        workerMode=true;
+        return {sourceFrame:sourceFrames,sequence:nextRenderedSequence,
+          bufferedSegments:0,terminal:true,activated:false};
+      }
       const activeChunks=renderedChunks.filter(segment=>
         segment.generation===renderedGeneration);
       const current=activeChunks.find(segment=>
         (position>=segment.startFrame&&position<segment.endFrame)||
-        (state.loopEnabled&&segment.endFrame===sourceFrames&&
+        (state.loopEnabled&&segment.endFrame>=state.loopEndFrame&&
           position<segment.startFrame))||
         activeChunks.find(segment=>position===segment.endFrame)||
         activeChunks.find(segment=>position<segment.startFrame)||null;
+      if(!loopEnabled&&current&&current.endFrame>=sourceFrames){
+        // The final source segment has no successor. Apply any unlooped
+        // settings after its retained PCM drains, even if saved B is earlier.
+        timeline.setLoopConfiguration(loopStartFrame,loopEndFrame,false);
+        renderedChunks.splice(0,renderedChunks.length,current);
+        const sequence=current.sequence+1;
+        nextRenderedSequence=sequence;
+        stagedWorkerState={kind:"terminal",generation,
+          frame:sourceFrames,sequence:current.sequence,speed,pitchSemitones,
+          loopStartFrame,loopEndFrame,loopEnabled:false,
+          firstChunkAccepted:true};
+        workerMode=true;
+        return {sourceFrame:sourceFrames,sequence,
+          bufferedSegments:renderedChunks.length,terminal:true,
+          activated:false};
+      }
       let frame,sequence;
       if(current){
         const currentIndex=activeChunks.indexOf(current);
-        const retained=activeChunks.slice(currentIndex,currentIndex+2);
-        frame=current.endFrame>=sourceFrames?0:current.endFrame;
+        let retained=activeChunks.slice(currentIndex,currentIndex+2);
+        const boundary=nextRenderedFrame(current.endFrame,state);
+        if(!loopEnabled&&state.loopEnabled&&
+           current.endFrame>=state.loopEndFrame){
+          frame=loopEndFrame<sourceFrames?loopEndFrame:loopStartFrame;
+          if(current.startFrame<=state.loopStartFrame)
+            current.retireAfterLoop=true;
+        }else if(loopEnabled){
+          const positionOutsideLoop=position<loopStartFrame||
+            position>=loopEndFrame;
+          const continuesInsideNewLoop=current.endFrame>=loopStartFrame&&
+            current.endFrame<loopEndFrame;
+          frame=positionOutsideLoop?loopStartFrame:
+            continuesInsideNewLoop?current.endFrame:
+            boundary>=loopStartFrame&&boundary<loopEndFrame?
+              boundary:loopStartFrame;
+        }else frame=boundary;
+        const loopChanged=state.loopEnabled!==loopEnabled||
+          state.loopStartFrame!==loopStartFrame||
+          state.loopEndFrame!==loopEndFrame;
+        if(loopChanged&&state.loopEnabled&&loopEnabled&&
+           current.startFrame<=state.loopStartFrame&&
+           current.endFrame>=state.loopEndFrame)
+          current.retireAfterLoop=true;
+        if(loopChanged&&state.loopEnabled&&loopEnabled&&
+           current.endFrame>=state.loopEndFrame&&
+           (frame<current.startFrame||frame>current.endFrame)){
+          current.retireAfterLoop=true;
+          // A new A beyond the current loop cannot consume already queued
+          // repetitions of the old loop. Keep only the audible old segment;
+          // the next sequence is reserved for the staged new A boundary.
+          retained=[current];
+        }
+        if(loopEnabled&&frame===loopStartFrame&&
+           current.startFrame===loopStartFrame&&
+           current.endFrame>=loopEndFrame)
+          current.retireAfterLoop=true;
+        // Keep old PCM intact while the replacement Worker chunk renders.
+        // New loop bounds apply atomically at generation handoff.
         sequence=current.sequence+1;
         renderedChunks.splice(0,renderedChunks.length,...retained);
       }else if(activeChunks.length&&
           position>=activeChunks.at(-1).endFrame){
         const consumed=activeChunks.at(-1);
-        frame=Math.floor(position);
+        const cursor=Math.floor(position);
+        frame=loopEnabled&&(cursor<loopStartFrame||cursor>=loopEndFrame)?
+          loopStartFrame:cursor;
         sequence=consumed.sequence+1;
         renderedChunks.length=0;
         previousRendered=null;
       }else{
-        frame=Math.floor(position);
+        const cursor=Math.floor(position);
+        frame=loopEnabled&&(cursor<loopStartFrame||cursor>=loopEndFrame)?
+          loopStartFrame:cursor;
         sequence=nextRenderedSequence;
         renderedChunks.length=0;
         previousRendered=null;
       }
       nextRenderedSequence=sequence;
       stagedWorkerState={generation,frame,sequence,speed,pitchSemitones,
+        loopStartFrame,loopEndFrame,loopEnabled,
         firstChunkAccepted:false};
       workerMode=true;
       return {sourceFrame:frame,sequence,
@@ -383,11 +477,17 @@ export function createSourcePCMRenderer({
     },
     /** Prepare a seek while the active source clock keeps consuming old PCM. */
     stageRenderedSeekState({generation,frame,speed,pitchSemitones,
-      requiredChunks=1,reuseCompatible=false,reuseGeneration=null}={}){
+      requiredChunks=1,reuseCompatible=false,reuseGeneration=null,
+      loopStartFrame=timeline.state.loopStartFrame,
+      loopEndFrame=timeline.state.loopEndFrame,
+      loopEnabled=timeline.state.loopEnabled}={}){
       if(!Number.isSafeInteger(generation)||generation<=renderedGeneration||
          !Number.isSafeInteger(frame)||frame<0||frame>=sourceFrames||
          !Number.isFinite(speed)||speed<.5||speed>2||
          !Number.isFinite(pitchSemitones)||pitchSemitones<-12||pitchSemitones>12||
+         !Number.isSafeInteger(loopStartFrame)||loopStartFrame<0||
+         !Number.isSafeInteger(loopEndFrame)||loopStartFrame>=loopEndFrame||
+         loopEndFrame>sourceFrames||typeof loopEnabled!=="boolean"||
          !Number.isSafeInteger(requiredChunks)||requiredChunks<1||
          requiredChunks>RENDERED_CHUNK_SLOTS||
          typeof reuseCompatible!=="boolean"||
@@ -408,7 +508,7 @@ export function createSourcePCMRenderer({
             if(!segment||segment.speed!==speed)break;
             if(offset){
               const previous=reusableChunks.at(-1);
-              const expected=previous.endFrame>=sourceFrames?0:previous.endFrame;
+              const expected=nextRenderedFrame(previous.endFrame,state);
               if(segment.startFrame!==expected)break;
             }
             reusableChunks.push({...segment,generation,sequence:offset});
@@ -418,7 +518,7 @@ export function createSourcePCMRenderer({
       }
       const current=activeChunks.find(segment=>
         (position>=segment.startFrame&&position<segment.endFrame)||
-        (state.loopEnabled&&segment.endFrame===sourceFrames&&
+        (state.loopEnabled&&segment.endFrame>=state.loopEndFrame&&
           position<segment.startFrame))||activeChunks[0]||null;
       const currentIndex=current?activeChunks.indexOf(current):0;
       const retainedLimit=RENDERED_CHUNK_SLOTS-requiredChunks;
@@ -427,14 +527,18 @@ export function createSourcePCMRenderer({
         activeChunks.slice(0,retainedLimit);
       renderedChunks.splice(0,renderedChunks.length,...retained);
       stagedWorkerState={generation,frame,sequence:0,speed,pitchSemitones,
+        loopStartFrame,loopEndFrame,loopEnabled,
         kind:"seek",requiredChunks,retainedLimit,
         preparedChunks:reusableChunks,reusedChunks:reusableChunks.length,
         firstChunkAccepted:reusableChunks.length>0};
       workerMode=true;
       const lastReusable=reusableChunks.at(-1);
       return {sourceFrame:frame,sequence:0,
-        nextFrame:lastReusable?
-          (lastReusable.endFrame>=sourceFrames?0:lastReusable.endFrame):frame,
+        nextFrame:lastReusable?nextRenderedFrame(lastReusable.endFrame,{
+            loopEnabled:stagedWorkerState.loopEnabled??timeline.state.loopEnabled,
+            loopStartFrame:stagedWorkerState.loopStartFrame??timeline.state.loopStartFrame,
+            loopEndFrame:stagedWorkerState.loopEndFrame??timeline.state.loopEndFrame
+          }):frame,
         nextSequence:reusableChunks.length,
         bufferedSegments:renderedChunks.length+reusableChunks.length,
         reusedChunks:reusableChunks.length};
@@ -469,10 +573,11 @@ export function createSourcePCMRenderer({
         const at=Math.floor(index),fraction=index-at,a=samples[at];
         if(!Number.isFinite(a))return NaN;
         if(fraction===0)return a;
-        let b=samples[at+1];
+        let b=!state.loopEnabled&&segment.endFrame===sourceFrames&&
+          at+1>=segment.coreFrames?0:samples[at+1];
         if(!Number.isFinite(b)&&wrapDepth===0&&state.loopEnabled&&
-           segment.endFrame===sourceFrames){
-          // A fractional source position just before the full-track loop end
+           segment.endFrame===state.loopEndFrame){
+          // A fractional source position just before a loop end
           // needs the next rendered output sample, which belongs to the chunk
           // queued at the loop start. Without this bridge the shared clock
           // freezes on the final fractional frame forever.
@@ -493,13 +598,28 @@ export function createSourcePCMRenderer({
       const fadeFrames=Math.max(1,Math.round(.018*outputSampleRate));
       for(let i=0;i<len;i++){
         state=timeline.state;
-        let position=timeline.sourceFrameAt(0);
-        if(position===null){for(const ch of output)ch[i]=0;continue;}
+        if(stagedWorkerState?.kind==="terminal"&&state.ended&&
+           !state.loopEnabled){
+          const staged=stagedWorkerState;
+          const activated=timeline.setSpeed(staged.speed);
+          renderedChunks.length=0;
+          previousRendered=null;
+          renderedGeneration=staged.generation;
+          workerState={generation:staged.generation,speed:staged.speed,
+            pitchSemitones:staged.pitchSemitones};
+          stagedWorkerState=null;
+          workerActivation={...workerState,sourceFrame:sourceFrames,
+            revision:activated.revision,sampleOffset:i,terminal:true};
+          state=timeline.state;
+        }
         const seek=stagedWorkerState?.kind==="seek"&&
           stagedWorkerState.preparedChunks.length>=
             stagedWorkerState.requiredChunks?stagedWorkerState:null;
+        let position=timeline.sourceFrameAt(0);
         if(seek){
           beginOutputTransition(output,i);
+          timeline.setLoopConfiguration(seek.loopStartFrame,
+            seek.loopEndFrame,seek.loopEnabled);
           const activated=timeline.scrub(seek.frame,seek.speed);
           const prepared=seek.preparedChunks;
           renderedChunks.splice(0,renderedChunks.length,...prepared);
@@ -515,10 +635,29 @@ export function createSourcePCMRenderer({
           state=timeline.state;
           position=timeline.sourceFrameAt(0);
         }
+        if(position===null&&state.ended&&stagedWorkerState&&
+           stagedWorkerState.kind!=="seek"&&stagedWorkerState.loopEnabled&&
+           renderedChunks.some(segment=>
+             segment.generation===stagedWorkerState.generation&&
+             segment.sequence===stagedWorkerState.sequence)){
+          // A loop re-enabled in the final unlooped chunk has no old-timeline
+          // boundary after EOF. Retire exhausted old PCM before re-arming so
+          // an overlapping new loop cannot keep the old chunk at the queue head.
+          const generation=stagedWorkerState.generation;
+          renderedChunks.splice(0,renderedChunks.length,
+            ...renderedChunks.filter(segment=>segment.generation===generation));
+          previousRendered=null;
+          timeline.setLoopConfiguration(stagedWorkerState.loopStartFrame,
+            stagedWorkerState.loopEndFrame,true);
+          state=timeline.state;
+          position=timeline.sourceFrameAt(0);
+        }
+        if(position===null){for(const ch of output)ch[i]=0;continue;}
         while(renderedChunks.length){
           const head=renderedChunks[0];
-          const wrapped=state.loopEnabled&&head.endFrame===sourceFrames&&
-            position<head.startFrame;
+          const wrapped=state.loopEnabled&&head.endFrame>=state.loopEndFrame&&
+            (position<head.startFrame||
+             head.retireAfterLoop&&head.completedLoop);
           if(position>=head.endFrame||wrapped){
             if(head.generation!==renderedGeneration)break;
             previousRendered=renderedChunks.shift();
@@ -538,9 +677,15 @@ export function createSourcePCMRenderer({
           // its boundary. Preserve its fractional sample position when it is
           // already inside the replacement chunk; scrub() is intentionally
           // integer-frame-only for user seeks and would throw here.
-          const activated=activationFrame===position?
+          timeline.setLoopConfiguration(staged.loopStartFrame,
+            staged.loopEndFrame,staged.loopEnabled);
+          const target=activationFrame===position&&
+            timeline.state.sourceFrame===position?position:
+            activationFrame===position?timeline.state.sourceFrame:
+            activationFrame;
+          const activated=target===timeline.state.sourceFrame?
             timeline.setSpeed(staged.speed):
-            timeline.scrub(activationFrame,staged.speed);
+            timeline.scrub(target,staged.speed);
           state=timeline.state;
           position=activated.sourceFrame;
           renderedGeneration=staged.generation;
@@ -596,6 +741,10 @@ export function createSourcePCMRenderer({
         if(workerTransitionLeft>0)workerTransitionLeft--;
         if(adjacent&&mix>=1)previousRendered=null;
         timeline.advance(1);
+        if(state.loopEnabled&&segment?.retireAfterLoop&&
+           position+state.speed*sourceSampleRate/outputSampleRate>=
+             state.loopEndFrame)
+          segment.completedLoop=true;
       }
       missingFrames+=missing;
       renderedFrames+=len;

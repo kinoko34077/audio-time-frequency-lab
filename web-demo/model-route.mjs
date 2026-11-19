@@ -1,7 +1,7 @@
 /** #63 U1/U5: dispatch guard for ACTUAL model DSP routes.
- * Spectral STFT and Granular share the bounded PCM source-time Worklet and
- * can play signed/0 and sample-coordinate A/B. Rust/Worker algorithms do not
- * inherit these capabilities merely because a UI value was selected.
+ * Spectral STFT, Granular, Rust, and legacy Worker models share the bounded
+ * PCM source-time Worklet. Each route exposes only the capabilities its DSP
+ * and transport actually implement.
  */
 export const MODEL_IDS=Object.freeze(["spectral","granular","live","pv","wsola","dual","am"]);
 export function primaryModelCapability(mode,speed,{individual=false}={}){
@@ -12,9 +12,10 @@ export function primaryModelCapability(mode,speed,{individual=false}={}){
   const continuousPCM=mode==="spectral"||mode==="granular"||
     mode==="live"&&!individual||
     (mode==="pv"||mode==="wsola"||mode==="dual"||mode==="am")&&!individual;
+  const sampleAB=continuousPCM||mode!=="live";
   return Object.freeze({
     mode,supported:continuousPCM||(speed>=.5&&speed<=2),
-    signed:continuousPCM,zeroAudible:continuousPCM,sampleAB:continuousPCM,
+    signed:continuousPCM,zeroAudible:continuousPCM,sampleAB,
     realtime:continuousPCM||mode==="live",
     reason:continuousPCM||speed>=.5&&speed<=2?"":"このモデルの速度は0.5〜2倍のみ。0倍・逆再生・2倍超は未対応です。"
   });

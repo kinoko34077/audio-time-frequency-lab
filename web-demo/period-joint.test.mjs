@@ -72,6 +72,14 @@ test('real model dispatch carries absolute source origin into non-neutral multi-
  assert.ok(actual.channels[0].some((v,i)=>Math.abs(v-shifted.channels[0][i])>1e-3));
 });
 
+test('A/B analysis context accepts a negative virtual origin when A is near source frame zero',()=>{
+ const signal=Float32Array.from({length:sr},(_,i)=>.3*Math.cos(2*Math.PI*437.3*i/sr+.2));
+ const actual=renderPCM({channels:[signal],sampleRate:sr,model:'period-joint',
+  speed:.8,semitones:3,sourceStartSeconds:-.05});
+ assert.equal(actual.channels[0].length,Math.round(sr/.8));
+ assert.ok(actual.channels[0].every(Number.isFinite));
+});
+
 test('strong transient outside seven observation supports is rejected by full-waveform verification',()=>{
  const duration=sr,carrier=tone(440.4);
  const altered=Float32Array.from(carrier,(v,i)=>{

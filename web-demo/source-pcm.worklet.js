@@ -87,7 +87,10 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
           this.workerSeekRequestId=null;
           const staged=this.renderer.stageRenderedState({
             generation:m.generation,speed:m.speed,
-            pitchSemitones:m.pitchSemitones
+            pitchSemitones:m.pitchSemitones,
+            loopStartFrame:m.loopStartFrame,
+            loopEndFrame:m.loopEndFrame,
+            loopEnabled:m.loopEnabled
           });
           this.port.postMessage({type:"worker-state-staged",
             requestId:m.requestId,generation:m.generation,
@@ -95,6 +98,7 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
             speed:m.speed,
             pitchSemitones:m.pitchSemitones,
             bufferedSegments:staged.bufferedSegments,
+            terminal:staged.terminal===true,
             stageRequestAudioTime:m.requestAudioTime,
             stageAudioTime:currentTime});
           return;
@@ -122,6 +126,8 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
             generation:m.generation,frame:m.frame,speed:m.speed,
             pitchSemitones:m.pitchSemitones,
             requiredChunks:m.requiredChunks,
+            loopStartFrame:m.loopStartFrame,
+            loopEndFrame:m.loopEndFrame,loopEnabled:m.loopEnabled,
             reuseCompatible:m.reuseCompatible===true,
             reuseGeneration:m.reuseGeneration??null
           });

@@ -6,8 +6,12 @@ self.onmessage=({data})=>{
   const startedAt=performance.now();
   try {
     if(!plan||channels.some(ch=>ch.length!==plan.to-plan.from+
-      (plan.wrapRight||0)))throw Error('区間情報が不正です');
-    const rendered=renderPCM({channels,sampleRate,speed,semitones,model,fftSize,shortFftSize,longFftSize,sourceStartSeconds:plan.from/sampleRate,periodCycles,jointBackend});
+      (plan.wrapLeft||0)+(plan.wrapRight||0)))
+      throw Error('区間情報が不正です');
+    const rendered=renderPCM({channels,sampleRate,speed,semitones,model,
+      fftSize,shortFftSize,longFftSize,
+      sourceStartSeconds:plan.sourceStartFrame/sampleRate,
+      periodCycles,jointBackend});
     const result=rendered.channels.map(ch=>{
       const out=new Float32Array(plan.outputFrames);
       const part=ch.subarray(plan.outputStart,plan.outputStart+out.length);

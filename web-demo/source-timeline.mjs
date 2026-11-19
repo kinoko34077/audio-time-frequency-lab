@@ -136,6 +136,13 @@ export function createSourceTimeline({
       A=a;B=b;if(loop){ended=false;endedDirection=0;reconcile();}revision++;
       return state();
     },
+    setLoopConfiguration(a,b,enabled){
+      if(!valid(a,b)||typeof enabled!=="boolean")
+        throw RangeError("invalid A/B source-frame configuration");
+      if(A===a&&B===b&&loop===enabled)return state();
+      A=a;B=b;loop=enabled;ended=false;endedDirection=0;reconcile();revision++;
+      return state();
+    },
     setLoopEnabled(enabled){
       if(typeof enabled!=="boolean")throw TypeError("loopEnabled must be boolean");
       if(loop===enabled)return state();

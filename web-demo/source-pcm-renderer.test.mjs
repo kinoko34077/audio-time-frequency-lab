@@ -176,6 +176,372 @@ test("staged Worker settings keep queued PCM and switch the shared clock at the 
   assert.equal(p.timeline.state.sourceFrame,8);
 });
 
+test("staged Worker A/B settings activate at the next chunk and repeat the selected source interval",()=>{
+  const p=createSourcePCMRenderer({sourceFrames:32,sourceSampleRate:8,
+    outputSampleRate:8,channelCount:1,speed:1,startFrame:0,
+    loopStartFrame:0,loopEndFrame:32,loopEnabled:false});
+  const chunk=(generation,sequence,startFrame,endFrame,value)=>({generation,
+    sequence,startFrame,endFrame,speed:1,coreFrames:endFrame-startFrame,
+    channels:[new Float32Array(endFrame-startFrame+2).fill(value)]});
+  p.installRenderedChunk(chunk(0,0,0,8,1));
+  p.installRenderedChunk(chunk(0,1,8,16,1));
+  const staged=p.stageRenderedState({generation:1,speed:1,
+    pitchSemitones:0,loopStartFrame:4,loopEndFrame:8,loopEnabled:true});
+  assert.deepEqual(staged,{sourceFrame:4,sequence:1,bufferedSegments:2});
+  assert.equal(p.installRenderedChunk(chunk(1,1,4,8,2)),2);
+  const output=[new Float32Array(20)];
+  assert.equal(p.renderBuffered(output),0,
+    "the Worker handoff and loop wrap must not insert missing PCM");
+  assert.equal(p.workerState.generation,1);
+  assert.deepEqual(p.timeline.state,{sourceFrame:4,speed:1,
+    loopStartFrame:4,loopEndFrame:8,loopEnabled:true,revision:1,ended:false});
+  assert.deepEqual(Array.from(output[0].slice(0,8)),Array(8).fill(1));
+  assert.deepEqual(Array.from(output[0].slice(8)),Array(12).fill(2),
+    "the A/B chunk itself remains the repeated loop body");
+  assert.equal(p.statistics.missingFrames,0);
+});
+
+test("shortening Worker B keeps the audible retained chunk until replacement PCM arrives",()=>{
+  const p=createSourcePCMRenderer({sourceFrames:32,sourceSampleRate:8,
+    outputSampleRate:8,channelCount:1,speed:1,startFrame:0,
+    loopStartFrame:0,loopEndFrame:32,loopEnabled:true});
+  const chunk=(generation,sequence,startFrame,endFrame,value)=>({generation,
+    sequence,startFrame,endFrame,speed:1,coreFrames:endFrame-startFrame,
+    channels:[new Float32Array(endFrame-startFrame).fill(value)]});
+  p.installRenderedChunk(chunk(0,0,0,12,1));
+  p.installRenderedChunk(chunk(0,1,12,24,2));
+  assert.equal(p.renderBuffered([new Float32Array(2)]),0);
+  assert.equal(p.timeline.state.sourceFrame,2);
+
+  const staged=p.stageRenderedState({generation:1,speed:1,pitchSemitones:0,
+    loopStartFrame:0,loopEndFrame:8,loopEnabled:true});
+  assert.equal(staged.sourceFrame,0);
+  assert.equal(staged.sequence,1);
+  const retained=[new Float32Array(10)];
+  assert.equal(p.renderBuffered(retained),0,
+    "old contiguous PCM must remain audible while the new B chunk renders");
+  assert.deepEqual(Array.from(retained[0]),Array(10).fill(1));
+  assert.equal(p.statistics.missingFrames,0);
+
+  p.installRenderedChunk(chunk(1,staged.sequence,0,8,3));
+  assert.equal(p.renderBuffered([new Float32Array(1)]),0);
+  assert.equal(p.workerState.generation,1);
+  assert.equal(p.timeline.state.loopEndFrame,8);
+  assert.equal(p.takeWorkerActivation().sourceFrame,0);
+  assert.equal(p.statistics.missingFrames,0);
+});
+
+test("extending a short active Worker loop retires its old loop body at the boundary",()=>{
+  const p=createSourcePCMRenderer({sourceFrames:32,sourceSampleRate:8,
+    outputSampleRate:8,channelCount:1,speed:1,startFrame:6,
+    loopStartFrame:4,loopEndFrame:8,loopEnabled:true});
+  const chunk=(generation,sequence,startFrame,endFrame,value)=>({generation,
+    sequence,startFrame,endFrame,speed:1,coreFrames:endFrame-startFrame,
+    channels:[new Float32Array(endFrame-startFrame).fill(value)]});
+  p.resetRenderedChunks(1,{speed:1,pitchSemitones:0});
+  p.installRenderedChunk(chunk(1,0,4,8,1));
+
+  const staged=p.stageRenderedState({generation:2,speed:1,pitchSemitones:0,
+    loopStartFrame:4,loopEndFrame:12,loopEnabled:true});
+  assert.equal(staged.sourceFrame,8,
+    "the replacement continues from old B when that frame is inside the new loop");
+  assert.equal(p.installRenderedChunk(chunk(2,1,8,12,2)),2);
+  const output=[new Float32Array(5)];
+  assert.equal(p.renderBuffered(output),0);
+  assert.equal(p.workerState.generation,2,
+    "the old one-chunk loop cannot keep cycling ahead of the replacement");
+  assert.equal(p.timeline.state.loopEndFrame,12);
+  assert.equal(p.timeline.state.sourceFrame,11);
+  assert.equal(p.statistics.missingFrames,0);
+});
+
+test("retiring one-frame and exact-step Worker loops detects a wrap to the same frame",()=>{
+  for(const {endFrame,speed} of [{endFrame:5,speed:1},
+    {endFrame:6,speed:2}]){
+    const p=createSourcePCMRenderer({sourceFrames:32,sourceSampleRate:8,
+      outputSampleRate:8,channelCount:1,speed,startFrame:4,
+      loopStartFrame:4,loopEndFrame:endFrame,loopEnabled:true});
+    const oldCore=Math.ceil((endFrame-4)/speed);
+    p.installRenderedChunk({generation:0,sequence:0,startFrame:4,
+      endFrame,speed,coreFrames:oldCore,
+      channels:[new Float32Array(oldCore).fill(1)]});
+    const staged=p.stageRenderedState({generation:1,speed,
+      pitchSemitones:0,loopStartFrame:4,loopEndFrame:12,loopEnabled:true});
+    assert.equal(staged.sourceFrame,endFrame);
+    const nextEnd=12,nextCore=Math.ceil((nextEnd-endFrame)/speed);
+    p.installRenderedChunk({generation:1,sequence:1,startFrame:endFrame,
+      endFrame:nextEnd,speed,coreFrames:nextCore,
+      channels:[new Float32Array(nextCore).fill(2)]});
+    assert.equal(p.renderBuffered([new Float32Array(4)]),0);
+    assert.equal(p.workerState.generation,1,
+      `the retired [4,${endFrame}) loop must hand off at ${speed}x`);
+    assert.equal(p.timeline.state.loopEndFrame,12);
+    assert.equal(p.statistics.missingFrames,0);
+  }
+});
+
+test("changing A stages the replacement inside the new loop instead of old A",()=>{
+  const p=createSourcePCMRenderer({sourceFrames:32,sourceSampleRate:8,
+    outputSampleRate:8,channelCount:1,speed:1,startFrame:7,
+    loopStartFrame:4,loopEndFrame:8,loopEnabled:true});
+  const chunk=(generation,sequence,startFrame,endFrame,value)=>({generation,
+    sequence,startFrame,endFrame,speed:1,coreFrames:endFrame-startFrame,
+    channels:[new Float32Array(endFrame-startFrame).fill(value)]});
+  p.resetRenderedChunks(1,{speed:1,pitchSemitones:0});
+  p.installRenderedChunk(chunk(1,0,4,8,1));
+
+  const staged=p.stageRenderedState({generation:2,speed:1,pitchSemitones:0,
+    loopStartFrame:6,loopEndFrame:12,loopEnabled:true});
+  assert.equal(staged.sourceFrame,8,
+    "the next old-loop boundary is a valid source frame in the new interval");
+  assert.doesNotThrow(()=>p.installRenderedChunk(chunk(2,1,8,12,2)));
+  const output=[new Float32Array(4)];
+  assert.equal(p.renderBuffered(output),0);
+  assert.equal(p.workerState.generation,2);
+  assert.equal(p.timeline.state.loopStartFrame,6);
+  assert.equal(p.timeline.state.loopEndFrame,12);
+  assert.equal(p.statistics.missingFrames,0);
+});
+
+test("moving loop A past the retained chunk retires the old loop at its boundary",()=>{
+  const p=createSourcePCMRenderer({sourceFrames:32,sourceSampleRate:8,
+    outputSampleRate:8,channelCount:1,speed:1,startFrame:6,
+    loopStartFrame:4,loopEndFrame:8,loopEnabled:true});
+  p.installRenderedChunk({generation:0,sequence:0,startFrame:4,endFrame:8,
+    speed:1,coreFrames:4,channels:[new Float32Array(4).fill(1)]});
+  assert.equal(p.installRenderedChunk({generation:0,sequence:1,startFrame:4,endFrame:8,
+    speed:1,coreFrames:4,channels:[new Float32Array(4).fill(1)]}),2,
+    "the old loop may already have its next repeated chunk queued");
+  const staged=p.stageRenderedState({generation:1,speed:1,pitchSemitones:0,
+    loopStartFrame:10,loopEndFrame:16,loopEnabled:true});
+  assert.equal(staged.sourceFrame,10);
+  assert.equal(p.installRenderedChunk({generation:1,sequence:staged.sequence,
+    startFrame:10,endFrame:16,speed:1,coreFrames:6,
+    channels:[new Float32Array(6).fill(2)]}),2);
+
+  assert.equal(p.renderBuffered([new Float32Array(8)]),0);
+  assert.equal(p.workerState.generation,1,
+    "the old loop cannot wrap forever ahead of the new A boundary");
+  assert.equal(p.timeline.state.loopStartFrame,10);
+  assert.equal(p.statistics.missingFrames,0);
+});
+
+test("re-enabling an overlapping loop retires the exhausted EOF chunk",()=>{
+  const p=createSourcePCMRenderer({sourceFrames:32,sourceSampleRate:8,
+    outputSampleRate:8,channelCount:1,speed:1,startFrame:31,
+    loopStartFrame:4,loopEndFrame:12,loopEnabled:false});
+  p.installRenderedChunk({generation:0,sequence:0,startFrame:24,endFrame:32,
+    speed:1,coreFrames:8,channels:[new Float32Array(8).fill(1)]});
+  const staged=p.stageRenderedState({generation:1,speed:1,pitchSemitones:0,
+    loopStartFrame:26,loopEndFrame:30,loopEnabled:true});
+  assert.equal(staged.sourceFrame,26);
+  p.installRenderedChunk({generation:1,sequence:staged.sequence,
+    startFrame:26,endFrame:30,speed:1,coreFrames:4,
+    channels:[new Float32Array(4).fill(2)]});
+
+  const output=[new Float32Array(5)];
+  assert.equal(p.renderBuffered(output),0);
+  assert.equal(p.workerState.generation,1,
+    "the old EOF PCM must not remain ahead of a loop inside its range");
+  assert.equal(p.takeWorkerActivation().sourceFrame,26);
+  assert.equal(p.timeline.state.loopStartFrame,26);
+  assert.ok(output[0].some(value=>value===2));
+  assert.equal(p.statistics.missingFrames,0);
+});
+
+test("disabling a Worker A/B loop exits at B without restarting the Worklet clock",()=>{
+  const p=createSourcePCMRenderer({sourceFrames:32,sourceSampleRate:8,
+    outputSampleRate:8,channelCount:1,speed:1,startFrame:4,
+    loopStartFrame:4,loopEndFrame:8,loopEnabled:true});
+  const chunk=(generation,sequence,startFrame,endFrame,value)=>({generation,
+    sequence,startFrame,endFrame,speed:1,coreFrames:endFrame-startFrame,
+    channels:[new Float32Array(endFrame-startFrame+2).fill(value)]});
+  p.installRenderedChunk(chunk(0,0,4,8,1));
+  assert.deepEqual(p.stageRenderedState({generation:1,speed:1,
+    pitchSemitones:0,loopStartFrame:4,loopEndFrame:8,loopEnabled:false}),
+    {sourceFrame:8,sequence:1,bufferedSegments:1});
+  assert.equal(p.installRenderedChunk(chunk(1,1,8,16,2)),2);
+  const output=[new Float32Array(8)];
+  assert.equal(p.renderBuffered(output),0);
+  assert.deepEqual(Array.from(output[0].slice(0,4)),[1,1,1,1]);
+  assert.equal(output[0][4],1,"the existing boundary transition starts at prior PCM");
+  assert.deepEqual(Array.from(output[0].slice(5)),[2,2,2]);
+  assert.equal(p.workerState.generation,1);
+  assert.equal(p.timeline.state.loopEnabled,false);
+  assert.equal(p.timeline.state.sourceFrame,12,
+    "the common source clock continues forward from B after the staged exit");
+  assert.equal(p.statistics.missingFrames,0);
+});
+
+test("disabling a full-track Worker loop at its terminal chunk drains to EOF",()=>{
+  const p=createSourcePCMRenderer({sourceFrames:32,sourceSampleRate:8,
+    outputSampleRate:8,channelCount:1,speed:1,startFrame:28,
+    loopStartFrame:0,loopEndFrame:32,loopEnabled:true});
+  p.installRenderedChunk({generation:0,sequence:0,startFrame:28,endFrame:32,
+    speed:1,coreFrames:4,channels:[new Float32Array(6).fill(1)]});
+
+  const staged=p.stageRenderedState({generation:1,speed:1,
+    pitchSemitones:0,loopStartFrame:0,loopEndFrame:32,loopEnabled:false});
+  assert.equal(staged.terminal,true);
+  assert.equal(staged.sourceFrame,32,
+    "a terminal loop exit must not render a replacement from A");
+  assert.equal(staged.activated,false,
+    "the terminal generation waits for the retained final PCM to drain");
+  assert.equal(p.timeline.state.loopEnabled,false,
+    "the source clock stops wrapping as soon as loop-off is requested");
+
+  const output=[new Float32Array(8)];
+  assert.equal(p.renderBuffered(output),0);
+  assert.deepEqual(Array.from(output[0].slice(0,4)),[1,1,1,1]);
+  assert.deepEqual(Array.from(output[0].slice(4)),[0,0,0,0],
+    "the source clock exhausts instead of playing another loop lap");
+  assert.equal(p.workerState.generation,1);
+  assert.equal(p.timeline.state.sourceFrame,32);
+  assert.equal(p.timeline.state.ended,true);
+  assert.equal(p.takeWorkerActivation().sourceFrame,32);
+  assert.equal(p.statistics.missingFrames,0);
+});
+
+test("terminal loop exit applies changed Worker settings after the final PCM",()=>{
+  const p=createSourcePCMRenderer({sourceFrames:32,sourceSampleRate:8,
+    outputSampleRate:8,channelCount:1,speed:1,startFrame:28,
+    loopStartFrame:0,loopEndFrame:32,loopEnabled:true});
+  p.installRenderedChunk({generation:0,sequence:0,startFrame:28,endFrame:32,
+    speed:1,coreFrames:4,channels:[new Float32Array(6).fill(1)]});
+  const staged=p.stageRenderedState({generation:1,speed:1.5,
+    pitchSemitones:3,loopStartFrame:0,loopEndFrame:32,loopEnabled:false});
+  assert.equal(staged.terminal,true);
+  assert.equal(p.workerState.generation,0,
+    "the old generation remains active while its final PCM is audible");
+  const output=[new Float32Array(8)];
+  assert.equal(p.renderBuffered(output),0);
+  assert.deepEqual(Array.from(output[0].slice(0,4)),[1,1,1,1]);
+  assert.deepEqual(Array.from(output[0].slice(4)),[0,0,0,0]);
+  assert.deepEqual(p.workerState,{generation:1,speed:1.5,pitchSemitones:3});
+  assert.equal(p.timeline.state.speed,1.5);
+  assert.equal(p.timeline.state.ended,true);
+  assert.equal(p.takeWorkerActivation().terminal,true);
+  assert.equal(p.statistics.missingFrames,0);
+});
+
+test("unlooped Worker settings at EOF activate after the retained final PCM drains",()=>{
+  const p=createSourcePCMRenderer({sourceFrames:32,sourceSampleRate:8,
+    outputSampleRate:8,channelCount:1,speed:1,startFrame:28,
+    loopStartFrame:4,loopEndFrame:12,loopEnabled:false});
+  p.installRenderedChunk({generation:0,sequence:0,startFrame:28,endFrame:32,
+    speed:1,coreFrames:4,channels:[new Float32Array(4).fill(1)]});
+  p.renderBuffered([new Float32Array(3)]);
+  assert.equal(p.timeline.state.sourceFrame,31);
+
+  const staged=p.stageRenderedState({generation:1,speed:1.25,
+    pitchSemitones:2,loopStartFrame:4,loopEndFrame:16,loopEnabled:false});
+  assert.equal(staged.terminal,true);
+  assert.equal(staged.sourceFrame,32);
+  p.renderBuffered([new Float32Array(2)]);
+  assert.deepEqual(p.workerState,{generation:1,speed:1.25,pitchSemitones:2});
+  assert.equal(p.takeWorkerActivation().terminal,true);
+  assert.equal(p.timeline.state.ended,true);
+  assert.equal(p.statistics.missingFrames,0);
+
+  const reenabled=p.stageRenderedState({generation:2,speed:1.25,
+    pitchSemitones:2,loopStartFrame:4,loopEndFrame:16,loopEnabled:true});
+  assert.equal(reenabled.sourceFrame,4);
+  p.installRenderedChunk({generation:2,sequence:reenabled.sequence,
+    startFrame:4,endFrame:16,speed:1.25,coreFrames:12,
+    channels:[new Float32Array(12).fill(2)]});
+  p.renderBuffered([new Float32Array(1)]);
+  assert.equal(p.workerState.generation,2);
+  assert.equal(p.timeline.state.loopEnabled,true);
+  assert.equal(p.statistics.missingFrames,0);
+});
+
+test("a Worker loop can be re-enabled after terminal loop-off drains",()=>{
+  const p=createSourcePCMRenderer({sourceFrames:32,sourceSampleRate:8,
+    outputSampleRate:8,channelCount:1,speed:1,startFrame:28,
+    loopStartFrame:0,loopEndFrame:32,loopEnabled:true});
+  p.installRenderedChunk({generation:0,sequence:0,startFrame:28,endFrame:32,
+    speed:1,coreFrames:4,channels:[new Float32Array(4).fill(1)]});
+  p.stageRenderedState({generation:1,speed:1,pitchSemitones:0,
+    loopStartFrame:0,loopEndFrame:32,loopEnabled:false});
+  p.renderBuffered([new Float32Array(8)]);
+  assert.equal(p.timeline.state.ended,true);
+
+  const staged=p.stageRenderedState({generation:2,speed:1,pitchSemitones:0,
+    loopStartFrame:8,loopEndFrame:24,loopEnabled:true});
+  assert.equal(staged.sourceFrame,8);
+  p.installRenderedChunk({generation:2,sequence:staged.sequence,
+    startFrame:8,endFrame:16,speed:1,coreFrames:8,
+    channels:[new Float32Array(8).fill(2)]});
+  p.renderBuffered([new Float32Array(2)]);
+
+  assert.equal(p.workerState.generation,2);
+  assert.equal(p.takeWorkerActivation().sourceFrame,8);
+  assert.equal(p.timeline.state.loopEnabled,true);
+  assert.equal(p.timeline.state.ended,false);
+  assert.equal(p.statistics.missingFrames,0);
+});
+
+test("a prepared Worker loop re-enables when the old unlooped chunk reaches EOF",()=>{
+  const p=createSourcePCMRenderer({sourceFrames:32,sourceSampleRate:8,
+    outputSampleRate:8,channelCount:1,speed:1,startFrame:28,
+    loopStartFrame:0,loopEndFrame:32,loopEnabled:false});
+  p.installRenderedChunk({generation:0,sequence:0,startFrame:28,endFrame:32,
+    speed:1,coreFrames:4,channels:[new Float32Array(4).fill(1)]});
+  p.renderBuffered([new Float32Array(3)]);
+  assert.equal(p.timeline.state.sourceFrame,31);
+
+  const staged=p.stageRenderedState({generation:1,speed:1,pitchSemitones:0,
+    loopStartFrame:4,loopEndFrame:12,loopEnabled:true});
+  assert.equal(staged.sourceFrame,4);
+  p.installRenderedChunk({generation:1,sequence:staged.sequence,
+    startFrame:4,endFrame:12,speed:1,coreFrames:8,
+    channels:[new Float32Array(8).fill(2)]});
+  p.renderBuffered([new Float32Array(3)]);
+
+  assert.equal(p.workerState.generation,1);
+  assert.equal(p.takeWorkerActivation().sourceFrame,4);
+  assert.equal(p.timeline.state.loopEnabled,true);
+  assert.equal(p.timeline.state.ended,false);
+  assert.equal(p.statistics.missingFrames,0);
+});
+
+test("fractional Worker output reaches EOF without a terminal interpolation sample",()=>{
+  const speed=1.1,p=createSourcePCMRenderer({sourceFrames:32,
+    sourceSampleRate:48000,outputSampleRate:48000,channelCount:1,speed,
+    startFrame:28,loopStartFrame:0,loopEndFrame:32,loopEnabled:false});
+  p.installRenderedChunk({generation:0,sequence:0,startFrame:28,endFrame:32,
+    speed,coreFrames:4,channels:[new Float32Array(4).fill(1)]});
+  const output=[new Float32Array(8)];
+  assert.equal(p.renderBuffered(output),0,
+    "a missing sample beyond EOF is the terminal boundary, not missing PCM");
+  assert.equal(p.timeline.state.sourceFrame,32);
+  assert.equal(p.timeline.state.ended,true);
+  assert.deepEqual(Array.from(output[0].slice(4)),[0,0,0,0]);
+  assert.equal(p.statistics.missingFrames,0);
+});
+
+test("a prepared Worker seek reactivates the source clock after terminal EOF",()=>{
+  const p=createSourcePCMRenderer({sourceFrames:32,sourceSampleRate:8,
+    outputSampleRate:8,channelCount:1,speed:1,startFrame:28,
+    loopStartFrame:0,loopEndFrame:32,loopEnabled:false});
+  p.installRenderedChunk({generation:0,sequence:0,startFrame:28,endFrame:32,
+    speed:1,coreFrames:4,channels:[new Float32Array(4).fill(1)]});
+  p.renderBuffered([new Float32Array(8)]);
+  assert.equal(p.timeline.state.ended,true);
+
+  p.stageRenderedSeekState({generation:1,frame:31,speed:1,
+    pitchSemitones:0,requiredChunks:1});
+  p.installRenderedChunk({generation:1,sequence:0,startFrame:31,endFrame:32,
+    speed:1,coreFrames:1,channels:[new Float32Array(1).fill(2)]});
+  p.renderBuffered([new Float32Array(2)]);
+
+  assert.equal(p.workerState.generation,1);
+  assert.equal(p.takeWorkerActivation().sourceFrame,31);
+  assert.equal(p.timeline.state.ended,true,
+    "the restarted terminal seek drains cleanly after its final frame");
+  assert.equal(p.statistics.missingFrames,0);
+});
+
 test("staged Worker settings target the next chunk and keep its PCM fallback",()=>{
   const p=createSourcePCMRenderer({sourceFrames:32,sourceSampleRate:4,
     outputSampleRate:4,channelCount:1,speed:1,startFrame:0});

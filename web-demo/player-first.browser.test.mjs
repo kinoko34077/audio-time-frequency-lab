@@ -522,7 +522,20 @@ test("U1/U5 primary Play routes to REAL selected live/PV/Granular engines and on
       window.__workerMessages=[];
       window.__workerResponses=[];
       window.__workletFrames=[];
+      window.__workletCommands=[];
       window.__lastPcmWorkletId=0;
+      const nativePortPostMessage=MessagePort.prototype.postMessage;
+      MessagePort.prototype.postMessage=function(data,...args){
+        if(data?.type==="worker-seek-stage")
+          window.__workletCommands.push({type:data.type,frame:data.frame,
+            generation:data.generation,requestId:data.requestId,
+            requiredChunks:data.requiredChunks});
+        if((data?.type==="command"&&data.op==="speed")||
+           data?.type==="scrub")
+          window.__scratchSpeeds?.push(data.speed);
+        return nativePortPostMessage.call(this,data,...args);
+      };
+      MessagePort.prototype.__scratchObserved=true;
       window.AudioWorkletNode=class extends Worklet{
         constructor(ctx,name,opts){
           super(ctx,name,opts);
@@ -533,7 +546,10 @@ test("U1/U5 primary Play routes to REAL selected live/PV/Granular engines and on
             if(Number.isSafeInteger(event.data?.sourceFrame))
               window.__workletFrames.push({id,type:event.data.type,
                 sourceFrame:event.data.sourceFrame,
-                generation:event.data.generation});
+                generation:event.data.generation,
+                requestId:event.data.requestId,
+                missingFrames:event.data.missingFrames,
+                reusedChunks:event.data.reusedChunks});
           });
         }
       };
@@ -557,7 +573,8 @@ test("U1/U5 primary Play routes to REAL selected live/PV/Granular engines and on
         postMessage(message,transfer){
           if(String(this.__labName||"").includes("lab-processor.worker.mjs")){
             window.__workerMessages.push({job:message?.job,
-              generation:message?.generation,startFrame:message?.plan?.start});
+              generation:message?.generation,startFrame:message?.plan?.start,
+              endFrame:message?.plan?.start+message?.plan?.core});
           }
           return super.postMessage(message,transfer);
         }
@@ -755,60 +772,93 @@ test("U1/U5 primary Play routes to REAL selected live/PV/Granular engines and on
         x.name.includes("lab-processor.worker.mjs"));
       return {created:workers.length,active:workers.filter(x=>!x.terminated).length};
     });
+    const beforeSeekPcmNodes=await page.evaluate(()=>window.__engineCreations.filter(x=>
+      x.kind==="worklet"&&x.name==="audio-lab-source-pcm").length);
     assert.equal(beforeSeekWorkers.active,1,
       "exactly one primary Worker is active before seek");
-    const beforeSeekGeneration=await page.evaluate(()=>Math.max(-1,...window.__workerMessages
-      .filter(x=>Number.isSafeInteger(x.generation)).map(x=>x.generation)));
+    const beforeSeekGeneration=await page.evaluate(()=>Math.max(-1,...window.__workletFrames
+      .filter(x=>x.type==="worker-state-activated"&&
+        Number.isSafeInteger(x.generation)).map(x=>x.generation)));
+    const missingBeforeSeek=await page.evaluate(()=>
+      [...window.__workletFrames].reverse().find(x=>
+        x.type==="worker-state-activated")?.missingFrames||0);
     await page.focus("#wave");
     await page.keyboard.press("ArrowRight");
-    await page.waitForFunction(generation=>window.__workerMessages.some(x=>
-      Number.isSafeInteger(x.generation)&&x.generation>generation),
+    await page.waitForFunction(generation=>window.__workletCommands.some(x=>
+      x.type==="worker-seek-stage"&&x.generation>generation),
       {timeout:20000},beforeSeekGeneration);
+    const seekCommand=await page.evaluate(generation=>
+      window.__workletCommands.findLast(x=>x.type==="worker-seek-stage"&&
+        x.generation>generation),beforeSeekGeneration);
     const expectedSeekFrame=await page.evaluate(()=>window.__expectedSeekFrame);
+    const loopTarget=await page.evaluate(()=>({
+      start:Number(document.querySelector("#player-loop-a")?.value),
+      end:Number(document.querySelector("#player-loop-b")?.value),
+      enabled:document.querySelector("#player-loop-enabled")?.checked
+    }));
+    const loopLength=loopTarget.end-loopTarget.start;
+    const normalizedSeekFrame=loopTarget.enabled&&
+      (expectedSeekFrame<loopTarget.start||expectedSeekFrame>=loopTarget.end)?
+      loopTarget.start+((expectedSeekFrame-loopTarget.start)%loopLength+
+        loopLength)%loopLength:expectedSeekFrame;
     try{
       await page.waitForFunction(generation=>{
         const workers=window.__engineCreations.filter(x=>x.kind==="worker"&&
           x.name.includes("lab-processor.worker.mjs"));
-        return window.__workerResponses.some(x=>x.generation>generation&&x.ok===true)&&
-          window.__workletFrames.some(x=>x.type==="worker-state-activated"&&
-            x.generation>generation)&&
+        return window.__workletFrames.some(x=>
+            x.type==="worker-state-activated"&&x.generation===generation)&&
           workers.filter(x=>!x.terminated).length===1;
-      },{timeout:20000},beforeSeekGeneration);
+      },{timeout:20000},seekCommand.generation);
     }catch(error){
       const diagnostic=await page.evaluate(generation=>{
         const workers=window.__engineCreations.filter(x=>x.kind==="worker"&&
           x.name.includes("lab-processor.worker.mjs"));
         return {workers:workers.map(x=>({terminated:x.terminated,name:x.name})),
-          messages:window.__workerMessages.filter(x=>x.generation>generation),
-          responses:window.__workerResponses.filter(x=>x.generation>generation),
+          commands:window.__workletCommands.filter(x=>x.generation>generation),
+          messages:window.__workerMessages.filter(x=>x.generation===generation),
+          responses:window.__workerResponses.filter(x=>x.generation===generation),
           workletEvents:window.__workletFrames.slice(-20),
           workletEventTypes:[...new Set(window.__workletFrames.map(x=>x.type))]};
-      },beforeSeekGeneration);
+      },seekCommand.generation);
       throw Error("seek handoff lifecycle did not settle: "+JSON.stringify(diagnostic)+
         " / "+error.message);
     }
     const seekRender=await page.evaluate(generation=>({
       workers:window.__engineCreations.filter(x=>x.kind==="worker"&&
         x.name.includes("lab-processor.worker.mjs")),
-      messages:window.__workerMessages.filter(x=>x.generation>generation),
-      responses:window.__workerResponses.filter(x=>x.generation>generation),
+      messages:window.__workerMessages.filter(x=>x.generation===generation),
+      responses:window.__workerResponses.filter(x=>x.generation===generation),
       activations:window.__workletFrames.filter(x=>
-        x.type==="worker-state-activated"&&x.generation>generation)
-    }),beforeSeekGeneration);
-    assert.equal(seekRender.workers.length,beforeSeekWorkers.created+1,
-      "seek creates one temporary handoff Worker");
+        x.type==="worker-state-activated"&&x.generation===generation),
+      pcmNodeCount:window.__engineCreations.filter(x=>
+        x.kind==="worklet"&&x.name==="audio-lab-source-pcm").length
+    }),seekCommand.generation);
+    const addedSeekWorkers=seekRender.workers.length-beforeSeekWorkers.created;
+    assert.ok(addedSeekWorkers===0||addedSeekWorkers===1,
+      "seek reuses the active Worker or creates at most one temporary handoff Worker");
     assert.equal(seekRender.workers.filter(x=>!x.terminated).length,
       beforeSeekWorkers.active,
-      "seek retires its handoff Worker after the existing source-clock route activates");
-    assert.ok(seekRender.responses.some(x=>x.ok===true),
-      "seek handoff Worker must return rendered PCM");
+      "seek leaves the same number of Workers active after PCM activation");
+    assert.equal(seekRender.pcmNodeCount,beforeSeekPcmNodes,
+      "seek keeps the existing shared PCM Worklet");
+    assert.equal(seekCommand.frame,normalizedSeekFrame,
+      "the Worklet must receive the A/B-normalized seek source frame: "+
+      JSON.stringify({seekCommand,expectedSeekFrame,normalizedSeekFrame,loopTarget}));
     assert.ok(seekRender.activations.length>0,
       "seek PCM must activate in the existing shared Worklet");
     assert.ok(Number.isSafeInteger(expectedSeekFrame),
       "keyboard event must observe the shared source-frame cursor before seeking");
-    assert.ok(seekRender.messages.some(x=>x.startFrame===expectedSeekFrame),
-      "ArrowRight must submit a real Worker render from the clamped source frame: "+
-      JSON.stringify({expectedSeekFrame,messages:seekRender.messages}));
+    assert.ok(seekRender.activations.some(x=>
+      x.sourceFrame===normalizedSeekFrame&&x.missingFrames===missingBeforeSeek),
+      "the shared clock must activate at the exact A/B-normalized frame without new PCM loss: "+
+      JSON.stringify({normalizedSeekFrame,loopTarget,
+        missingBeforeSeek,activations:seekRender.activations}));
+    assert.ok(seekRender.messages.every(x=>
+      x.startFrame<=normalizedSeekFrame&&x.endFrame>normalizedSeekFrame),
+      "any newly rendered seek PCM must cover the requested source frame: "+
+      JSON.stringify({normalizedSeekFrame,messages:seekRender.messages}));
+    assert.ok(seekRender.responses.every(x=>x.ok===true),
+      "any newly rendered seek Worker job must complete successfully");
     await page.waitForFunction(()=>{
       const text=document.querySelector("#rt-indicator")?.textContent||"";
       return text.includes("モデル再生中")&&text.includes("PV");

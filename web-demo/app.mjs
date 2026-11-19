@@ -362,14 +362,14 @@ function refreshAB(){
   const workerPlayback=Boolean(state.player?.labStream);
   for(const id of ["player-loop-a","player-loop-b","player-loop-enabled",
     "player-loop-a-now","player-loop-b-now"])
-    $("#"+id).disabled=workerPlayback;
+    $("#"+id).disabled=false;
   if(workerPlayback)
     $("#player-loop-hint").textContent=
-      "Worker研究モデルは全曲ループで再生中です。A/B区間の編集・適用は未対応です。";
+      "研究モデルのA/B変更は共通PCM時計の次の安全な区間境界で反映します。";
   detailWaveEditor?.refresh(true);
 }
 function syncLoopToPlayer(player=state.player){
-  if(!player?.pcmBridge||player.initializing)return;
+  if((!player?.pcmBridge&&!player?.labStream)||player.initializing)return;
   const requested={a:ab.a,b:ab.b,enabled:ab.enabled};
   if(!player.loopBusy&&!player.pendingLoop&&player.appliedLoop?.a===requested.a&&
      player.appliedLoop?.b===requested.b&&
@@ -381,15 +381,22 @@ function syncLoopToPlayer(player=state.player){
     while(state.player===player&&player.pendingLoop){
       const requested=player.pendingLoop;
       player.pendingLoop=null;
-      // setLoopBounds delivers an atomic endpoint+transport change. Keep
-      // loop enabled/disabled consistent without restarting the Worklet.
-      await player.pcmBridge.setLoopBounds(requested.a,requested.b);
+      if(player.labStream){
+        await player.stream.updateLoop(requested);
+      }else{
+        // setLoopBounds delivers an atomic endpoint+transport change. Keep
+        // loop enabled/disabled consistent without restarting the Worklet.
+        await player.pcmBridge.setLoopBounds(requested.a,requested.b);
+        if(state.player!==player)return;
+        await player.pcmBridge.setLoopEnabled(requested.enabled);
+      }
       if(state.player!==player)return;
-      await player.pcmBridge.setLoopEnabled(requested.enabled);
       player.appliedLoop=requested;
     }
     if(state.player===player)
-      $("#player-loop-hint").textContent="区間の音声処理への反映が完了しました。";
+      $("#player-loop-hint").textContent=player.labStream?
+        "A/B区間を研究モデルの共通PCM時計へ反映しました。":
+        "区間の音声処理への反映が完了しました。";
   })().catch(error=>{
     if(state.player===player){
       $("#player-loop-hint").textContent="区間変更が反映されません: "+error.message;
@@ -2604,10 +2611,10 @@ function labRefresh(){
     spectral:"STFT Spectral：周波数成分の位相を連続進行させる再生方式。0倍は同じ波形片の反復ではなく、固定した音源位置のスペクトルから位相を発展させます。極短区間の可聴品質とiOS処理性能は検証中です。",
     granular:"Granular：波形片の重ね合わせ方式（比較用）。符号付き±8倍・0倍・サンプル単位A/Bに対応します。極低速時の周期感・comb感は既知の評価課題です。",
     live:"Rust engine 3：部分音発振器と帯域内スペクトル残差を共通PCMの元音源位置から解析し、出力時間で合成します。±8倍・0倍・逆再生・独立音程・A/B・スクラブに接続しました。音質評価は継続中です。",
-    pv:"位相ボコーダー：ピーク近傍の位相関係を保持するSTFT再合成です。通常は元音源位置と逆/0倍・スクラブに直接追従します。個別波長選択時は従来の先読み処理です。打音や極低速の音色は検証中です。",
-    wsola:"WSOLA：ステレオ共通の正規化波形相関によって接続する実時間OLA。通常は元音源位置・正逆/0倍・スクラブに追従します。個別波長ONは従来の先読み方式です。極低速の周期性・打音品質は検証中です。",
-    dual:"短窓WSOLA＋長窓PV：打音の短い波形と持続音の周波数成分を独立合成し、過渡音検出・ステレオ共通位相照合で切替える方式です。±8/0/逆とスクラブに対応しますが音響品質は未受入です。",
-    am:"AM包絡＋PV：元音源の緩やかな音量輪郭をピーク位相ロックPVに35msで平滑反映します。通常再生は共通PCMと正逆・0倍・A/Bに対応。個別波長ONは別の先読み研究処理です。",
+    pv:"位相ボコーダー：ピーク近傍の位相関係を保持するSTFT再合成です。通常経路は元音源位置と逆/0倍・スクラブに直接追従します。個別波長選択時は固有DSPの先読みWorkerで処理し、A/Bは安全な区間境界で反映します。打音や極低速の音色は検証中です。",
+    wsola:"WSOLA：ステレオ共通の正規化波形相関によって接続する実時間OLA。通常経路は元音源位置・正逆/0倍・スクラブに追従します。個別波長ONは固有DSPの先読みWorkerで処理し、A/Bは安全な区間境界で反映します。極低速の周期性・打音品質は検証中です。",
+    dual:"短窓WSOLA＋長窓PV：打音の短い波形と持続音の周波数成分を独立合成し、過渡音検出・ステレオ共通位相照合で切替える方式です。通常経路は±8/0/逆とスクラブに対応します。Worker経路は正方向0.5〜2倍とA/Bに対応しますが、音響品質は未受入です。",
+    am:"AM包絡＋PV：元音源の緩やかな音量輪郭をピーク位相ロックPVに35msで平滑反映します。通常経路は共通PCMと正逆・0倍・A/Bに対応。個別波長ONは固有DSPの先読みWorkerで処理し、A/Bは安全な区間境界で反映します。",
     "period-joint":"周波数ごとの個別波長（研究版）：7つの周波数別周期窓から複数の共通部分音を推定し、残差も処理します。和音・変調・声・打音も再生対象ですが、物理的な音源分離・完全な位相/音色保持は未証明です。"
   };
   $("#lab-model-description").textContent=lab.individual&&!isPCMModel(lab.mode)?
@@ -2615,9 +2622,11 @@ function labRefresh(){
     notes[lab.mode];
   const cap=primaryModelCapability(lab.mode,granular.speed,
     {individual:lab.individual});
-  $("#lab-model-compatibility").textContent=cap.sampleAB?
+  $("#lab-model-compatibility").textContent=cap.signed?
     "このモデルは0/逆再生・サンプル単位A/B・スクラブ対応。再生/モデルの両タブが同じ設定値です。":
-    (cap.reason||"Worker研究モデルは正方向0.5〜2倍のみ対応。A/B・0倍・逆方向・±2倍超は未対応です。1.5秒区間の再計算中は一時無音になる場合があります。シークは区間再計算を待ち、即時スクラブは未対応です。");
+    (cap.sampleAB?
+      "Workerは正方向0.5〜2倍。A/Bは元音源サンプル座標で安全な区間境界から反映し、即時スクラブは未対応です。":
+      (cap.reason||"Worker研究モデルは正方向0.5〜2倍のみ対応。0倍・逆方向・±2倍超と即時スクラブは未対応です."));
   if(!state.player?.labStream)labStatusText(!cap.supported?
     "未適用: "+cap.reason:lab.mode==="live"?
     "Rust/WASMの部分音処理 · 選択時に主再生へ適用":
@@ -2815,6 +2824,9 @@ async function startModelPlayback(offset=null,appliedOverride=null){
       fftSize:applied.fftSize,shortFftSize:applied.shortFftSize,
       longFftSize:applied.longFftSize,referenceWindows:applied.referenceWindows,
       periodCycles:applied.periodCycles,startSeconds:where,
+      loopStartFrame:ab.a,
+      loopEndFrame:ab.b||state.dry[0].length,
+      loopEnabled:ab.enabled,
       onStatus:text=>{
         if(state.player!==player)return;
         setPlayerProcessingDetail(text);
@@ -2855,7 +2867,9 @@ async function startModelPlayback(offset=null,appliedOverride=null){
     if(epoch!==state.transportEpoch){stream.stop();return;}
     player={labStream:true,stream,mode:"wet",appliedLabMode:applied.mode,
       appliedConfig:applied,offset:where,at:ctx.currentTime,
-      sourceTimeRate:applied.speed,master:stream.master};
+      sourceTimeRate:applied.speed,master:stream.master,
+      appliedLoop:{a:ab.a,b:ab.b||state.dry[0].length,
+        enabled:ab.enabled}};
     state.player=player;controls.stop.disabled=false;
     refreshAB();
     controls.main.textContent="■ モデル停止";

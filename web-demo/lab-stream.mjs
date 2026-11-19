@@ -4,14 +4,51 @@
 import {createSourcePCMBridge} from "./source-pcm-bridge.mjs";
 import {RENDERED_CHUNK_SLOTS} from "./source-pcm-renderer.mjs";
 export const CHUNK_SECONDS=1.5;
-export function planChunk({totalFrames,sampleRate,speed,startSeconds,startFrame=null,model='dual',fftSize=2048,shortFftSize=512,longFftSize=fftSize,referenceWindows=8,jointBackend=null}){
+export function requiredSeekChunkCount({totalFrames,sampleRate,speed,
+  loopEnabled,plan}={}){
+  if(!Number.isSafeInteger(totalFrames)||totalFrames<1||
+     !Number.isFinite(sampleRate)||sampleRate<=0||
+     !Number.isFinite(speed)||speed<=0||typeof loopEnabled!=="boolean"||
+     !plan||!Number.isSafeInteger(plan.core)||plan.core<1||
+     !Number.isSafeInteger(plan.nextFrame))
+    throw RangeError("invalid Worker seek chunk requirement");
+  const normalChunkFrames=Math.ceil(CHUNK_SECONDS*sampleRate);
+  if(!loopEnabled&&(plan.core<normalChunkFrames||
+     plan.nextFrame>=totalFrames))return 1;
+  return plan.core<normalChunkFrames||speed>1.5?2:1;
+}
+export function repeatLoopContext(source,loopStartFrame,loopEndFrame,count,side){
+  if(!(source instanceof Float32Array)||
+     !Number.isSafeInteger(loopStartFrame)||loopStartFrame<0||
+     !Number.isSafeInteger(loopEndFrame)||loopStartFrame>=loopEndFrame||
+     loopEndFrame>source.length||!Number.isSafeInteger(count)||count<0||
+     side!=="left"&&side!=="right")
+    throw RangeError("invalid repeated loop context");
+  const length=loopEndFrame-loopStartFrame,context=new Float32Array(count);
+  for(let i=0;i<count;i++){
+    const offset=side==="left"?length-count+i:i;
+    context[i]=source[loopStartFrame+((offset%length)+length)%length];
+  }
+  return context;
+}
+export function planChunk({totalFrames,sampleRate,speed,startSeconds,startFrame=null,model='dual',fftSize=2048,shortFftSize=512,longFftSize=fftSize,referenceWindows=8,jointBackend=null,loopStartFrame=0,loopEndFrame=totalFrames,loopEnabled=true}){
   if(!(totalFrames>0&&sampleRate>0&&speed>0))throw RangeError('invalid source range');
   if(startFrame!==null&&!Number.isSafeInteger(startFrame))throw RangeError('invalid source frame');
+  if(!Number.isSafeInteger(loopStartFrame)||!Number.isSafeInteger(loopEndFrame)||
+     loopStartFrame<0||loopStartFrame>=loopEndFrame||loopEndFrame>totalFrames||
+     typeof loopEnabled!=='boolean')throw RangeError('invalid loop range');
   if(![1024,2048,4096,8192].includes(longFftSize)||![256,512,1024,2048].includes(shortFftSize)||(model==='dual'&&shortFftSize>=longFftSize))throw RangeError('invalid short/long FFT windows');
   if(!Number.isInteger(referenceWindows)||referenceWindows<2||referenceWindows>16)throw RangeError('invalid context window count');
   const requestedStart=startFrame===null?Math.floor(startSeconds*sampleRate):startFrame;
-  const start=Math.min(totalFrames-1,Math.max(0,requestedStart));
-  const core=Math.min(totalFrames-start,Math.ceil(CHUNK_SECONDS*sampleRate));
+  const loopLength=loopEndFrame-loopStartFrame;
+  const normalizedStart=loopEnabled&&
+    (requestedStart<loopStartFrame||requestedStart>=loopEndFrame)?
+    loopStartFrame+((requestedStart-loopStartFrame)%loopLength+loopLength)%loopLength:
+    requestedStart;
+  const start=Math.min(loopEnabled?loopEndFrame-1:totalFrames-1,
+    Math.max(loopEnabled?loopStartFrame:0,normalizedStart));
+  const rangeEnd=loopEnabled?loopEndFrame:totalFrames;
+  const core=Math.min(rangeEnd-start,Math.ceil(CHUNK_SECONDS*sampleRate));
   const analysisWindow=(model==='wsola'||(model==='period-joint'&&jointBackend==='wsola'))?shortFftSize:longFftSize;
   // The experimental joint model disables long FFT and reference-window
   // controls. Its preview context must NOT accidentally depend on either.
@@ -19,21 +56,35 @@ export function planChunk({totalFrames,sampleRate,speed,startSeconds,startFrame=
     (jointBackend?Math.min(Math.ceil(sampleRate*.7),
       Math.max(Math.ceil(sampleRate*.120),analysisWindow*2)):Math.ceil(sampleRate*.120)):
     Math.min(Math.ceil(sampleRate*.7),Math.max(Math.ceil(sampleRate*.040),referenceWindows*analysisWindow/4,analysisWindow));
-  const left=Math.min(start,context),right=Math.min(totalFrames-start-core,context);
-  const wrapRight=start+core>=totalFrames?Math.min(totalFrames,context):0;
-  const from=start-left,to=start+core+right;
+  const contiguousLeft=Math.min(start-(loopEnabled?loopStartFrame:0),context);
+  const leftWrapCandidate=loopEnabled&&loopLength<totalFrames?
+    context-contiguousLeft:0;
+  const wrapLeft=leftWrapCandidate;
+  const left=contiguousLeft+wrapLeft;
+  const right=Math.min(rangeEnd-start-core,context);
+  const wrapRight=loopEnabled&&start+core>=rangeEnd?
+    context-right:0;
+  const from=start-contiguousLeft,to=start+core+right;
   const crop=Math.round(left/speed),central=Math.ceil(core/speed);
   const tail=Math.min(Math.round(.025*sampleRate),Math.round(right/speed));
-  return {from,to,left,right,wrapRight,core,start,shortFftSize,longFftSize,
+  const nextFrame=loopEnabled&&start+core>=loopEndFrame?loopStartFrame:
+    start+core;
+  return {from,to,left,right,wrapLeft,wrapRight,core,start,loopStartFrame,
+    loopEndFrame,loopEnabled,nextFrame,shortFftSize,longFftSize,
+    sourceStartFrame:start-left,
     outputStart:crop,outputFrames:central+tail+(wrapRight>0?1:0),
-    coreFrames:central,nextSeconds:(start+core)/sampleRate};
+    coreFrames:central,nextSeconds:nextFrame/sampleRate};
 }
-export async function createModelStream({ctx,sourceChannels,sampleRate,speed,semitones,model,fftSize,shortFftSize=512,longFftSize=fftSize,referenceWindows,periodCycles=8,jointBackend=null,startSeconds=0,onStatus=()=>{},onStarted=()=>{},onFailure=()=>{}}){
+export async function createModelStream({ctx,sourceChannels,sampleRate,speed,semitones,model,fftSize,shortFftSize=512,longFftSize=fftSize,referenceWindows,periodCycles=8,jointBackend=null,startSeconds=0,loopStartFrame=0,loopEndFrame=null,loopEnabled=true,onStatus=()=>{},onStarted=()=>{},onFailure=()=>{}}){
   const totalFrames=sourceChannels[0].length,duration=totalFrames/sampleRate;
+  loopEndFrame??=totalFrames;
   if(!Number.isSafeInteger(totalFrames)||totalFrames<1||
      !Number.isFinite(sampleRate)||sampleRate<=0||
      !Number.isFinite(speed)||speed<.5||speed>2||
-     !Number.isFinite(semitones)||semitones<-12||semitones>12)
+     !Number.isFinite(semitones)||semitones<-12||semitones>12||
+     !Number.isSafeInteger(loopStartFrame)||loopStartFrame<0||
+     !Number.isSafeInteger(loopEndFrame)||loopStartFrame>=loopEndFrame||
+     loopEndFrame>totalFrames||typeof loopEnabled!=='boolean')
     throw RangeError("legacy Worker supports positive 0.5..2x and -12..12 semitones");
   let stopped=false,started=false,pending=false,stagingOperations=0,job=0;
   let handoffWorker=null,handoffPending=false,handoffInstalling=false;
@@ -45,7 +96,8 @@ export async function createModelStream({ctx,sourceChannels,sampleRate,speed,sem
   let cursorFrame=0,sequenceCursor=0,activeJob=0,activeJobGeneration=0;
   let activeJobConfig=null,activeJobSequence=0;
   let config={speed,semitones,model,fftSize,shortFftSize,longFftSize,
-    referenceWindows,periodCycles,jointBackend};
+    referenceWindows,periodCycles,jointBackend,loopStartFrame,loopEndFrame,
+    loopEnabled};
   let activeConfig=config;
   const sameRenderConfig=(left,right)=>{
     if(!left||!right)return false;
@@ -60,7 +112,8 @@ export async function createModelStream({ctx,sourceChannels,sampleRate,speed,sem
   const configs=new Map([[0,config]]),transitionWaiters=new Map();
   const initial=Math.min(totalFrames-1,Math.max(0,
     Math.floor((((startSeconds%duration)+duration)%duration)*sampleRate)));
-  cursorFrame=latestFrame=initial;
+  cursorFrame=latestFrame=loopEnabled&&
+    (initial<loopStartFrame||initial>=loopEndFrame)?loopStartFrame:initial;
   const worker=new Worker('./lab-processor.worker.mjs',{type:'module'});
   let bridge=null,master=null;
   const resolveTransition=(id,value)=>{
@@ -95,13 +148,24 @@ export async function createModelStream({ctx,sourceChannels,sampleRate,speed,sem
       shortFftSize:jobConfig.shortFftSize,
       longFftSize:jobConfig.longFftSize,
       referenceWindows:jobConfig.referenceWindows,
-      jointBackend:jobConfig.jointBackend});
+      jointBackend:jobConfig.jointBackend,
+      loopStartFrame:jobConfig.loopStartFrame,
+      loopEndFrame:jobConfig.loopEndFrame,
+      loopEnabled:jobConfig.loopEnabled});
     const channels=sourceChannels.map(ch=>{
+      const left=plan.wrapLeft?repeatLoopContext(ch,plan.loopStartFrame,
+        plan.loopEndFrame,plan.wrapLeft,"left"):null;
       const core=ch.slice(plan.from,plan.to);
-      if(!plan.wrapRight)return core;
-      const wrapped=ch.slice(0,plan.wrapRight);
-      const input=new Float32Array(core.length+wrapped.length);
-      input.set(core);input.set(wrapped,core.length);return input;
+      const right=plan.wrapRight?repeatLoopContext(ch,plan.loopStartFrame,
+        plan.loopEndFrame,plan.wrapRight,"right"):null;
+      if(!left&&!right)return core;
+      const input=new Float32Array((left?.length||0)+core.length+
+        (right?.length||0));
+      let offset=0;
+      if(left){input.set(left,offset);offset+=left.length;}
+      input.set(core,offset);offset+=core.length;
+      if(right)input.set(right,offset);
+      return input;
     });
     return {plan,channels,sequence};
   };
@@ -124,7 +188,7 @@ export async function createModelStream({ctx,sourceChannels,sampleRate,speed,sem
     if(accepted.stale){stagedGeneration=null;return;}
     bufferedSegments=accepted.bufferedSegments;
     sequenceCursor=result.sequence+1;
-    cursorFrame=plan.start+plan.core>=totalFrames?0:plan.start+plan.core;
+    cursorFrame=plan.nextFrame;
   };
   const startHandoffJob=(targetGeneration,targetConfig,startFrame,sequence,
     {seek=false}={})=>{
@@ -207,6 +271,9 @@ export async function createModelStream({ctx,sourceChannels,sampleRate,speed,sem
       onStatus('設定を切替中 · 現在のPCMを再生しながら次の世代を準備中');
       void bridge.stageWorkerPlayback({speed:requestedConfig.speed,
         pitchSemitones:requestedConfig.semitones,
+        loopStartFrame:requestedConfig.loopStartFrame,
+        loopEndFrame:requestedConfig.loopEndFrame,
+        loopEnabled:requestedConfig.loopEnabled,
         generation:requestedGeneration}).then(accepted=>{
         if(stopped)return;
         if(requestedGeneration!==generation){
@@ -216,7 +283,8 @@ export async function createModelStream({ctx,sourceChannels,sampleRate,speed,sem
         cursorFrame=accepted.sourceFrame;
         sequenceCursor=accepted.sequence;
         bufferedSegments=accepted.bufferedSegments??bufferedSegments;
-        if(pending&&handoffUnavailableGeneration!==requestedGeneration)
+        if(pending&&handoffUnavailableGeneration!==requestedGeneration&&
+           !accepted.terminal)
           startHandoffJob(requestedGeneration,requestedConfig,
             accepted.sourceFrame,accepted.sequence);
       }).catch(error=>{
@@ -229,6 +297,7 @@ export async function createModelStream({ctx,sourceChannels,sampleRate,speed,sem
       return;
     }
     if(pending||handoffPending)return;
+    if(!requestedConfig.loopEnabled&&cursorFrame>=totalFrames)return;
     const bufferLimit=RENDERED_CHUNK_SLOTS;
     if(bufferedSegments>=bufferLimit)return;
     const jobConfig=requestedConfig,jobGeneration=requestedGeneration;
@@ -295,8 +364,8 @@ export async function createModelStream({ctx,sourceChannels,sampleRate,speed,sem
   };
   try{
     bridge=await createSourcePCMBridge({ctx,sourceChannels,
-      sourceSampleRate:sampleRate,speed,startFrame:initial,
-      loopStartFrame:0,loopEndFrame:totalFrames,loopEnabled:true,
+      sourceSampleRate:sampleRate,speed,startFrame:cursorFrame,
+      loopStartFrame,loopEndFrame,loopEnabled,
       processingMode:"worker",pitchSemitones:semitones,onEvent:onBridgeEvent});
     master=ctx.createGain();master.gain.value=1;
     bridge.connect(master);master.connect(ctx.destination);
@@ -329,12 +398,15 @@ export async function createModelStream({ctx,sourceChannels,sampleRate,speed,sem
         sequenceCursor=Math.max(sequenceCursor,activeJobSequence+1);
       if(resultGeneration===generation||
          seekTransitionGeneration!==generation)
-        cursorFrame=plan.start+plan.core>=totalFrames?0:plan.start+plan.core;
+        cursorFrame=plan.nextFrame;
       pending=false;
       if(!started){
         // Give the first 1.5-second render enough lookahead to cover one
         // Worker round trip before exposing the stream to the audio clock.
-        if(bufferedSegments<2){pump();return;}
+        if(bufferedSegments<2&&
+           (resultConfig.loopEnabled||plan.nextFrame<totalFrames)){
+          pump();return;
+        }
         await bridge.play();
         if(stopped)return;
         started=true;onStarted(ctx.currentTime);
@@ -362,7 +434,9 @@ export async function createModelStream({ctx,sourceChannels,sampleRate,speed,sem
       startSeconds:frame/sampleRate,startFrame:frame,
       model:next.model,fftSize:next.fftSize,
       shortFftSize:next.shortFftSize,longFftSize:next.longFftSize,
-      referenceWindows:next.referenceWindows,jointBackend:next.jointBackend});
+      referenceWindows:next.referenceWindows,jointBackend:next.jointBackend,
+      loopStartFrame:next.loopStartFrame,loopEndFrame:next.loopEndFrame,
+      loopEnabled:next.loopEnabled});
     return next;
   };
   const reset=async(frame,nextConfig)=>{
@@ -381,13 +455,16 @@ export async function createModelStream({ctx,sourceChannels,sampleRate,speed,sem
         startSeconds:frame/sampleRate,startFrame:frame,model:next.model,
         fftSize:next.fftSize,shortFftSize:next.shortFftSize,
         longFftSize:next.longFftSize,referenceWindows:next.referenceWindows,
-        jointBackend:next.jointBackend});
-      const requiredChunks=seekPlan.core<Math.ceil(CHUNK_SECONDS*sampleRate)||
-        next.speed>1.5?2:1;
+        jointBackend:next.jointBackend,loopStartFrame:next.loopStartFrame,
+        loopEndFrame:next.loopEndFrame,loopEnabled:next.loopEnabled});
+      const requiredChunks=requiredSeekChunkCount({totalFrames,sampleRate,
+        speed:next.speed,loopEnabled:next.loopEnabled,plan:seekPlan});
       stagingOperations++;
       try{
-        const staged=await bridge.stageWorkerSeekPlayback({frame,
+        const staged=await bridge.stageWorkerSeekPlayback({frame:seekPlan.start,
           speed:next.speed,pitchSemitones:next.semitones,
+          loopStartFrame:next.loopStartFrame,
+          loopEndFrame:next.loopEndFrame,loopEnabled:next.loopEnabled,
           generation:requestedGeneration,requiredChunks,
           reuseCompatible:sameRenderConfig(activeConfig,next),
           reuseGeneration:activeGeneration});
@@ -425,9 +502,11 @@ export async function createModelStream({ctx,sourceChannels,sampleRate,speed,sem
   };
   const stageSettings=({frame,speed,semitones,...settings}={})=>{
     const targetFrame=frame??latestFrame;
+    const validationFrame=frame===undefined&&targetFrame===totalFrames?
+      totalFrames-1:targetFrame;
     // Validate against the caller's source position, but the audible source
     // clock chooses the next safe retained-PCM boundary for activation.
-    const next=validateNext(targetFrame,{...settings,
+    const next=validateNext(validationFrame,{...settings,
       speed:speed??config.speed,semitones:semitones??config.semitones});
     for(const id of [...transitionWaiters.keys()])
       resolveTransition(id,{stale:true});
@@ -447,6 +526,10 @@ export async function createModelStream({ctx,sourceChannels,sampleRate,speed,sem
   return {master,start(){pump();},stop:cleanup,
     sourcePositionAt(){return latestFrame/sampleRate;},
     seek(frame){return reset(frame,{});},
+    updateLoop({a,b,enabled}={}){
+      return stageSettings({loopStartFrame:a,loopEndFrame:b,
+        loopEnabled:enabled});
+    },
     updateSettings:stageSettings,
     get active(){return !stopped},get firstScheduled(){return started},
     get bufferedSegments(){return bufferedSegments}};

@@ -65,5 +65,5 @@ test('browser slider appears in opt-in mode and forwards user-selected cycle cou
  assert.match(app,/lab.periodCycles=nextCycles/);
  assert.match(app,/periodCycles:applied.periodCycles,startSeconds:where/);
  assert.match(stream,/longFftSize:targetConfig\.longFftSize,[\s\S]*periodCycles:targetConfig\.periodCycles,[\s\S]*jointBackend:targetConfig\.jointBackend,plan/);
- assert.match(worker,/sourceStartSeconds:plan.from\/sampleRate,periodCycles,jointBackend/);
+ assert.match(worker,/sourceStartSeconds:plan\.sourceStartFrame\/sampleRate,\s*periodCycles,jointBackend/);
 });
