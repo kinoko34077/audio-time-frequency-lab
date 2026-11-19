@@ -10,6 +10,7 @@ import struct
 import tempfile
 import wave
 from playwright.sync_api import sync_playwright
+from playwright_runtime import launch_chromium
 
 ORIGIN = os.environ.get('LAB_TEST_ORIGIN', 'http://127.0.0.1:8123/')
 here = pathlib.Path(__file__).resolve().parents[1]
@@ -23,7 +24,7 @@ try:
         samples = (struct.pack('<h', int(8000 * math.sin(2*math.pi*440*n/16000))) for n in range(16000))
         w.writeframes(b''.join(samples))
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True, args=['--no-sandbox', '--autoplay-policy=no-user-gesture-required', "--mute-audio"])
+        browser = launch_chromium(p, headless=True, args=['--no-sandbox', '--autoplay-policy=no-user-gesture-required', "--mute-audio"])
         page = browser.new_page(accept_downloads=True)
         errors = []
         page.on('pageerror', lambda e: errors.append(str(e)))
