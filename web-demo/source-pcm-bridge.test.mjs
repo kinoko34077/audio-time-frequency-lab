@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {createSourcePCMBridge} from "./source-pcm-bridge.mjs";
+import {createProgressivePCMCache} from "./progressive-source-cache.mjs";
 
 class FakeAudioWorkletNode{
   constructor(){
@@ -43,6 +44,14 @@ function range(startFrame,frameCount){
   return {startFrame,channels:[new Float32Array(frameCount).fill(.2)]};
 }
 
+async function waitFor(predicate,timeoutMs=1000){
+  const deadline=Date.now()+timeoutMs;
+  while(!predicate()){
+    if(Date.now()>=deadline)throw Error("timed out waiting for test state");
+    await new Promise(resolve=>setTimeout(resolve,0));
+  }
+}
+
 test("a preempted playback refill retries without failing the audio processor",async()=>{
   await withFakeWorklet(async nodes=>{
     const reads=[];
@@ -66,6 +75,76 @@ test("a preempted playback refill retries without failing the audio processor",a
       message.refillId===17),node.sent);
     assert.equal(events.filter(event=>event.type==="fatal-error").length,0,events);
     bridge.dispose();
+  });
+});
+
+test("A/B endpoint reads retry when a scrub preempts a shared PCM decode",async()=>{
+  await withFakeWorklet(async nodes=>{
+    const sourceReads=[],started=[],aborted=[];
+    let releaseA=null,releaseB=null;
+    const source=createProgressivePCMCache({sourceFrames:524_288,channelCount:1,
+      windowFrames:65_536,maxCachedWindows:2,maxConcurrentDecodes:2,
+      decodeWindow:(startFrame,frameCount,{signal})=>{
+        sourceReads.push(startFrame);
+        if(startFrame!==65_536&&startFrame!==196_608)
+          return Promise.resolve([new Float32Array(frameCount).fill(.2)]);
+        started.push(startFrame);
+        return new Promise((resolve,reject)=>{
+          const onAbort=()=>{
+            aborted.push(startFrame);
+            reject(new DOMException("PCM window decode aborted","AbortError"));
+          };
+          signal.addEventListener("abort",onAbort,{once:true});
+          const release=()=>{
+            signal.removeEventListener("abort",onAbort);
+            resolve([new Float32Array(frameCount).fill(.2)]);
+          };
+          if(startFrame===65_536)releaseA=release;
+          else if(started.filter(frame=>frame===196_608).length===1)
+            releaseB=release;
+          else release();
+        });
+      }});
+    let bridge;
+    try{
+      bridge=await createSourcePCMBridge({ctx:context(),source,
+        sourceSampleRate:48_000,startFrame:10_000,loopStartFrame:0,
+        loopEndFrame:524_288,loopEnabled:true});
+      const node=nodes[0];
+      const loopResult=bridge.setLoopBounds(70_000,300_000)
+        .then(()=>({ok:true}),error=>({ok:false,error}));
+      await waitFor(()=>started.includes(65_536)&&started.includes(196_608))
+        .catch(error=>{throw Error(error.message+": "+JSON.stringify({started,
+          sourceReads,stats:source.stats()}));});
+
+      const scrubResult=bridge.scrub(70_000,1)
+        .then(()=>({ok:true}),error=>({ok:false,error}));
+      await waitFor(()=>aborted.includes(196_608));
+      const early=await Promise.race([loopResult.then(result=>({settled:true,result})),
+        new Promise(resolve=>setTimeout(()=>resolve({settled:false}),50))]);
+      assert.equal(early.settled,false,
+        early.result?.error?.message||"A/B update must retry scheduler cancellation");
+
+      releaseA();
+      await waitFor(()=>node.sent.some(message=>message.type==="scrub"));
+      const scrubMessage=node.sent.findLast(message=>message.type==="scrub");
+      node.port.onmessage({data:{type:"command-accepted",
+        requestId:scrubMessage.requestId}});
+      assert.deepEqual(await scrubResult,{ok:true});
+      await waitFor(()=>started.filter(frame=>frame===196_608).length===2);
+      releaseB();
+      await waitFor(()=>node.sent.some(message=>message.type==="loop-config"&&
+        message.a===70_000&&message.b===300_000));
+      const loopMessage=node.sent.findLast(message=>message.type==="loop-config");
+      node.port.onmessage({data:{type:"command-accepted",
+        requestId:loopMessage.requestId}});
+      assert.deepEqual(await loopResult,{ok:true});
+      assert.equal(sourceReads.filter(frame=>frame===196_608).length,2,
+        "the preempted endpoint must be decoded again");
+    }finally{
+      releaseA?.();releaseB?.();
+      bridge?.dispose();source.dispose();
+    }
   });
 });
 

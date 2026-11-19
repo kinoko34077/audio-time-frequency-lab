@@ -258,9 +258,24 @@ export async function createSourcePCMBridge({
     // one message. No render quantum can see new pins with old A/B bounds.
     const revision=++loopRevision;
     return (async()=>{
-      const endpoints=enabled?await Promise.all([
-        windowSlice(a,1,"playback"),windowSlice(b-1,-1,"playback")
-      ]):[];
+      let endpoints=[];
+      while(enabled&&!closed&&revision===loopRevision){
+        try{
+          endpoints=await Promise.all([
+            windowSlice(a,1,"playback"),windowSlice(b-1,-1,"playback")
+          ]);
+          break;
+        }catch(error){
+          if(closed)throw closedFailure();
+          if(revision!==loopRevision)return {stale:true};
+          const preempted=error?.name==="AbortError"||
+            error?.message==="PCM window decode aborted";
+          if(!preempted)throw error;
+          // Scrubs outrank A/B endpoint reads. Let the aborted decode clean
+          // up, then retry while these bounds are still the current request.
+          await new Promise(resolve=>setTimeout(resolve,0));
+        }
+      }
       if(closed)throw closedFailure();
       if(revision!==loopRevision)return {stale:true};
       return submit({type:"loop-config",op,a,b,enabled,endpoints},
