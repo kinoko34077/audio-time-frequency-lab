@@ -225,6 +225,31 @@ test("extending a short active Worker loop retires its old loop body at the boun
   assert.equal(p.statistics.missingFrames,0);
 });
 
+test("retiring one-frame and exact-step Worker loops detects a wrap to the same frame",()=>{
+  for(const {endFrame,speed} of [{endFrame:5,speed:1},
+    {endFrame:6,speed:2}]){
+    const p=createSourcePCMRenderer({sourceFrames:32,sourceSampleRate:8,
+      outputSampleRate:8,channelCount:1,speed,startFrame:4,
+      loopStartFrame:4,loopEndFrame:endFrame,loopEnabled:true});
+    const oldCore=Math.ceil((endFrame-4)/speed);
+    p.installRenderedChunk({generation:0,sequence:0,startFrame:4,
+      endFrame,speed,coreFrames:oldCore,
+      channels:[new Float32Array(oldCore).fill(1)]});
+    const staged=p.stageRenderedState({generation:1,speed,
+      pitchSemitones:0,loopStartFrame:4,loopEndFrame:12,loopEnabled:true});
+    assert.equal(staged.sourceFrame,endFrame);
+    const nextEnd=12,nextCore=Math.ceil((nextEnd-endFrame)/speed);
+    p.installRenderedChunk({generation:1,sequence:1,startFrame:endFrame,
+      endFrame:nextEnd,speed,coreFrames:nextCore,
+      channels:[new Float32Array(nextCore).fill(2)]});
+    assert.equal(p.renderBuffered([new Float32Array(4)]),0);
+    assert.equal(p.workerState.generation,1,
+      `the retired [4,${endFrame}) loop must hand off at ${speed}x`);
+    assert.equal(p.timeline.state.loopEndFrame,12);
+    assert.equal(p.statistics.missingFrames,0);
+  }
+});
+
 test("changing A stages the replacement inside the new loop instead of old A",()=>{
   const p=createSourcePCMRenderer({sourceFrames:32,sourceSampleRate:8,
     outputSampleRate:8,channelCount:1,speed:1,startFrame:7,
@@ -320,6 +345,21 @@ test("terminal loop exit applies changed Worker settings after the final PCM",()
   assert.equal(p.timeline.state.speed,1.5);
   assert.equal(p.timeline.state.ended,true);
   assert.equal(p.takeWorkerActivation().terminal,true);
+  assert.equal(p.statistics.missingFrames,0);
+});
+
+test("fractional Worker output reaches EOF without a terminal interpolation sample",()=>{
+  const speed=1.1,p=createSourcePCMRenderer({sourceFrames:32,
+    sourceSampleRate:48000,outputSampleRate:48000,channelCount:1,speed,
+    startFrame:28,loopStartFrame:0,loopEndFrame:32,loopEnabled:false});
+  p.installRenderedChunk({generation:0,sequence:0,startFrame:28,endFrame:32,
+    speed,coreFrames:4,channels:[new Float32Array(4).fill(1)]});
+  const output=[new Float32Array(8)];
+  assert.equal(p.renderBuffered(output),0,
+    "a missing sample beyond EOF is the terminal boundary, not missing PCM");
+  assert.equal(p.timeline.state.sourceFrame,32);
+  assert.equal(p.timeline.state.ended,true);
+  assert.deepEqual(Array.from(output[0].slice(4)),[0,0,0,0]);
   assert.equal(p.statistics.missingFrames,0);
 });
 

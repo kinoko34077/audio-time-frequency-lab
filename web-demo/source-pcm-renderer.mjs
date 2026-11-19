@@ -539,7 +539,8 @@ export function createSourcePCMRenderer({
         const at=Math.floor(index),fraction=index-at,a=samples[at];
         if(!Number.isFinite(a))return NaN;
         if(fraction===0)return a;
-        let b=samples[at+1];
+        let b=!state.loopEnabled&&segment.endFrame===sourceFrames&&
+          at+1>=segment.coreFrames?0:samples[at+1];
         if(!Number.isFinite(b)&&wrapDepth===0&&state.loopEnabled&&
            segment.endFrame===state.loopEndFrame){
           // A fractional source position just before a loop end
@@ -688,7 +689,8 @@ export function createSourcePCMRenderer({
         if(adjacent&&mix>=1)previousRendered=null;
         timeline.advance(1);
         if(state.loopEnabled&&segment?.retireAfterLoop&&
-           timeline.state.sourceFrame<position)
+           position+state.speed*sourceSampleRate/outputSampleRate>=
+             state.loopEndFrame)
           segment.completedLoop=true;
       }
       missingFrames+=missing;
