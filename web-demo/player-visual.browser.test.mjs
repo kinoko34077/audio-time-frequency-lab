@@ -103,6 +103,25 @@ test("R4 usability visual captures: desktop and mobile player and folded researc
     assert.equal(await page.$eval("#model-transport-host #audio-state-summary",e=>e.getClientRects().length>0),true);
     assert.equal(await page.$eval("#runtime-hud",e=>e.getClientRects().length),0,
       "the model view must not append a second permanent status panel after the footer");
+    await page.setViewport({width:610,height:900,deviceScaleFactor:1});
+    const tabletModel=await page.evaluate(()=>{
+      const grid=document.querySelector(".model-extra-grid");
+      const controls=[...grid.querySelectorAll(".lab-inline-control")]
+        .filter(control=>control.getClientRects().length>0);
+      return {columns:getComputedStyle(grid).gridTemplateColumns.trim().split(/\s+/).length,
+        controls:controls.map(control=>{
+          const label=control.querySelector(":scope > label").getBoundingClientRect();
+          const slider=control.querySelector(":scope > input[type=range]").getBoundingClientRect();
+          const value=control.querySelector(":scope > .inline-number").getBoundingClientRect();
+          return {sliderWidth:slider.width,labelBeforeSlider:label.right<=slider.left,
+            sliderBeforeValue:slider.right<=value.left};
+        })};
+    });
+    assert.equal(tabletModel.columns,1,"model controls need a full-width row at 610 px");
+    assert.ok(tabletModel.controls.length>=3&&tabletModel.controls.every(control=>
+      control.sliderWidth>0&&control.labelBeforeSlider&&control.sliderBeforeValue),
+      "model sliders must remain visible between their labels and editable values: "+JSON.stringify(tabletModel));
+    await page.setViewport({width:1280,height:900,deviceScaleFactor:1});
     // Error states must remain visible even if the full diagnostics are closed,
     // including startup failures from the separately loaded entry controller.
     await page.evaluate(()=>{
