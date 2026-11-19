@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createProgressiveAudioSource} from './progressive-audio-source.mjs';
+import {copyAudioSamplesIntoRange,createProgressiveAudioSource}
+  from './progressive-audio-source.mjs';
 
 function mockMedia({supported=true,channels=2,frames=8192,rate=48000,
   firstTimestamp=0}={}){
@@ -132,4 +133,14 @@ test('closes an AudioSample that resolves after its PCM read is aborted',async()
   }finally{
     source.dispose();
   }
+});
+
+test('closes AudioSamples beyond the point where a PCM range is filled',()=>{
+  let closeCount=0;
+  const sample=(timestamp)=>({timestamp,sampleRate:48_000,
+    numberOfFrames:512,numberOfChannels:1,copyTo(){},close(){closeCount++;}});
+  copyAudioSamplesIntoRange([sample(0),sample(512/48_000)],{
+    sourceStartTime:0,sampleRate:48_000,startFrame:0,
+    channels:[new Float32Array(512)]});
+  assert.equal(closeCount,2);
 });

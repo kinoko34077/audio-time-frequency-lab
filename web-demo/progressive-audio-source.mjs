@@ -15,8 +15,8 @@ export function copyAudioSamplesIntoRange(samples,{sourceStartTime,
     throw new RangeError('PCM output channels must have equal lengths');
   const endFrame=startFrame+frameCount;
   let coveredTo=startFrame;
-  for(const sample of samples){
-    try{
+  try{
+    for(const sample of samples){
       if(!sample||!Number.isFinite(sample.timestamp)||
          sample.sampleRate!==sampleRate||
          !Number.isSafeInteger(sample.numberOfFrames)||sample.numberOfFrames<1||
@@ -43,13 +43,13 @@ export function copyAudioSamplesIntoRange(samples,{sourceStartTime,
       }
       coveredTo=overlapEnd;
       if(coveredTo===endFrame)break;
-    }finally{
-      sample?.close?.();
     }
+    if(coveredTo!==endFrame)
+      throw new Error('音声デコーダが要求範囲のPCMを最後まで返しませんでした');
+    return channels;
+  }finally{
+    for(const sample of samples)sample?.close?.();
   }
-  if(coveredTo!==endFrame)
-    throw new Error('音声デコーダが要求範囲のPCMを最後まで返しませんでした');
-  return channels;
 }
 
 async function collectWindow({sink,sourceStartTime,sampleRate,startFrame,
