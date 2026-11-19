@@ -161,11 +161,12 @@ test("rapid zoom changes never overlap stale detail PCM reads",async()=>{
   try{
     ({editor,zoomIn,zoomOut}=makeEditor(source,sourceFrames/(2*48_000)));
     await new Promise(resolve=>setTimeout(resolve,0));
+    const readsBeforeZoom=reads.length;
     zoomOut.click();zoomOut.click();zoomIn.click();zoomIn.click();
     await waitForReadQuiet(source,reads);
     assert.equal(maxActiveReads,1,
       "a canceled detail pass must settle before the current viewport starts another read");
-    assert.ok(reads.length>1,
+    assert.ok(reads.length>readsBeforeZoom,
       "the latest detail viewport must resume after the canceled PCM chunk settles");
   }finally{
     editor?.setSource(null,48000);

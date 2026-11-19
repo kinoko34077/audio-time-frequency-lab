@@ -145,6 +145,12 @@ test('native browser decodes exact requested WAV PCM, loads the app without eage
     await page.waitForFunction(()=>document.querySelector('#rt-telemetry')
       ?.dataset.pcmTransport==='raw-experimental',{timeout:20000});
     await page.click('#stop');
+    await page.evaluate(()=>window.dispatchEvent(
+      new PageTransitionEvent('pagehide',{persisted:true})));
+    await page.click('#play-dry');
+    await page.waitForFunction(()=>document.querySelector('#rt-telemetry')
+      ?.dataset.pcmTransport==='raw-experimental',{timeout:3000});
+    await page.click('#stop');
     const output=await page.evaluate(()=>({
       muted:window.__audioSilenceAudit?.audioOutputMuteGain,
       mutedRoutes:window.__audioSilenceAudit?.mutedOutputRoutes,

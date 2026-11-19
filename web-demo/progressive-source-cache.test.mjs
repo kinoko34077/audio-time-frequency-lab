@@ -105,3 +105,46 @@ test('a playback read preempts an active lower-priority waveform read',async()=>
   assert.deepEqual(started,[0,2048]);
   source.dispose();
 });
+
+test('a scrub joining an aborted decode is retried after decoder cleanup',async()=>{
+  const attempts=new Map();
+  let releaseWaveform;
+  const source=createProgressivePCMCache({
+    sourceFrames:4096,channelCount:1,windowFrames:1024,maxCachedWindows:2,
+    maxConcurrentDecodes:1,
+    decodeWindow:(start,frames,{signal})=>{
+      const attempt=(attempts.get(start)||0)+1;
+      attempts.set(start,attempt);
+      if(start===0&&attempt===1)return new Promise((_resolve,reject)=>{
+        signal.addEventListener('abort',()=>{
+          releaseWaveform=()=>reject(Error('preempted waveform'));
+        },{once:true});
+      });
+      if(start===2048)return Promise.resolve([
+        new Float32Array(frames).fill(.5)
+      ]);
+      return Promise.resolve([new Float32Array(frames).fill(start===0?.75:.5)]);
+    }
+  });
+
+  const waveform=source.read(0,1,{priority:'waveform'});
+  await new Promise(resolve=>setImmediate(resolve));
+  const playback=source.read(2048,1,{priority:'playback'});
+  assert.equal(attempts.get(0),1);
+  assert.equal(source.stats().queuedDecodes,1);
+  const scrub=source.read(0,1,{priority:'scrub'});
+  assert.equal(typeof releaseWaveform,'function',
+    'preemption must signal the active waveform decoder');
+  releaseWaveform();
+  const [waveformResult,,scrubResult]=await Promise.allSettled([
+    waveform,playback,scrub
+  ]);
+
+  assert.equal(waveformResult.status,'rejected');
+  assert.equal(scrubResult.status,'fulfilled',
+    'the new scrub position must not inherit a rejected, aborted decode');
+  assert.equal(scrubResult.value.channels[0][0],.75);
+  assert.equal(attempts.get(0),2,
+    'the same source window is decoded again for the higher-priority scrub');
+  source.dispose();
+});

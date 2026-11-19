@@ -121,7 +121,7 @@ async function waitForWorkerPCM(page,{backend=null,generation=null,
 test("individual-period Worker plays through one shared PCM Worklet in Chrome",async()=>{
   const port=18749;
   const server=spawn(process.env.PYTHON||"python3",
-    ["-c","import sys; from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler; ThreadingHTTPServer(('127.0.0.1', int(sys.argv[1])), SimpleHTTPRequestHandler).serve_forever()",
+    ["-c","import sys; from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler; ThreadingHTTPServer.request_queue_size=64; ThreadingHTTPServer(('127.0.0.1', int(sys.argv[1])), SimpleHTTPRequestHandler).serve_forever()",
       String(port)],{
     cwd:path.resolve("web-demo"),stdio:["ignore","ignore","pipe"]
   });
@@ -184,7 +184,8 @@ test("individual-period Worker plays through one shared PCM Worklet in Chrome",a
           audit.audioContext=ctx;
           const mode=options?.processorOptions?.processingMode||"raw";
           this.__labWorkerMode=mode==="worker";
-          audit.worklets.push({name,mode});
+          audit.worklets.push({name,mode,
+            sourceSampleRate:options?.processorOptions?.sourceSampleRate});
           this.port.addEventListener("message",event=>audit.messages.push({
             ...(event.data||{}),receivedAt:performance.now(),
             audioTime:ctx.currentTime
@@ -415,7 +416,9 @@ test("individual-period Worker plays through one shared PCM Worklet in Chrome",a
       return {sourceFrame:progress?.sourceFrame,
         progressAudioTime:progress?.outputTime,speed:progress?.speed,
         requestAudioTime,requestPerformanceTime,
-        sampleRate:audit.audioContext.sampleRate};
+        audioSampleRate:audit.audioContext.sampleRate,
+        sourceSampleRate:audit.worklets.find(worklet=>
+          worklet.mode==="worker")?.sourceSampleRate};
     });
     try{
       await page.waitForFunction(generation=>window.__labAudit.messages.some(message=>
@@ -457,10 +460,13 @@ test("individual-period Worker plays through one shared PCM Worklet in Chrome",a
       Number.isFinite(pitchRequest.speed)&&
       Number.isFinite(pitchRequest.requestAudioTime)&&
       Number.isFinite(pitchRequest.requestPerformanceTime)&&
-      Number.isFinite(pitchRequest.sampleRate)&&pitchRequest.sampleRate>0,
+      Number.isFinite(pitchRequest.audioSampleRate)&&
+      Number.isFinite(pitchRequest.sourceSampleRate)&&
+      pitchRequest.sourceSampleRate>0,
       pitchRequest);
+    // sourceFrame is measured at the decoded file's rate, not the output rate.
     const requestFrame=((pitchRequest.sourceFrame+
-      pitchRequest.speed*pitchRequest.sampleRate*(pitchRequest.requestAudioTime-
+      pitchRequest.speed*pitchRequest.sourceSampleRate*(pitchRequest.requestAudioTime-
         pitchRequest.progressAudioTime))%loopEnd+loopEnd)%loopEnd;
     const transitionLatencyMs=(pitchAccepted.audioTime-
       pitchRequest.requestAudioTime)*1000;
@@ -472,7 +478,7 @@ test("individual-period Worker plays through one shared PCM Worklet in Chrome",a
         reason:"Worker staging must include the AudioWorklet sample time"}));
     assert.ok(Number.isFinite(pitchStage.stageRequestAudioTime),pitchStage);
     const expectedActivationFrame=((requestFrame+pitchRequest.speed*
-      pitchRequest.sampleRate*
+      pitchRequest.sourceSampleRate*
       (pitchAccepted.activationAudioTime-pitchRequest.requestAudioTime))%loopEnd+loopEnd)%loopEnd;
     const sourcePositionErrorFrames=((pitchAccepted.sourceFrame-
       expectedActivationFrame+loopEnd/2)%loopEnd+loopEnd)%loopEnd-loopEnd/2;

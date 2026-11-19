@@ -2239,7 +2239,13 @@ controls.dry.addEventListener("click",()=>play("dry"));
 controls.wet.addEventListener("click",()=>play("wet"));
 controls.stop.addEventListener("click",()=>stop());
 window.addEventListener("resize",()=>{drawCurve();drawAudio();detailWaveEditor?.refresh(true);});
-window.addEventListener("pagehide",()=>{
+window.addEventListener("pagehide",event=>{
+  if(event.persisted){
+    ++state.loadToken;
+    state.loadingSource?.dispose();state.loadingSource=null;
+    stop();
+    return;
+  }
   if(state.rebuildTimer)clearTimeout(state.rebuildTimer);
   stop();state.loadingSource?.dispose();state.source?.dispose();
   if(state.offlineWorker)state.offlineWorker.terminate();

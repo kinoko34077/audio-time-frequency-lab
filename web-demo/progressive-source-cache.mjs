@@ -31,6 +31,8 @@ export function createProgressivePCMCache({
     const priority=PRIORITY[options?.priority]??PRIORITY.background;
     const inflight=pending.get(start);
     if(inflight){
+      if(inflight.controller.signal.aborted)
+        return inflight.cleanup.then(()=>readWindow(start,options));
       if(priority>inflight.priority){
         inflight.priority=priority;
         inflight.options={...inflight.options,...options};
@@ -54,7 +56,7 @@ export function createProgressivePCMCache({
   };
   const decode=entry=>{
     active.add(entry);
-    Promise.resolve().then(()=>decodeWindow(entry.start,entry.length,{
+    entry.cleanup=Promise.resolve().then(()=>decodeWindow(entry.start,entry.length,{
       ...entry.options,priority:entry.priority,signal:entry.controller.signal
     })).then(channels=>{
         assertLive();
