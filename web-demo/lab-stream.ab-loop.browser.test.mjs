@@ -616,13 +616,14 @@ test("individual-period Worker applies and wraps edited source-frame A/B without
           key:"End",bubbles:true,cancelable:true
         }));
       });
-      const seekDuringLoopStage=await page.waitForFunction(({a,b,generation})=>
+      const seekDuringLoopStageHandle=await page.waitForFunction(({a,b,generation})=>
         window.__labAudit.commands.findLast(command=>
           command.type==="worker-seek-stage"&&
           command.generation>generation&&command.loopEnabled===true&&
           command.loopStartFrame===a&&command.loopEndFrame===b),
         {timeout:12000},{a:editedTerminalA,b:totalFrames,
           generation:beforeReenable});
+      const seekDuringLoopStage=await seekDuringLoopStageHandle.jsonValue();
       assert.equal(seekDuringLoopStage.frame,totalFrames-1,
         JSON.stringify(seekDuringLoopStage));
       assert.equal(seekDuringLoopStage.requiredChunks,2,
