@@ -481,8 +481,8 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, swit
     assert.ok(!await page.$eval("#audio-state-summary",
       el=>el.textContent.includes("停止中 · 再生中")),
       "the visible status must not claim playback after Stop");
-    // The original button remains a separate audition path, not an alias
-    // for granular pitch-shifted output on the new default home page.
+    // The original button remains a separate audition path; it never aliases
+    // the selected Phase Vocoder output.
     await page.click("#play-dry");
     await page.waitForFunction(()=>document.querySelector("#rt-indicator")
       ?.textContent.includes("原音再生中"),{timeout:20000});

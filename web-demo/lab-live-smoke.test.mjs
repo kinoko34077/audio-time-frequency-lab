@@ -112,8 +112,8 @@ test('full Chrome: inherited Rust AudioWorklet live independent speed/pitch UI',
   assert.equal(await page.$eval('body',e=>e.dataset.mainTab),'model');
   await (await page.$('#audio-file')).uploadFile(audioFile);
   await page.waitForFunction(()=>!document.querySelector('#play-wet').disabled,{timeout:20000});
-  // Granular is now the explicit main default. Enter an FFT model before
-  // exercising the research-only individual-wave controls.
+  // Select PV explicitly so this research-only individual-wave scenario
+  // stays self-contained even though PV is also the normal player default.
   await page.$eval('#lab-model',el=>{
     el.value='pv';el.dispatchEvent(new Event('change',{bubbles:true}));
   });

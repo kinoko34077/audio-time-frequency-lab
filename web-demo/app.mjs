@@ -26,7 +26,7 @@ import {axisShiftUnits,axisShiftCanonical,axisShiftView} from "./axis-shift-view
 
 const $=id=>document.querySelector(id);
 const MAX_PREVIEW_SECONDS=600;
-// R2 development-only: never switch the real musical-pitch DSP by default.
+// Normal Audio Time uses the real Phase Vocoder; raw PCM remains opt-in.
 const PCM_EXPERIMENT=new URLSearchParams(location.search).get("pcmTransport");
 const RAW_PCM_EXPERIMENT=PCM_EXPERIMENT==="1"||PCM_EXPERIMENT==="granular";
 const GRANULAR_EXPERIMENT=PCM_EXPERIMENT==="granular";
@@ -35,15 +35,15 @@ const GRANULAR_EXPERIMENT=PCM_EXPERIMENT==="granular";
 // remain compatible, and old wet/Rust/models are still explicitly selectable.
 const PLAYER_GRANULAR_AVAILABLE=true;
 // The pre-existing ?pcmTransport=granular route remains a deliberate
-// regression/comparison path. Normal Audio Time uses real STFT instead.
+// regression/comparison path. Normal Audio Time uses the real PV route.
 // PV is a real peak-locked streaming Worklet unless period-joint is enabled.
 const isPCMModel=(mode,individual=lab.individual)=>
   mode==="spectral"||mode==="granular"||mode==="live"&&!individual||
   ((mode==="pv"||mode==="wsola"||mode==="dual"||mode==="am")&&!individual);
 const initialModel=GRANULAR_EXPERIMENT||
   new URLSearchParams(location.search).get("model")==="granular"?
-  "granular":"spectral";
-const granular={speed:1,pitch:0,railMax:8};
+  "granular":"pv";
+const granular={speed:1,pitch:0,railMax:2};
 let detailWaveEditor=null,detailWaveScrubbing=false;
 // Scrub speed temporarily overrides transport; it never edits canonical speed.
 let temporaryScrubSpeed=null,scrubMotionToken=0,scrubMotionFrame=0;
