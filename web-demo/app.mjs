@@ -21,7 +21,7 @@ import {prepareStreamSettings} from "./stream-parameter-contract.mjs";
 import {displaySourceFrameFromProgress} from "./player-display-clock.mjs";
 import {createPlaybackFeedback} from "./playback-feedback.mjs";
 import {formatPlaybackStatus,rendererMatchesSelection,
-  transportFromReceipt} from "./playback-status.mjs";
+  transportFromReceipt,phaseForModelStart} from "./playback-status.mjs";
 import {axisShiftUnits,axisShiftCanonical,axisShiftView} from "./axis-shift-view.mjs";
 
 const $=id=>document.querySelector(id);
@@ -2819,8 +2819,13 @@ async function startModelPlayback(offset=null,appliedOverride=null){
       onStarted:at=>{
         if(state.player!==player)return;
         player.at=at;controls.stop.disabled=false;
-        setPlayerProcessingStatus(pending?"pending":"applied",
-          {transport:"playing"});
+        const selectedCapability=primaryModelCapability(lab.mode,lab.speed,
+          {individual:lab.individual});
+        setPlayerProcessingStatus(phaseForModelStart({
+          supported:selectedCapability.supported,
+          settingsPending:labSettingsPending(applied)
+        }),{transport:"playing",model:lab.mode,individual:lab.individual,
+          speed:lab.speed,pitch:lab.semitones});
         indicator("モデル再生中 · "+(applied.individual?"個別波長＋":"")+
           applied.mode.toUpperCase()+" · 自動先読み"+
           (labSettingsPending(player.appliedConfig)?

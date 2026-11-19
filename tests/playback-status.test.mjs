@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {formatPlaybackStatus,rendererMatchesSelection,
   transportFromReceipt} from '../web-demo/playback-status.mjs';
+import * as playbackStatus from '../web-demo/playback-status.mjs';
 
 test('playback status summarizes state, selected model and canonical factors',()=>{
   const status=formatPlaybackStatus({transport:'playing',phase:'applied',
@@ -40,4 +41,13 @@ test('paused transport stays paused when a silent render receipt arrives',()=>{
   assert.equal(transportFromReceipt({paused:true,running:false}),'paused');
   assert.equal(transportFromReceipt({paused:false,running:false}),'stopped');
   assert.equal(transportFromReceipt({paused:false,running:true}),'playing');
+});
+
+test('worker start status uses the current selection after async preparation',()=>{
+  assert.equal(playbackStatus.phaseForModelStart?.({supported:false,settingsPending:false}),
+    'unsupported');
+  assert.equal(playbackStatus.phaseForModelStart?.({supported:true,settingsPending:true}),
+    'pending');
+  assert.equal(playbackStatus.phaseForModelStart?.({supported:true,settingsPending:false}),
+    'applied');
 });

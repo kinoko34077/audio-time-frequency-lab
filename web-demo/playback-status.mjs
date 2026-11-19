@@ -36,3 +36,8 @@ export function rendererMatchesSelection({processingMode,selectedMode,
 export function transportFromReceipt({paused=false,running=false}){
   return paused?'paused':running?'playing':'stopped';
 }
+
+export function phaseForModelStart({supported,settingsPending}){
+  if(!supported)return 'unsupported';
+  return settingsPending?'pending':'applied';
+}
