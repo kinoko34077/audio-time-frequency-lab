@@ -5,6 +5,8 @@
 // or proprietary UI imagery are copied.
 import {scrubSpeed,releaseScrubSpeed} from "./scrub-kinetics.mjs";
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const DETAIL_READ_FRAMES=32_768;
+const DETAIL_MAX_READS=64;
 const timestamp=seconds=>{
   const value=Math.max(0,seconds);
   return Math.floor(value/60)+":"+(value%60).toFixed(2).padStart(5,"0");
@@ -41,7 +43,11 @@ export function createPlayerWaveEditor({
   visibleStart,visibleEnd,getPosition,onPosition,onStart,onAB,onScrubState,
   onScrubMotion=()=>{},onHoverFrame=()=>false,onHoverEnd=()=>{}
 }){
-  let channels=null,rate=48000,levels=null,frames=0,spanFrames=rate*8;
+  let channels=null,source=null,detailPeaks=null,detailStart=0,detailEnd=0;
+  let detailBlockFrames=0;
+  let detailPending=null,detailFailedKey=null,detailRetriedKey=null;
+  let detailRetryTimer=null,detailRevision=0;
+  let rate=48000,levels=null,frames=0,spanFrames=rate*8;
   let lastFrame=NaN,lastSpan=NaN,lastWidth=0,lastHeight=0;
   const pointers=new Map();
   let gesture=null,dragged=false,active=false;
@@ -51,8 +57,17 @@ export function createPlayerWaveEditor({
   const center=()=>clamp(Math.round(getPosition()*rate),0,Math.max(0,frames-1));
   function setSource(nextChannels,nextRate){
     if(hover){hover=null;onHoverEnd(false);}
-    channels=nextChannels;rate=nextRate||48000;frames=channels?.[0]?.length||0;
-    levels=frames?peakHierarchy(channels):null;
+    source=nextChannels&&typeof nextChannels.read==='function'?
+      nextChannels:null;
+    channels=source?null:nextChannels;
+    if(detailRetryTimer!==null)clearTimeout(detailRetryTimer);
+    detailRetryTimer=null;
+    detailPeaks=null;detailStart=detailEnd=0;detailBlockFrames=0;
+    detailPending=null;
+    detailFailedKey=null;detailRetriedKey=null;detailRevision++;
+    rate=nextRate||48000;
+    frames=source?.sourceFrames||channels?.[0]?.length||0;
+    levels=channels&&frames?peakHierarchy(channels):null;
     spanFrames=Math.max(2,Math.min(frames,rate*12));
     lastFrame=NaN;lastSpan=NaN;refresh(true);
   }
@@ -60,9 +75,29 @@ export function createPlayerWaveEditor({
     return w*(.5+(frame-c)/spanFrames);
   }
   function sampledPeak(from,to,level){
-    if(!channels||to<=from)return [0,0];
+    if(to<=from)return [0,0];
     let low=1,high=-1;
-    if(level){
+    if(source){
+      if(detailPeaks&&from>=detailStart&&to<=detailEnd){
+        const begin=clamp(Math.floor((from-detailStart)/detailBlockFrames),
+          0,detailPeaks.low.length-1);
+        const end=clamp(Math.floor((to-1-detailStart)/detailBlockFrames),
+          begin,detailPeaks.low.length-1);
+        for(let i=begin;i<=end;i++){
+          low=Math.min(low,detailPeaks.low[i]);
+          high=Math.max(high,detailPeaks.high[i]);
+        }
+      }else if(source.overviewPeaks?.length){
+        const peaks=source.overviewPeaks;
+        const begin=clamp(Math.floor(from*peaks.length/frames),0,peaks.length-1);
+        const end=clamp(Math.floor((to-1)*peaks.length/frames),begin,peaks.length-1);
+        for(let i=begin;i<=end;i++){
+          const peak=peaks[i];if(!peak)continue;
+          low=Math.min(low,peak[0]);high=Math.max(high,peak[1]);
+        }
+      }
+    }else if(!channels)return [0,0];
+    else if(level){
       // Coarse hierarchy bins deliberately include partial border samples:
       // their visual envelope is conservative, and no raw whole-song scan is
       // repeated on each playback animation frame.
@@ -81,6 +116,99 @@ export function createPlayerWaveEditor({
       }
     }
     return [low===1&&high===-1?0:low,high===-1&&low===1?0:high];
+  }
+  function requestDetail(start,end){
+    if(!source)return;
+    const from=clamp(Math.floor(start),0,Math.max(0,frames-1));
+    const to=clamp(Math.ceil(end),from+1,frames);
+    const key=from+':'+to;
+    const pixelRatio=Math.min(devicePixelRatio||1,2);
+    const maxSummaryBins=Math.max(1,
+      Math.ceil(canvas.clientWidth*pixelRatio));
+    const blockFrames=Math.max(1,Math.ceil((to-from)/maxSummaryBins));
+    const summaryStart=Math.floor(from/blockFrames)*blockFrames;
+    const summaryEnd=Math.min(frames,
+      Math.ceil(to/blockFrames)*blockFrames);
+    const reader=source;
+    const maxRead=Number.isSafeInteger(reader.maxReadFrames)?
+      reader.maxReadFrames:DETAIL_READ_FRAMES;
+    const readFrames=Math.max(1,Math.min(DETAIL_READ_FRAMES,maxRead));
+    if(summaryEnd-summaryStart>readFrames*DETAIL_MAX_READS){
+      // Wide zoom uses the fixed-size whole-track overview. Invalidate an
+      // obsolete detail read so it stops after its current bounded PCM chunk.
+      // Keep its token until that chunk settles to prevent overlapping reads
+      // if the user quickly zooms back into the detail range.
+      if(detailPending)detailRevision++;
+      return;
+    }
+    if(detailPending||detailFailedKey===key)return;
+    if(detailPeaks&&from>=detailStart&&to<=detailEnd&&
+       detailBlockFrames<=blockFrames)return;
+    const revision=++detailRevision;
+    const requestToken={};
+    const summaryCount=Math.ceil((summaryEnd-summaryStart)/blockFrames);
+    const low=new Float32Array(summaryCount),high=new Float32Array(summaryCount);
+    low.fill(Infinity);high.fill(-Infinity);
+    detailPending=requestToken;
+    (async()=>{
+      let chunkIndex=0;
+      for(let chunkStart=summaryStart;chunkStart<summaryEnd;){
+        if(source!==reader||revision!==detailRevision)return;
+        const count=Math.min(readFrames,summaryEnd-chunkStart);
+        const range=await reader.read(chunkStart,count,{priority:'waveform'});
+        if(source!==reader||revision!==detailRevision)return;
+        if(range?.startFrame!==chunkStart||!Array.isArray(range.channels)||
+           !range.channels.length||
+           !range.channels.every(channel=>channel instanceof Float32Array&&
+             channel.length===count))
+          throw Error('progressive waveform source returned an invalid PCM range');
+        for(let offset=0;offset<count;offset++){
+          const bucket=Math.floor((chunkStart+offset-summaryStart)/
+            blockFrames);
+          for(const channel of range.channels){
+            const value=channel[offset];
+            if(value<low[bucket])low[bucket]=value;
+            if(value>high[bucket])high[bucket]=value;
+          }
+        }
+        chunkStart+=count;
+        chunkIndex++;
+        // Let play, scrub and paint work run before summarizing another block.
+        if(chunkIndex%4===0&&chunkStart<summaryEnd)
+          await new Promise(resolve=>setTimeout(resolve,0));
+      }
+      if(source!==reader||revision!==detailRevision)return;
+      for(let i=0;i<summaryCount;i++){
+        if(!Number.isFinite(low[i]))low[i]=0;
+        if(!Number.isFinite(high[i]))high[i]=0;
+      }
+      detailStart=summaryStart;detailEnd=summaryEnd;
+      detailBlockFrames=blockFrames;detailPeaks={low,high};
+      detailFailedKey=null;detailRetriedKey=null;
+      if(detailRetryTimer!==null)clearTimeout(detailRetryTimer);
+      detailRetryTimer=null;
+    })().catch(error=>{
+      if(source!==reader||revision!==detailRevision)return;
+      detailFailedKey=key;
+      if(error?.name==='AbortError'&&detailRetriedKey!==key){
+        if(detailRetryTimer!==null)clearTimeout(detailRetryTimer);
+        detailRetryTimer=setTimeout(()=>{
+          detailRetryTimer=null;
+          const rawStart=center()-spanFrames/2;
+          const currentFrom=clamp(Math.floor(Math.max(0,rawStart)),
+            0,Math.max(0,frames-1));
+          const currentTo=clamp(Math.ceil(Math.min(frames,
+            rawStart+spanFrames)),currentFrom+1,frames);
+          if(source!==reader||revision!==detailRevision||
+             currentFrom+':'+currentTo!==key)return;
+          detailRetriedKey=key;detailFailedKey=null;refresh(true);
+        },160);
+      }
+    }).finally(()=>{
+      if(detailPending===requestToken){
+        detailPending=null;refresh(true);
+      }
+    });
   }
   function zoom(factor,pivotX=.5){
     if(!frames)return;
@@ -119,6 +247,7 @@ export function createPlayerWaveEditor({
       context.clearRect(0,0,width,height);
       context.fillStyle="#0a1e27";context.fillRect(0,0,width,height);
       const start=c-spanFrames/2;
+      requestDetail(Math.max(0,start),Math.min(frames,start+spanFrames));
       const {a,b,enabled}=onAB();
       const xa=clamp(boundsToX(a,c,width),0,width);
       const xb=clamp(boundsToX(b,c,width),0,width);
@@ -127,7 +256,8 @@ export function createPlayerWaveEditor({
       context.strokeStyle="#33595f";context.lineWidth=ratio;
       context.beginPath();context.moveTo(0,height/2);context.lineTo(width,height/2);context.stroke();
       const samplesPerPixel=spanFrames/width;
-      const level=samplesPerPixel>=256?levels.slice().reverse().find(x=>x.block<=samplesPerPixel*1.6)||levels[0]:null;
+      const level=levels&&samplesPerPixel>=256?
+        levels.slice().reverse().find(x=>x.block<=samplesPerPixel*1.6)||levels[0]:null;
       context.strokeStyle="#75d9c5";context.lineWidth=Math.max(1,ratio);
       context.beginPath();
       for(let x=0;x<width;x++){

@@ -22,20 +22,27 @@ function ensureProcessor(ctx){
 }
 
 export async function createSourcePCMBridge({
-  ctx,sourceChannels,sourceSampleRate,
+  ctx,source,sourceChannels,sourceSampleRate,
+  sourceFrames=source?.sourceFrames??sourceChannels?.[0]?.length,
   speed=1,startFrame=0,loopStartFrame=0,
-  loopEndFrame=sourceChannels?.[0]?.length,loopEnabled=false,
+  loopEndFrame=sourceFrames,loopEnabled=false,
   onEvent=()=>{},commandTimeoutMs=5000,
   processingMode="raw",pitchSemitones=0,wsolaWindowFrames=1024,
   dualShortFrames=512,dualLongFrames=2048,wasmBytes=null,rustSettings=null
 }={}){
+  const channelCount=source?.channelCount??sourceChannels?.length;
+  const readerValid=source&&typeof source.read==="function"&&
+    Number.isSafeInteger(sourceFrames)&&sourceFrames>0&&
+    Number.isInteger(channelCount)&&channelCount>=1&&channelCount<=2;
+  const channelsValid=Array.isArray(sourceChannels)&&sourceChannels.length>=1&&
+    sourceChannels.length<=2&&
+    sourceChannels.every(ch=>ch instanceof Float32Array&&ch.length>0&&
+      ch.length===sourceChannels[0].length);
   if(!ctx?.audioWorklet||!Number.isFinite(ctx.sampleRate)||
-     !Array.isArray(sourceChannels)||sourceChannels.length<1||
-     sourceChannels.length>2||
-     !sourceChannels.every(ch=>ch instanceof Float32Array&&ch.length>0&&
-                                  ch.length===sourceChannels[0].length))
-    throw RangeError("decoded local mono/stereo PCM and AudioWorklet required");
-  const frames=sourceChannels[0].length;
+     !(readerValid||channelsValid))
+    throw RangeError("decoded mono/stereo PCM source and AudioWorklet required");
+  const frames=source?.sourceFrames??sourceChannels[0].length;
+  const outputChannels=source?.channelCount??sourceChannels.length;
   if(!Number.isFinite(sourceSampleRate)||sourceSampleRate<=0)
     throw RangeError("invalid source PCM sample rate");
   if(!Number.isFinite(commandTimeoutMs)||commandTimeoutMs<1||commandTimeoutMs>60000)
@@ -71,18 +78,20 @@ export async function createSourcePCMBridge({
   await ensureProcessor(ctx);
   const node=new AudioWorkletNode(ctx,"audio-lab-source-pcm",{
     numberOfInputs:0,numberOfOutputs:1,
-    outputChannelCount:[sourceChannels.length],
+    outputChannelCount:[outputChannels],
     processorOptions:{
       sourceFrames:frames,sourceSampleRate,
-      channelCount:sourceChannels.length,speed,
+      channelCount:outputChannels,speed,
       startFrame,loopStartFrame:A,loopEndFrame:B,loopEnabled:loop,
       processingMode,pitchSemitones,wsolaWindowFrames,
       dualShortFrames,dualLongFrames
     }
   });
   // Do not copy entire track to the worklet; these small snapshots are moved.
-  let requestId=0,closed=false,latest=null,scratchCached=null;
+  let requestId=0,closed=false,closureError=null,latest=null,scratchCached=null;
+  let refillRevision=0;
   const pending=new Map();
+  const closedFailure=()=>closureError??Error("PCM bridge disposed");
   let rustReadyResolve=null,rustReadyReject=null;
   const rejectPending=error=>{
     for(const ticket of pending.values()){
@@ -97,6 +106,7 @@ export async function createSourcePCMBridge({
     // Ask the processor to terminate before suppressing normal dispose().
     try{node.port.postMessage({type:"dispose"});}catch{}
     closed=true;
+    closureError=error;
     rustReadyReject?.(error);rustReadyResolve=null;rustReadyReject=null;
     node.port.onmessage=null;
     node.removeEventListener("processorerror",onProcessorError);
@@ -126,30 +136,63 @@ export async function createSourcePCMBridge({
       }
     });
   };
-  const windowSlice=(requested,direction=currentSpeed)=>{
+  const windowSlice=async(requested,direction=currentSpeed,priority="playback")=>{
     const frame=Math.max(0,Math.min(frames-1,Math.floor(requested)));
     const start=chooseSourceWindowStart(frame,frames,SOURCE_WINDOW_FRAMES,direction);
     const end=Math.min(frames,start+SOURCE_WINDOW_FRAMES);
+    if(source){
+      const range=await source.read(start,end-start,{priority});
+      if(range?.startFrame!==start||!Array.isArray(range.channels)||
+         range.channels.length!==outputChannels||
+         !range.channels.every(ch=>ch instanceof Float32Array&&ch.length===end-start))
+        throw Error("progressive PCM source returned an invalid frame range");
+      return {start,channels:range.channels};
+    }
     return {start,channels:sourceChannels.map(x=>x.slice(start,end))};
   };
-  const sendWindow=(requested,pin=null,direction=currentSpeed,refillId=null)=>{
+  const postWindow=({start,channels},pin=null,refillId=null)=>{
     if(closed)return;
-    const {start,channels}=windowSlice(requested,direction);
     node.port.postMessage({
       type:"window",start,channels,pin,refillId,
       requestId:++requestId
     },channels.map(x=>x.buffer));
   };
-  const primeLoop=()=>{
+  const sendWindow=async(requested,pin=null,direction=currentSpeed,refillId=null)=>{
+    if(closed)return;
+    const window=await windowSlice(requested,direction,"playback");
+    if(closed)return;
+    postWindow(window,pin,refillId);
+  };
+  const requestRefill=(frame,refillId,revision,attempt=0)=>{
+    void sendWindow(frame,null,currentSpeed,refillId).catch(error=>{
+      if(closed)return;
+      const preempted=error?.name==="AbortError"||
+        error?.message==="PCM window decode aborted";
+      if(preempted){
+        if(revision!==refillRevision)return;
+        if(attempt>=1){failProcessor(error);return;}
+        queueMicrotask(()=>{
+          if(!closed&&revision===refillRevision)
+            requestRefill(frame,refillId,revision,attempt+1);
+        });
+        return;
+      }
+      failProcessor(error);
+    });
+  };
+  const primeLoop=async()=>{
     if(!loop)return;
-    sendWindow(A,"A",1);
-    sendWindow(B-1,"B",-1);
+    const endpoints=await Promise.all([
+      windowSlice(A,1,"playback"),windowSlice(B-1,-1,"playback")
+    ]);
+    if(closed)return;
+    postWindow(endpoints[0],"A");postWindow(endpoints[1],"B");
   };
   node.port.onmessage=event=>{
     if(closed)return;
     const data=event.data||{};
     if(data.type==="need-window"){
-      sendWindow(data.frame,null,currentSpeed,data.refillId);
+      requestRefill(data.frame,data.refillId,refillRevision);
     }else if(data.type==="rust-ready"){
       rustReadyResolve?.();rustReadyResolve=null;rustReadyReject=null;
     }else if(data.type==="rust-error"){
@@ -192,32 +235,70 @@ export async function createSourcePCMBridge({
   // Later user A/B changes use one atomic loop-config message.
   // The renderer bounds its cache to four windows by default.
   if(processingMode!=="worker"){
-    primeLoop();
-    sendWindow(startFrame===frames?frames-1:startFrame);
+    try{
+      await primeLoop();
+      const initial=await windowSlice(startFrame===frames?frames-1:startFrame,
+        currentSpeed,"playback");
+      if(!closed)postWindow(initial);
+    }catch(error){
+      closed=true;
+      try{node.port.postMessage({type:"dispose"});}catch{}
+      node.port.onmessage=null;
+      node.removeEventListener("processorerror",onProcessorError);
+      try{node.disconnect();}catch{}
+      rejectPending(error);throw error;
+    }
   }
   const command=(op,params={})=>submit({type:"command",op,...params});
+  let cursorRevision=0,loopRevision=0;
   const updateLoop=(a,b,enabled,op)=>{
     if(closed)return Promise.reject(Error("PCM bridge disposed"));
+    refillRevision++;
     // Transfer both endpoint PCM windows and target loop configuration as
     // one message. No render quantum can see new pins with old A/B bounds.
-    const endpoints=enabled?[
-      windowSlice(a,1),windowSlice(b-1,-1)
-    ]:[];
-    return submit({type:"loop-config",op,a,b,enabled,endpoints},
-      endpoints.flatMap(w=>w.channels.map(ch=>ch.buffer)));
+    const revision=++loopRevision;
+    return (async()=>{
+      let endpoints=[];
+      while(enabled&&!closed&&revision===loopRevision){
+        try{
+          endpoints=await Promise.all([
+            windowSlice(a,1,"playback"),windowSlice(b-1,-1,"playback")
+          ]);
+          break;
+        }catch(error){
+          if(closed)throw closedFailure();
+          if(revision!==loopRevision)return {stale:true};
+          const preempted=error?.name==="AbortError"||
+            error?.message==="PCM window decode aborted";
+          if(!preempted)throw error;
+          // Scrubs outrank A/B endpoint reads. Let the aborted decode clean
+          // up, then retry while these bounds are still the current request.
+          await new Promise(resolve=>setTimeout(resolve,0));
+        }
+      }
+      if(closed)throw closedFailure();
+      if(revision!==loopRevision)return {stale:true};
+      return submit({type:"loop-config",op,a,b,enabled,endpoints},
+        endpoints.flatMap(w=>w.channels.map(ch=>ch.buffer)));
+    })();
   };
   const api={
     node,
     connect(destination){node.connect(destination);return api;},
     async play(){await ctx.resume();return command("play");},
     pause(){return command("pause");},
-    seek(frame){
+    async seek(frame){
       if(processingMode==="worker")
         return Promise.reject(Error("legacy Worker seeks must reset the Worker generation"));
       if(!Number.isSafeInteger(frame)||frame<0||frame>frames)
         return Promise.reject(RangeError("invalid source-frame seek"));
       if(closed)return Promise.reject(Error("PCM bridge disposed"));
-      const {start,channels}=windowSlice(frame===frames?frames-1:frame);
+      refillRevision++;
+      const revision=++cursorRevision;
+      const {start,channels}=await windowSlice(frame===frames?frames-1:frame,
+        currentSpeed,"playback");
+      if(closed)throw closedFailure();
+      if(revision!==cursorRevision)return {stale:true};
       // The source window and seek become one Worklet message, so prefetch
       // eviction cannot discard the target while protecting the old cursor.
       return submit({type:"seek-window",start,channels,frame,op:"seek"},
@@ -235,7 +316,9 @@ export async function createSourcePCMBridge({
         throw RangeError("invalid scratch sample frame");
       const wantedSpeed=validatePlaybackSpeed(speed);
       if(closed)throw Error("PCM bridge disposed");
+      refillRevision++;
       currentSpeed=wantedSpeed;
+      const revision=++cursorRevision;
       // No 64k-frame PCM copy for each pointermove. The first scratch
       // positions the source cache, subsequent moves within that interval
       // transmit just a frame+speed pair (tens of bytes).
@@ -244,13 +327,18 @@ export async function createSourcePCMBridge({
         frame<scratchCached.start+(scratchCached.start>0?margin:0)||
         frame>=scratchCached.end-(scratchCached.end<frames?margin:0);
       const send=()=>{
-        const {start,channels}=windowSlice(frame,wantedSpeed);
-        scratchCached={start,end:start+channels[0].length};
-        return submit({type:"scrub",op:"scrub",start,channels,
-          frame,speed:wantedSpeed},channels.map(c=>c.buffer));
+        return (async()=>{
+          const {start,channels}=await windowSlice(frame,wantedSpeed,"scrub");
+          if(closed)throw closedFailure();
+          if(revision!==cursorRevision)return {stale:true};
+          scratchCached={start,end:start+channels[0].length};
+          return submit({type:"scrub",op:"scrub",start,channels,
+            frame,speed:wantedSpeed},channels.map(c=>c.buffer));
+        })();
       };
       if(needsCache)return send();
       try{
+        if(revision!==cursorRevision)return {stale:true};
         return await submit({type:"scrub",op:"scrub",frame,speed:wantedSpeed});
       }catch(error){
         // The AudioWorklet cache can evict a former pointer window while

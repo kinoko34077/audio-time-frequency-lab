@@ -7,6 +7,7 @@ Browser-based offline audio audition laboratory for independently controlled tim
 - DSP candidates: phase vocoder, WSOLA/granular alignment, onset-aware hybrid, and modulation/partial-track experimental model (each must be genuinely distinct, documented, and tested). Original/bypass baseline.
 - Respect waveform/phase and preserve stereo where possible; display limitations, latency, CPU/memory constraints, reconstruction quality, failure fallback.
 - Audio never uploaded to external server. Static browser page, no paid provider. Browser/offline computation first.
+- Player source loading is progressive: no 75 MB or 600-second cap, one confirmation for files above 75 MB, bounded PCM windows prioritized at the playback position, and replacement only after the new source decodes successfully. WAV export remains on hold.
 - Reuse proven audio-import / transport / UX patterns from frequency-warp-vst; keep frequency-axis warp and time/pitch model ownership separate. No need to fork the entire VST3 tree.
 - No claims that physically different generators can be uniquely inferred when they produce identical waveforms.
 ## Development authority

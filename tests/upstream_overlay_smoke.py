@@ -2,7 +2,7 @@
 file chooser, Rust/WASM live AudioWorklet and distinct offline model worker.
 Not an iPhone Safari hardware acceptance test.
 """
-import math, os, struct, tempfile, wave
+import atexit, json, math, os, struct, tempfile, wave
 from playwright.sync_api import sync_playwright
 
 URL=os.environ.get("LAB_TEST_ORIGIN","http://127.0.0.1:8123/")
@@ -13,6 +13,10 @@ try:
     w.writeframes(b"".join(struct.pack("<h",int(8000*math.sin(2*math.pi*440*n/16000))) for n in range(16000)))
   with sync_playwright() as p:
     browser=p.chromium.launch(channel="chromium",headless=True,args=["--no-sandbox","--disable-dev-shm-usage","--autoplay-policy=no-user-gesture-required", "--mute-audio"])
+    def close_browser():
+      try: browser.close()
+      except Exception: pass
+    atexit.register(close_browser)
     for mobile in (False,True):
       page=browser.new_page(viewport={"width":390 if mobile else 1200,"height":844 if mobile else 850},is_mobile=mobile,has_touch=mobile)
       page.add_init_script("""(() => {
@@ -22,7 +26,13 @@ try:
         };
       })()""")
       failures=[]
+      console_errors=[]
+      failed_requests=[]
       page.on("pageerror",lambda e:failures.append(str(e)))
+      page.on("console",lambda msg:console_errors.append(msg.text) if msg.type=="error" else None)
+      page.on("requestfailed",lambda request:failed_requests.append({
+        "url":request.url,"failure":request.failure
+      }))
       page.goto(URL,wait_until="domcontentloaded")
       page.locator("html[data-fw-boot=ready]").wait_for(timeout=18000)
       assert page.locator("#audio-file").count()==1
@@ -32,8 +42,29 @@ try:
       chooser.value.set_files(path)
       # U6: readiness is visible in the one-line player status. Full
       # engine telemetry stays mounted but is no longer permanently visible.
-      page.wait_for_function("""() => document.querySelector('#audio-state-summary')
-        ?.textContent.includes('読み込み完了。再生できます。')""",timeout=20000)
+      try:
+        page.wait_for_function("""() => document.querySelector('#audio-state-summary')
+          ?.textContent.includes('読み込み完了。再生できます。')""",timeout=20000)
+      except Exception as error:
+        try:
+          state=page.evaluate("""() => {
+            const text=selector=>document.querySelector(selector)?.textContent||null;
+            const file=document.querySelector('#audio-file')?.files?.[0];
+            return {boot:document.documentElement.dataset.fwBoot,
+              summary:text('#audio-state-summary'),status:text('#status'),
+              statusKind:document.querySelector('#status')?.dataset.kind||null,
+              fileMeta:text('#file-meta'),indicator:text('#rt-indicator'),
+              file:file?{name:file.name,type:file.type,size:file.size}:null};
+          }""")
+        except Exception as diagnostic_error:
+          state={"diagnostic_error":str(diagnostic_error)}
+        print("AUDIO_FILE_READY_DIAGNOSTICS",json.dumps({
+          "mobile":mobile,"state":state,"pageErrors":failures,
+          "consoleErrors":console_errors,"failedRequests":failed_requests,
+          "waitError":str(error)
+        },ensure_ascii=False),flush=True)
+        close_browser();atexit.unregister(close_browser)
+        raise
       assert not page.locator("#runtime-hud").is_visible()
       assert page.locator("#play-wet").is_enabled()
       # The Audio Time player owns the only editable speed/pitch pair.
@@ -115,5 +146,6 @@ try:
       print("PASS native chooser, dedicated Audio Time model/player UI, WSOLA preview + windows, original transport; mobile emulation:",mobile)
       page.close()
     browser.close()
+    atexit.unregister(close_browser)
 finally:
   os.unlink(path)

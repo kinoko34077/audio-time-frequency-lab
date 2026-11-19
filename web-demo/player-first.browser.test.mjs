@@ -543,7 +543,7 @@ test("U1/U5 primary Play routes to REAL selected live/PV/Granular engines and on
           window.__engineCreations.push({kind:"worklet",name,id});
           if(name==="audio-lab-source-pcm")window.__lastPcmWorkletId=id;
           this.port.addEventListener("message",event=>{
-            if(Number.isSafeInteger(event.data?.sourceFrame))
+            if(Number.isFinite(event.data?.sourceFrame))
               window.__workletFrames.push({id,type:event.data.type,
                 sourceFrame:event.data.sourceFrame,
                 generation:event.data.generation,
@@ -583,15 +583,35 @@ test("U1/U5 primary Play routes to REAL selected live/PV/Granular engines and on
         if(event.target?.id!=="wave"||event.key!=="ArrowRight")return;
         const id=window.__lastPcmWorkletId;
         const current=[...window.__workletFrames].reverse().find(x=>
-          x.id===id&&Number.isSafeInteger(x.sourceFrame));
+          x.id===id&&Number.isFinite(x.sourceFrame));
         const canvas=document.getElementById("wave-detail");
         const fileMeta=document.getElementById("file-meta")?.textContent||"";
         const rate=Number(fileMeta.match(/(\d+)Hz/)?.[1]);
         const totalFrames=Number(canvas?.getAttribute("aria-valuemax"))+1;
         if(!current||!(rate>0&&totalFrames>1))return;
-        window.__expectedSeekFrame=Math.round(Math.min(
+        const expectedFrame=Math.round(Math.min(
           totalFrames/rate-.01,current.sourceFrame/rate+2)*rate);
+        window.__expectedSeekFrame=expectedFrame;
+        window.__seekKeyObservation={key:event.key,target:event.target?.id||"",
+          workletId:id,currentFrame:current.sourceFrame,sampleRate:rate,
+          totalFrames,expectedFrame,
+          elapsedBefore:document.querySelector("#elapsed")?.textContent||"",
+          loopA:document.querySelector("#player-loop-a")?.value||"",
+          loopB:document.querySelector("#player-loop-b")?.value||"",
+          loopEnabled:document.querySelector("#player-loop-enabled")?.checked};
       },true);
+      document.addEventListener("keydown",event=>{
+        if(event.target?.id!=="wave"||event.key!=="ArrowRight")return;
+        window.__seekKeyObservation.afterBubble={
+          elapsed:document.querySelector("#elapsed")?.textContent||"",
+          playhead:document.querySelector("#playhead")?.style.left||"",
+          commands:window.__workletCommands.map(x=>({frame:x.frame,generation:x.generation})),
+          model:document.querySelector("#lab-model")?.value||"",
+          transport:document.querySelector("#rt-telemetry")?.dataset.pcmTransport||"",
+          status:document.querySelector("#lab-status")?.textContent||"",
+          stopped:document.querySelector("#stop")?.disabled??true
+        };
+      },false);
     });
     await page.goto("http://127.0.0.1:"+port+"/?model=granular",{
       waitUntil:"domcontentloaded",timeout:20000
@@ -784,13 +804,9 @@ test("U1/U5 primary Play routes to REAL selected live/PV/Granular engines and on
         x.type==="worker-state-activated")?.missingFrames||0);
     await page.focus("#wave");
     await page.keyboard.press("ArrowRight");
-    await page.waitForFunction(generation=>window.__workletCommands.some(x=>
-      x.type==="worker-seek-stage"&&x.generation>generation),
-      {timeout:20000},beforeSeekGeneration);
-    const seekCommand=await page.evaluate(generation=>
-      window.__workletCommands.findLast(x=>x.type==="worker-seek-stage"&&
-        x.generation>generation),beforeSeekGeneration);
     const expectedSeekFrame=await page.evaluate(()=>window.__expectedSeekFrame);
+    assert.ok(Number.isSafeInteger(expectedSeekFrame),
+      "keyboard event must observe the shared source-frame cursor before seeking");
     const loopTarget=await page.evaluate(()=>({
       start:Number(document.querySelector("#player-loop-a")?.value),
       end:Number(document.querySelector("#player-loop-b")?.value),
@@ -801,6 +817,33 @@ test("U1/U5 primary Play routes to REAL selected live/PV/Granular engines and on
       (expectedSeekFrame<loopTarget.start||expectedSeekFrame>=loopTarget.end)?
       loopTarget.start+((expectedSeekFrame-loopTarget.start)%loopLength+
         loopLength)%loopLength:expectedSeekFrame;
+    try{
+      await page.waitForFunction(({generation,frame})=>
+        window.__workletCommands.some(x=>x.type==="worker-seek-stage"&&
+          x.generation>generation&&x.frame===frame),
+        {timeout:20000},{generation:beforeSeekGeneration,frame:normalizedSeekFrame});
+    }catch(error){
+      const diagnostic=await page.evaluate(({generation,frame})=>({
+        expectedFrame:frame,
+        keyObservation:window.__seekKeyObservation,
+        activeWorkletId:window.__lastPcmWorkletId,
+        latestActiveWorkletEvent:[...window.__workletFrames].reverse().find(x=>
+          x.id===window.__lastPcmWorkletId),
+        elapsedAtTimeout:document.querySelector("#elapsed")?.textContent||"",
+        playheadAtTimeout:document.querySelector("#playhead")?.style.left||"",
+        commands:window.__workletCommands.filter(x=>
+          x.type==="worker-seek-stage"&&x.generation>generation),
+        activations:window.__workletFrames.filter(x=>
+          x.type==="worker-state-activated"&&x.generation>generation),
+        latestEvents:window.__workletFrames.slice(-12)
+      }),{generation:beforeSeekGeneration,frame:normalizedSeekFrame});
+      throw Error("A/B-normalized source-frame command did not reach the Worklet: "+
+        JSON.stringify(diagnostic)+" / "+error.message);
+    }
+    const seekCommand=await page.evaluate(({generation,frame})=>
+      window.__workletCommands.findLast(x=>x.type==="worker-seek-stage"&&
+        x.generation>generation&&x.frame===frame),
+      {generation:beforeSeekGeneration,frame:normalizedSeekFrame});
     try{
       await page.waitForFunction(generation=>{
         const workers=window.__engineCreations.filter(x=>x.kind==="worker"&&
@@ -846,8 +889,6 @@ test("U1/U5 primary Play routes to REAL selected live/PV/Granular engines and on
       JSON.stringify({seekCommand,expectedSeekFrame,normalizedSeekFrame,loopTarget}));
     assert.ok(seekRender.activations.length>0,
       "seek PCM must activate in the existing shared Worklet");
-    assert.ok(Number.isSafeInteger(expectedSeekFrame),
-      "keyboard event must observe the shared source-frame cursor before seeking");
     assert.ok(seekRender.activations.some(x=>
       x.sourceFrame===normalizedSeekFrame&&x.missingFrames===missingBeforeSeek),
       "the shared clock must activate at the exact A/B-normalized frame without new PCM loss: "+

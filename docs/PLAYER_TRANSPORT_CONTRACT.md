@@ -4,7 +4,16 @@
 
 - **Phase Vocoder is the normal playback default.** Spectral STFT, Granular, Rust/WASM, WSOLA, Dual and AM remain separate selectable models; selecting PV uses the existing peak-locked PV renderer.
 - The speed rail displays **±2× by default**. Its existing ±1/±2/±4/±8 presets remain available, and ±8× remains selectable. The exact numeric speed input and canonical transport retain the full signed −8..+8 range.
-- After this default-setting slice, further audio DSP, sound-quality, capability and device work is held until the user explicitly requests it. Keep the 600-second cap, WAV hold and U3 residual-click hold. Physical iOS/Android behavior remains unverified.
+- After the Phase-Vocoder default-setting slice, further audio DSP, sound-quality and device work remains held until the user explicitly requests it, apart from the separately accepted staged-source-loading follow-up below. Keep the WAV and U3 residual-click holds. Physical iOS/Android behavior remains unverified.
+
+## Progressive local source reads (2026-11-19; active Owner #36 follow-up)
+
+- The previous 75 MB rejection and 600-second truncation are removed from player loading. Files above 75 MB receive one continue/cancel prompt before opening; after continue, no repeated size warning is shown.
+- Mediabunny 1.66.1 is shipped locally under its MPL-2.0 license. The browser's `AudioDecoder` capability is checked before replacing a source. Unsupported formats produce an explicit error; there is no full-file `decodeAudioData()` fallback.
+- A loaded File remains local and compressed. The progressive source reader decodes bounded Float32 PCM ranges. Playback, seek, scrub and A/B reads preempt queued low-priority waveform requests. Worklet PCM windows and decoded-source cache have fixed bounds independent of duration.
+- Native PV/STFT/WSOLA/Dual/AM and the Rust partial-plus-residual renderer keep their existing algorithms and common source-frame clock. The individual-period Worker requests source chunks asynchronously but retains its separate current speed capability.
+- Replacement is committed only after metadata and a real first PCM range succeed. A failed, unsupported or canceled replacement preserves the previous playable file. Stale decoder work is disposed on replacement/page close.
+- This source-load integration does not release the held WAV full-file export or U3 quality work. Desktop Chrome tests are not physical iOS/Android acceptance.
 
 ## 2026-11-17 Rust engine-3 shared source-time integration (#36)
 

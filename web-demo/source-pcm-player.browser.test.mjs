@@ -15,6 +15,7 @@ test("live Audio Lab routes the selected Rust model through the shared PCM node"
     cwd:path.resolve("_site"),stdio:"ignore"
   });
   let browser;
+  let testFailure=null;
   try{
     browser=await puppeteer.launch({
       executablePath:process.env.CHROME_BIN||"/usr/bin/google-chrome",
@@ -109,7 +110,8 @@ test("live Audio Lab routes the selected Rust model through the shared PCM node"
         labStatus:document.querySelector("#lab-status").textContent,
         indicator:document.querySelector("#rt-indicator").textContent,
         transport:document.querySelector("#rt-telemetry").dataset.pcmTransport,
-        starts:document.querySelector("#rt-telemetry").dataset.pcmNodeStarts
+        starts:document.querySelector("#rt-telemetry").dataset.pcmNodeStarts,
+        telemetry:document.querySelector("#rt-telemetry").textContent
       }));
       throw Error("Selected Rust model did not start: "+
         JSON.stringify({observed,errors})+" / "+error.message);
@@ -242,7 +244,16 @@ test("live Audio Lab routes the selected Rust model through the shared PCM node"
     await page.waitForFunction(()=>!document.querySelector("#rt-telemetry")
       ?.dataset.pcmTransport,{timeout:10000});
     assert.deepEqual(errors,[]);
+  }catch(error){
+    testFailure=error;
+    throw error;
   }finally{
-    await cleanupTestProcesses(browser,[server],"PCM player HTTP server");
+    try{
+      await cleanupTestProcesses(browser,[server],"PCM player HTTP server");
+    }catch(cleanupFailure){
+      if(testFailure)throw new AggregateError([testFailure,cleanupFailure],
+        "PCM player test failed and cleanup also reported a problem");
+      throw cleanupFailure;
+    }
   }
 });

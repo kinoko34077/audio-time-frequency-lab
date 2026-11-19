@@ -11,10 +11,14 @@ test("Pages staging resolves transitive module/worker dependencies and fails clo
   try{
     await mkdir(src);
     await writeFile(join(src,"index.html"),
-      '<link rel="stylesheet" href="./style.css"><script type="module" src="./app.mjs"></script>');
+      '<link rel="stylesheet" href="./style.css"><link rel="license" href="./vendor/NOTICE.md"><link rel="license" href="./vendor/LICENSE.txt"><script type="module" src="./app.mjs"></script>');
     await writeFile(join(src,"style.css"),"body{color:white}");
     await writeFile(join(src,"app.mjs"),
-      'import {mode} from "./engine-policy.mjs"; import "./nested/index.mjs"; new URL("./worker.mjs",import.meta.url); fetch("./dsp_core.wasm");');
+      'import {mode} from "./engine-policy.mjs"; import "./nested/index.mjs"; import("./source-loader.mjs"); new URL("./worker.mjs",import.meta.url); fetch("./dsp_core.wasm");');
+    await writeFile(join(src,"source-loader.mjs"),'export const source=true;');
+    await mkdir(join(src,"vendor"));
+    await writeFile(join(src,"vendor","NOTICE.md"),'license notice');
+    await writeFile(join(src,"vendor","LICENSE.txt"),'license text');
     await writeFile(join(src,"engine-policy.mjs"),'export const mode=1;');
     await mkdir(join(src,"nested"));
     await writeFile(join(src,"nested","index.mjs"),'import "./child.mjs";');
@@ -22,7 +26,7 @@ test("Pages staging resolves transitive module/worker dependencies and fails clo
     await writeFile(join(src,"worker.mjs"),'import "./export-policy.mjs";');
     await writeFile(join(src,"export-policy.mjs"),'export const max=40_000_000;');
     await writeFile(wasm,Buffer.from([0,97,115,109,1,0,0,0]));
-    const expected=["app.mjs","dsp_core.wasm","engine-policy.mjs","export-policy.mjs","index.html","nested/child.mjs","nested/index.mjs","style.css","worker.mjs"];
+    const expected=["app.mjs","dsp_core.wasm","engine-policy.mjs","export-policy.mjs","index.html","nested/child.mjs","nested/index.mjs","source-loader.mjs","style.css","vendor/LICENSE.txt","vendor/NOTICE.md","worker.mjs"];
     assert.deepEqual(await collectAssets({sourceDir:src,wasmPath:wasm}),expected);
     assert.deepEqual(await stageSite({sourceDir:src,outputDir:dest,wasmPath:wasm}),expected);
     assert.match(await readFile(join(dest,"worker.mjs"),"utf8"),/export-policy.mjs/);
