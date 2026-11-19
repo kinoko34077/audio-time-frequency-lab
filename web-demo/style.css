@@ -705,6 +705,16 @@ dialog[open]{display:flex;flex-direction:column;height:min(92dvh,850px);max-heig
 .audio-lab-panel .section-header{margin-bottom:12px}
 .lab-grid{display:grid;grid-template-columns:minmax(215px,1.3fr) minmax(145px,1fr) minmax(145px,1fr);gap:14px;align-items:end}
 .lab-field{display:flex;flex-direction:column;gap:7px;font-size:12px;color:var(--text,#d9eaf0);min-width:0}
+.lab-inline-control{
+  display:grid;grid-template-columns:minmax(74px,max-content) minmax(0,1fr) max-content;
+  align-items:center;gap:8px
+}
+.lab-inline-control>label{grid-column:1;grid-row:1;white-space:nowrap}
+.lab-inline-control>input[type=range]{grid-column:2;grid-row:1;min-width:0}
+.lab-inline-control>.inline-number{grid-column:3;grid-row:1;white-space:nowrap}
+.lab-inline-control>.inline-number input[type=number]{width:72px;min-height:38px}
+.lab-inline-control>output[hidden]{display:none!important}
+.lab-inline-control>small{grid-column:1/-1}
 .lab-field select{width:100%;max-width:100%;min-height:42px;font:inherit;color:inherit;background:#142d33;border:1px solid #436168;border-radius:7px;padding:6px 9px}
 .lab-field input[type=range]{width:100%;accent-color:#77e9cb;min-height:28px;touch-action:pan-y}
 .lab-field output{font-variant-numeric:tabular-nums;color:#77e9cb}
@@ -782,7 +792,6 @@ body[data-main-tab="model"] .player .wave-wrap{height:132px}
 .player-pitch-speed .lab-field input[type=range]{width:100%}
 .player-pitch-speed .lab-field input[type=number],
 .player-pitch-speed .lab-field select{width:100%;min-height:40px}
-.player-quality-note{color:#a9c3c4;margin-bottom:9px}
 .player-loop{
   display:grid;gap:9px;margin-top:14px;padding:13px 14px;
   border-radius:11px;border:1px solid #36575d;background:#0d2228;
@@ -859,6 +868,11 @@ body.model-lab .player-pitch-speed .lab-grid .lab-field:first-child{grid-column:
 .wave-detail-wrap{position:relative;overflow:hidden;border:1px solid #3a6064;border-radius:11px;background:#0a1e27;height:clamp(185px,31vh,280px);touch-action:none}
 .wave-detail-wrap canvas{display:block;width:100%;height:100%;touch-action:none;cursor:grab;outline-offset:-3px}
 .wave-detail-wrap canvas:active{cursor:grabbing}
+.wave-detail-time-bounds{
+  position:absolute;z-index:6;left:0;right:0;bottom:0;display:flex;justify-content:space-between;
+  gap:8px;padding:3px 8px 4px;color:#d0e6e2;background:linear-gradient(180deg,transparent,#071820d9);
+  font:11px/1.3 ui-monospace,monospace;pointer-events:none;font-variant-numeric:tabular-nums
+}
 .wave-center-head{position:absolute;z-index:4;pointer-events:none;top:0;bottom:0;left:50%;width:2px;transform:translateX(-50%);background:#ffac72;box-shadow:0 0 6px #ffb76a82}
 .wave-center-head::before{content:"";position:absolute;top:0;left:-6px;width:14px;height:9px;background:#ffac72;border-radius:0 0 4px 4px}
 .wave-marker{position:absolute;z-index:5;pointer-events:none;top:0;left:0;transform:translateX(-50%);min-width:27px;height:27px;line-height:27px;text-align:center;font-size:12px;font-weight:800;border:1px solid #cef6ee;border-radius:0 0 8px 8px;color:#11232a;background:#6be2c4}
@@ -866,8 +880,7 @@ body.model-lab .player-pitch-speed .lab-grid .lab-field:first-child{grid-column:
 .wave-marker[hidden]{display:none!important}
 .wave-detail-wrap[data-interaction="a"] .wave-marker-a,
 .wave-detail-wrap[data-interaction="b"] .wave-marker-b{filter:brightness(1.23)}
-.wave-editor-footer{display:flex;justify-content:space-between;gap:8px;color:#9ebcbc;font:11px/1.35 ui-monospace,monospace}
-.wave-editor-footer span:nth-child(2){text-align:center;font-family:inherit;font-size:10px;color:#b9d9d1}
+.wave-editor-footer{display:flex;justify-content:center;gap:8px;color:#9ebcbc;font:11px/1.35 ui-monospace,monospace}
 .wave-overview-header{margin-top:7px}
 .wave-editor .wave-wrap{height:65px!important;padding:4px 6px}
 .wave-editor #wave{height:54px!important;width:100%}
@@ -879,7 +892,6 @@ body[data-main-tab="model"] .wave-editor #wave{height:41px!important}
 @media(max-width:560px){
  .wave-editor-toolbar{gap:5px}
  .wave-detail-wrap{height:min(33vh,250px)}
- .wave-editor-footer span:nth-child(2){font-size:9px}
  .wave-editor .wave-wrap{height:53px!important}
  .wave-editor #wave{height:43px!important}
  .wave-zoom-actions button{min-width:42px;height:40px}
@@ -955,30 +967,28 @@ body.model-lab[data-main-tab="player"] #play-main{
 .player-tune-grid{
   display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px
 }
-.player-tune-control{min-width:0;display:grid;gap:7px}
-.player-tune-heading{display:flex;justify-content:space-between;align-items:center;gap:6px;font-size:13px}
-.player-tune-heading label{font-weight:650;color:#e8f4ef}
-.player-tune-heading output{font-variant-numeric:tabular-nums;color:#91e8c7;font-size:13px}
-.player-tune-inputs{display:flex;align-items:center;gap:8px;min-width:0}
-.player-tune-inputs input[type=range]{
-  min-width:0;flex:1;touch-action:pan-y;accent-color:#70e6bb;min-height:38px
+.player-tune-control{
+  min-width:0;display:grid;grid-template-columns:minmax(88px,max-content) minmax(0,1fr) auto;
+  align-items:center;column-gap:8px
 }
-.player-tune-inputs input[type=number]{
-  flex:none;width:clamp(64px,22%,96px);min-height:39px;
-  border:1px solid #496e68;border-radius:7px;background:#112a30;
-  color:#e9fff8;text-align:right;font:13px ui-monospace,monospace;padding:5px
+.player-tune-control>label,.player-tune-labels{grid-column:1;grid-row:1}
+.player-tune-control>label{font-size:13px;font-weight:650;color:#e8f4ef;white-space:nowrap}
+.player-tune-labels{display:flex;align-items:center;justify-content:space-between;gap:7px;min-width:0}
+.player-tune-labels>label:first-child{font-size:13px;font-weight:650;color:#e8f4ef;white-space:nowrap}
+.player-tune-control>input[type=range]{
+  grid-column:2;grid-row:1;width:100%;min-width:0;touch-action:pan-y;accent-color:#70e6bb;min-height:40px
 }
-.player-tune-inputs input:focus-visible{outline:2px solid #95f1d0;outline-offset:2px}
-.player-tune-advanced,.player-loop-precision{font-size:11px;color:#a6c1c3}
-.player-tune-advanced>summary,.player-loop-precision>summary{
+.player-tune-control>.inline-number{grid-column:3;grid-row:1}
+.player-tune-control output[hidden]{display:none!important}
+.player-tune-control .inline-number input[type=number]{min-height:40px;height:40px;width:64px}
+.player-loop-precision{font-size:11px;color:#a6c1c3}
+.player-loop-precision>summary{
   width:max-content;max-width:100%;padding:5px 0;cursor:pointer;color:#acd5cf;
   font-weight:550;font-size:11px
 }
-.player-tune-advanced>summary:focus-visible,
 .player-loop-precision>summary:focus-visible{outline:2px solid #a0ebd5}
-.player-rail-setting{display:flex;align-items:center;gap:10px;margin-top:6px;font-size:12px}
-.player-rail-setting select{padding:6px;border:1px solid #456b68;color:#e2f7f1;background:#0e2830;border-radius:6px}
-.player-tune-advanced .player-quality-note{margin:7px 0 0}
+.player-rail-setting{display:flex;align-items:center;gap:4px;margin:0;font-size:11px;white-space:nowrap;color:#bdd8d2}
+.player-rail-setting select{min-height:34px;padding:3px 5px;border:1px solid #456b68;color:#e2f7f1;background:#0e2830;border-radius:6px}
 .player-tune #granular-rail-note:empty{display:none}
 body.model-lab[data-main-tab="player"] #player-loop-controls{
   gap:3px;margin:1px 0 0;padding:9px 12px;border:1px solid #305158;
@@ -991,9 +1001,6 @@ body.model-lab[data-main-tab="player"] .player-loop-top input{width:20px;height:
 body.model-lab[data-main-tab="player"] #player-loop-hint{
   font-size:10px;margin:0;color:#9cb8bb;line-height:1.35
 }
-body.model-lab[data-main-tab="player"] .wave-editor-footer span:nth-child(2){
-  font-size:10px
-}
 @media(max-width:600px){
   body.model-lab[data-main-tab="player"] .studio{padding:6px 7px 14px}
   body.model-lab[data-main-tab="player"] .main-workspace-tabs{margin-bottom:6px}
@@ -1005,11 +1012,8 @@ body.model-lab[data-main-tab="player"] .wave-editor-footer span:nth-child(2){
   body.model-lab[data-main-tab="player"] #play-dry{grid-column:1/-1}
   body.model-lab[data-main-tab="player"] #main-player-panel>.actions button{min-height:44px}
   .player-tune-grid{grid-template-columns:1fr;gap:9px}
-  .player-tune-control{gap:3px}
+  .player-tune-control{column-gap:6px}
   body.model-lab[data-main-tab="player"] #drop small{display:none}
-  body.model-lab[data-main-tab="player"] .wave-editor-footer span:nth-child(2){
-    font-size:9px;max-width:46%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap
-  }
 }
 
 
@@ -1033,6 +1037,9 @@ body.model-lab[data-main-tab="player"] .runtime-hud-body{
 body.model-lab[data-main-tab="model"] .model-essential-grid{
   display:grid;grid-template-columns:minmax(250px,1.8fr) minmax(130px,1fr) minmax(130px,1fr);
   align-items:end;gap:13px
+}
+body.model-lab[data-main-tab="model"] .model-extra-grid{
+  grid-template-columns:repeat(3,minmax(0,1fr));gap:10px
 }
 body.model-lab[data-main-tab="model"] .model-essential-grid .lab-field:first-child{
   grid-column:auto
@@ -1104,9 +1111,6 @@ body.model-lab[data-main-tab="model"] .workspace-grid:has(.model-legacy-fold:not
     height:43px!important
   }
   body.model-lab[data-main-tab="player"] #main-player-panel #wave{height:33px!important}
-  body.model-lab[data-main-tab="player"] #main-player-panel .wave-editor-footer span:nth-child(2){
-    display:none
-  }
   body.model-lab[data-main-tab="player"] #main-player-panel .transport #wave-hint{display:none}
   body.model-lab[data-main-tab="player"] #main-player-panel>.actions{
     grid-template-columns:1.25fr .85fr 1.15fr;gap:4px
@@ -1120,10 +1124,8 @@ body.model-lab[data-main-tab="model"] .workspace-grid:has(.model-legacy-fold:not
   body.model-lab[data-main-tab="player"] .player-tune{
     padding-top:6px;padding-bottom:2px;margin-top:1px
   }
-  body.model-lab[data-main-tab="player"] .player-tune-grid{gap:5px}
-  body.model-lab[data-main-tab="player"] .player-tune-control{gap:1px}
-  body.model-lab[data-main-tab="player"] .player-tune-inputs input[type=range]{min-height:31px}
-  body.model-lab[data-main-tab="player"] .player-tune-inputs input[type=number]{min-height:33px}
+  body.model-lab[data-main-tab="player"] .player-tune-grid{gap:7px}
+  body.model-lab[data-main-tab="player"] .player-tune-control{column-gap:6px}
 }
 
 
@@ -1289,8 +1291,8 @@ body.model-lab[data-legacy-tools="1"] .audio-status-row{display:none!important}
 
 /* #36 2026-11-17: the editable value IS the visible value, adjacent to its
    label. Shared A/B and model controls stay expanded without oversized boxes. */
-body.model-lab .player-tune-heading output[hidden],
-body.model-lab .lab-number-heading output[hidden]{display:none!important}
+body.model-lab .player-tune-control output[hidden],
+body.model-lab .lab-inline-control output[hidden]{display:none!important}
 body.model-lab .inline-number{display:inline-flex;align-items:center;gap:3px;white-space:nowrap;
   font-size:11px;color:#9ecdc0;font-variant-numeric:tabular-nums}
 body.model-lab .inline-number input[type=number]{
@@ -1300,15 +1302,8 @@ body.model-lab .inline-number input[type=number]{
   font:12px ui-monospace,monospace
 }
 body.model-lab .inline-number input:disabled{opacity:.5}
-body.model-lab .player-tune-heading{justify-content:flex-start;gap:8px;min-height:29px}
-body.model-lab .player-tune-heading label{margin-right:auto}
-body.model-lab .player-tune-control{gap:2px}
-body.model-lab .player-tune-inputs{gap:0}
-body.model-lab .player-tune-inputs input[type=range]{width:100%;min-height:30px}
-body.model-lab .lab-number-heading{display:flex;align-items:center;justify-content:space-between;
-  gap:5px;flex-wrap:wrap;min-height:30px}
-body.model-lab .lab-number-heading label{font-size:11px}
-body.model-lab .lab-number-heading .inline-number input[type=number]{width:66px}
+body.model-lab .player-tune-control .inline-number input[type=number]{width:64px;min-height:40px;height:40px}
+body.model-lab .lab-inline-control .inline-number input[type=number]{width:66px;min-height:38px}
 body.model-lab .model-extra-grid{row-gap:7px}
 body.model-lab .model-extra-grid .lab-field{gap:2px}
 body.model-lab .player-loop-fields{gap:6px}
@@ -1331,5 +1326,9 @@ body.model-lab .model-extra-controls>summary{padding:3px 0}
   body.model-lab .player-loop-fields .loop-point{flex-wrap:nowrap}
   body.model-lab .loop-point input[type=number]{flex:1;width:90px;max-width:135px}
   body.model-lab .loop-point button{margin-left:auto}
-  body.model-lab .model-extra-grid .lab-number-heading{flex-wrap:nowrap}
+  body.model-lab .player-tune-control input[type=range],
+  body.model-lab .lab-inline-control input[type=range]{min-height:44px}
+  body.model-lab .player-tune-control .inline-number input[type=number],
+  body.model-lab .lab-inline-control .inline-number input[type=number]{height:44px;min-height:44px}
+  body.model-lab .player-rail-setting select{min-height:44px}
 }

@@ -28,7 +28,17 @@ async function layoutEvidence(page,tag){
     return {viewport:innerWidth,scrollWidth:document.documentElement.scrollWidth,
       waveform:box(".wave-detail-wrap"),transport:box(".actions"),
       speedPitch:box("#granular-optin-controls"),ab:box("#player-loop-controls"),
-      advancedOpen:document.querySelector(".player-tune-advanced").open,
+      railRangeVisible:document.querySelector("#granular-range").getClientRects().length>0&&
+        document.querySelector("#granular-range").closest("details")===null,
+      waveTimeBoundsInside:(()=>{
+        const waveform=document.querySelector(".wave-detail-wrap").getBoundingClientRect();
+        return ["#wave-visible-start","#wave-visible-end"].every(selector=>{
+          const element=document.querySelector(selector);
+          const bounds=element.getBoundingClientRect();
+          return element.parentElement===document.querySelector(".wave-detail-time-bounds")&&
+            bounds.top>=waveform.top&&bounds.bottom<=waveform.bottom;
+        });
+      })(),
       precisionOpen:document.querySelector(".player-loop-precision").open,
       legacyVisible:getComputedStyle(document.querySelector(".model-legacy-fold")).display!=="none"};
   });
@@ -40,7 +50,8 @@ async function layoutEvidence(page,tag){
   assert.ok(value.waveform.top<value.transport.top&&
     value.transport.top<value.speedPitch.top&&value.speedPitch.top<value.ab.top,
     "expected waveform > transport > speed/pitch > loop hierarchy "+tag);
-  assert.equal(value.advancedOpen,false);
+  assert.equal(value.railRangeVisible,true,"speed rail width is directly available");
+  assert.equal(value.waveTimeBoundsInside,true,"visible waveform bounds stay inside the detailed waveform");
   assert.equal(value.precisionOpen,true, "A/B detail must remain expanded by default");
   assert.equal(value.legacyVisible,false);
 }

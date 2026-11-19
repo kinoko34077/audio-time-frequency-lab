@@ -149,10 +149,11 @@ export function createPlayerWaveEditor({
       }
       const font=Math.round(10*scale);
       context.fillStyle="#b2cecd";context.font=font+"px ui-monospace, monospace";
+      context.textBaseline="top";
       for(let n=0;n<=4;n++){
         const x=n*width/4,time=(start+n*spanFrames/4)/rate;
         if(time>=0&&time<=frames/rate)
-          context.fillText(timestamp(time),Math.min(width-50*scale,x+4*scale),height-6*scale);
+          context.fillText(timestamp(time),Math.min(width-50*scale,x+4*scale),30*scale);
       }
     }
     const {a,b}=onAB();
