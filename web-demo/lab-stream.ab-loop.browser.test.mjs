@@ -81,7 +81,10 @@ test("individual-period Worker applies and wraps edited source-frame A/B without
           if(message?.type==="worker-seek-stage")
             audit.commands.push({type:message.type,frame:message.frame,
               generation:message.generation,requestId:message.requestId,
-              requiredChunks:message.requiredChunks});
+              requiredChunks:message.requiredChunks,
+              loopStartFrame:message.loopStartFrame,
+              loopEndFrame:message.loopEndFrame,
+              loopEnabled:message.loopEnabled});
           return nativePortPostMessage.call(this,message,...args);
         };
         const NativeWorklet=window.AudioWorkletNode;
@@ -607,13 +610,30 @@ test("individual-period Worker applies and wraps edited source-frame A/B without
         const loop=document.querySelector("#player-loop-enabled");
         loop.checked=true;
         loop.dispatchEvent(new Event("change",{bubbles:true}));
+        const wave=document.querySelector("#wave-detail");
+        wave.focus();
+        wave.dispatchEvent(new KeyboardEvent("keydown",{
+          key:"End",bubbles:true,cancelable:true
+        }));
       });
+      const seekDuringLoopStage=await page.waitForFunction(({a,b,generation})=>
+        window.__labAudit.commands.findLast(command=>
+          command.type==="worker-seek-stage"&&
+          command.generation>generation&&command.loopEnabled===true&&
+          command.loopStartFrame===a&&command.loopEndFrame===b),
+        {timeout:12000},{a:editedTerminalA,b:totalFrames,
+          generation:beforeReenable});
+      assert.equal(seekDuringLoopStage.frame,totalFrames-1,
+        JSON.stringify(seekDuringLoopStage));
+      assert.equal(seekDuringLoopStage.requiredChunks,2,
+        "a short terminal seek prepares both the terminal and wrapped A/B chunks");
       await page.waitForFunction(({a,b,generation})=>{
         const audit=window.__labAudit;
         const progress=audit.messages.filter(message=>
           message.type==="progress"&&message.processingMode==="worker"&&
           message.loopEnabled&&message.loopStartFrame===a&&
-          message.loopEndFrame===b&&message.workerGeneration>generation);
+          message.loopEndFrame===b&&
+          message.workerGeneration===generation);
         const current=progress.at(-1);
         return current&&audit.jobs.some(job=>job.generation===current.workerGeneration&&
           job.start===a&&job.end===b&&audit.results.some(result=>
@@ -621,7 +641,14 @@ test("individual-period Worker applies and wraps edited source-frame A/B without
             result.ok===true))&&document.querySelector("#player-loop-hint")
               ?.textContent.includes("反映しました");
       },{timeout:20000},{a:editedTerminalA,b:totalFrames,
-        generation:beforeReenable});
+        generation:seekDuringLoopStage.generation});
+      await page.waitForFunction(({a,generation})=>
+        window.__labAudit.messages.some(message=>
+          message.type==="progress"&&message.processingMode==="worker"&&
+          message.workerGeneration===generation&&message.loopEnabled&&
+          message.sourceFrame<a+4096),
+        {timeout:12000},{a:editedTerminalA,
+          generation:seekDuringLoopStage.generation});
 
       assert.deepEqual(errors,[]);
       await page.evaluate(()=>document.querySelector("#stop").click());

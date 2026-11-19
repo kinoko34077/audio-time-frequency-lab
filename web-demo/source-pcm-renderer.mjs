@@ -624,6 +624,19 @@ export function createSourcePCMRenderer({
           state=timeline.state;
           position=timeline.sourceFrameAt(0);
         }
+        if(position===null&&state.ended&&stagedWorkerState&&
+           stagedWorkerState.kind!=="seek"&&stagedWorkerState.loopEnabled&&
+           renderedChunks.some(segment=>
+             segment.generation===stagedWorkerState.generation&&
+             segment.sequence===stagedWorkerState.sequence)){
+          // A loop re-enabled in the final unlooped chunk has no old-timeline
+          // boundary after EOF. Wait until its replacement PCM is ready, then
+          // re-arm the same source clock at the new A point for normal handoff.
+          timeline.setLoopConfiguration(stagedWorkerState.loopStartFrame,
+            stagedWorkerState.loopEndFrame,true);
+          state=timeline.state;
+          position=timeline.sourceFrameAt(0);
+        }
         if(position===null){for(const ch of output)ch[i]=0;continue;}
         while(renderedChunks.length){
           const head=renderedChunks[0];

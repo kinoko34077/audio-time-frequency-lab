@@ -374,6 +374,30 @@ test("a Worker loop can be re-enabled after terminal loop-off drains",()=>{
   assert.equal(p.statistics.missingFrames,0);
 });
 
+test("a prepared Worker loop re-enables when the old unlooped chunk reaches EOF",()=>{
+  const p=createSourcePCMRenderer({sourceFrames:32,sourceSampleRate:8,
+    outputSampleRate:8,channelCount:1,speed:1,startFrame:28,
+    loopStartFrame:0,loopEndFrame:32,loopEnabled:false});
+  p.installRenderedChunk({generation:0,sequence:0,startFrame:28,endFrame:32,
+    speed:1,coreFrames:4,channels:[new Float32Array(4).fill(1)]});
+  p.renderBuffered([new Float32Array(3)]);
+  assert.equal(p.timeline.state.sourceFrame,31);
+
+  const staged=p.stageRenderedState({generation:1,speed:1,pitchSemitones:0,
+    loopStartFrame:4,loopEndFrame:12,loopEnabled:true});
+  assert.equal(staged.sourceFrame,4);
+  p.installRenderedChunk({generation:1,sequence:staged.sequence,
+    startFrame:4,endFrame:12,speed:1,coreFrames:8,
+    channels:[new Float32Array(8).fill(2)]});
+  p.renderBuffered([new Float32Array(3)]);
+
+  assert.equal(p.workerState.generation,1);
+  assert.equal(p.takeWorkerActivation().sourceFrame,4);
+  assert.equal(p.timeline.state.loopEnabled,true);
+  assert.equal(p.timeline.state.ended,false);
+  assert.equal(p.statistics.missingFrames,0);
+});
+
 test("fractional Worker output reaches EOF without a terminal interpolation sample",()=>{
   const speed=1.1,p=createSourcePCMRenderer({sourceFrames:32,
     sourceSampleRate:48000,outputSampleRate:48000,channelCount:1,speed,

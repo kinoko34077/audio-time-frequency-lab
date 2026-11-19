@@ -126,6 +126,8 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
             generation:m.generation,frame:m.frame,speed:m.speed,
             pitchSemitones:m.pitchSemitones,
             requiredChunks:m.requiredChunks,
+            loopStartFrame:m.loopStartFrame,
+            loopEndFrame:m.loopEndFrame,loopEnabled:m.loopEnabled,
             reuseCompatible:m.reuseCompatible===true,
             reuseGeneration:m.reuseGeneration??null
           });

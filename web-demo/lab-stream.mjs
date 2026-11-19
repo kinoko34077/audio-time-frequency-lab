@@ -439,6 +439,8 @@ export async function createModelStream({ctx,sourceChannels,sampleRate,speed,sem
       try{
         const staged=await bridge.stageWorkerSeekPlayback({frame:seekPlan.start,
           speed:next.speed,pitchSemitones:next.semitones,
+          loopStartFrame:next.loopStartFrame,
+          loopEndFrame:next.loopEndFrame,loopEnabled:next.loopEnabled,
           generation:requestedGeneration,requiredChunks,
           reuseCompatible:sameRenderConfig(activeConfig,next),
           reuseGeneration:activeGeneration});
