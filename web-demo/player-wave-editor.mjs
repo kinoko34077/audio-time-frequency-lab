@@ -5,8 +5,8 @@
 // or proprietary UI imagery are copied.
 import {scrubSpeed,releaseScrubSpeed} from "./scrub-kinetics.mjs";
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
-const DETAIL_PEAK_FRAMES=128;
 const DETAIL_READ_FRAMES=32_768;
+const DETAIL_MAX_READS=64;
 const timestamp=seconds=>{
   const value=Math.max(0,seconds);
   return Math.floor(value/60)+":"+(value%60).toFixed(2).padStart(5,"0");
@@ -118,26 +118,39 @@ export function createPlayerWaveEditor({
     return [low===1&&high===-1?0:low,high===-1&&low===1?0:high];
   }
   function requestDetail(start,end){
-    if(!source||detailPending)return;
+    if(!source)return;
     const from=clamp(Math.floor(start),0,Math.max(0,frames-1));
     const to=clamp(Math.ceil(end),from+1,frames);
     const key=from+':'+to;
-    if(detailFailedKey===key)return;
-    const blockFrames=Math.max(1,Math.min(DETAIL_PEAK_FRAMES,
-      Math.floor(spanFrames/Math.max(1,canvas.clientWidth*2))));
-    if(detailPeaks&&from>=detailStart&&to<=detailEnd&&
-       detailBlockFrames<=blockFrames)return;
-    const reader=source,revision=++detailRevision;
+    const pixelRatio=Math.min(devicePixelRatio||1,2);
+    const maxSummaryBins=Math.max(1,
+      Math.ceil(canvas.clientWidth*pixelRatio));
+    const blockFrames=Math.max(1,Math.ceil((to-from)/maxSummaryBins));
     const summaryStart=Math.floor(from/blockFrames)*blockFrames;
     const summaryEnd=Math.min(frames,
       Math.ceil(to/blockFrames)*blockFrames);
-    const summaryCount=Math.ceil((summaryEnd-summaryStart)/blockFrames);
-    const low=new Float32Array(summaryCount),high=new Float32Array(summaryCount);
-    low.fill(Infinity);high.fill(-Infinity);
+    const reader=source;
     const maxRead=Number.isSafeInteger(reader.maxReadFrames)?
       reader.maxReadFrames:DETAIL_READ_FRAMES;
     const readFrames=Math.max(1,Math.min(DETAIL_READ_FRAMES,maxRead));
-    detailPending=(async()=>{
+    if(summaryEnd-summaryStart>readFrames*DETAIL_MAX_READS){
+      // Wide zoom uses the fixed-size whole-track overview. Invalidate an
+      // obsolete detail read so it stops after its current bounded PCM chunk.
+      // Keep its token until that chunk settles to prevent overlapping reads
+      // if the user quickly zooms back into the detail range.
+      if(detailPending)detailRevision++;
+      return;
+    }
+    if(detailPending||detailFailedKey===key)return;
+    if(detailPeaks&&from>=detailStart&&to<=detailEnd&&
+       detailBlockFrames<=blockFrames)return;
+    const revision=++detailRevision;
+    const requestToken={};
+    const summaryCount=Math.ceil((summaryEnd-summaryStart)/blockFrames);
+    const low=new Float32Array(summaryCount),high=new Float32Array(summaryCount);
+    low.fill(Infinity);high.fill(-Infinity);
+    detailPending=requestToken;
+    (async()=>{
       let chunkIndex=0;
       for(let chunkStart=summaryStart;chunkStart<summaryEnd;){
         if(source!==reader||revision!==detailRevision)return;
@@ -192,7 +205,7 @@ export function createPlayerWaveEditor({
         },160);
       }
     }).finally(()=>{
-      if(source===reader&&revision===detailRevision){
+      if(detailPending===requestToken){
         detailPending=null;refresh(true);
       }
     });
