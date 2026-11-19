@@ -44,7 +44,7 @@ export function planChunk({totalFrames,sampleRate,speed,startSeconds,startFrame=
       Math.max(Math.ceil(sampleRate*.120),analysisWindow*2)):Math.ceil(sampleRate*.120)):
     Math.min(Math.ceil(sampleRate*.7),Math.max(Math.ceil(sampleRate*.040),referenceWindows*analysisWindow/4,analysisWindow));
   const contiguousLeft=Math.min(start-(loopEnabled?loopStartFrame:0),context);
-  const leftWrapCandidate=loopEnabled?
+  const leftWrapCandidate=loopEnabled&&loopLength<totalFrames?
     context-contiguousLeft:0;
   const wrapLeft=leftWrapCandidate;
   const left=contiguousLeft+wrapLeft;
