@@ -273,6 +273,52 @@ test("changing A stages the replacement inside the new loop instead of old A",()
   assert.equal(p.statistics.missingFrames,0);
 });
 
+test("moving loop A past the retained chunk retires the old loop at its boundary",()=>{
+  const p=createSourcePCMRenderer({sourceFrames:32,sourceSampleRate:8,
+    outputSampleRate:8,channelCount:1,speed:1,startFrame:6,
+    loopStartFrame:4,loopEndFrame:8,loopEnabled:true});
+  p.installRenderedChunk({generation:0,sequence:0,startFrame:4,endFrame:8,
+    speed:1,coreFrames:4,channels:[new Float32Array(4).fill(1)]});
+  assert.equal(p.installRenderedChunk({generation:0,sequence:1,startFrame:4,endFrame:8,
+    speed:1,coreFrames:4,channels:[new Float32Array(4).fill(1)]}),2,
+    "the old loop may already have its next repeated chunk queued");
+  const staged=p.stageRenderedState({generation:1,speed:1,pitchSemitones:0,
+    loopStartFrame:10,loopEndFrame:16,loopEnabled:true});
+  assert.equal(staged.sourceFrame,10);
+  assert.equal(p.installRenderedChunk({generation:1,sequence:staged.sequence,
+    startFrame:10,endFrame:16,speed:1,coreFrames:6,
+    channels:[new Float32Array(6).fill(2)]}),2);
+
+  assert.equal(p.renderBuffered([new Float32Array(8)]),0);
+  assert.equal(p.workerState.generation,1,
+    "the old loop cannot wrap forever ahead of the new A boundary");
+  assert.equal(p.timeline.state.loopStartFrame,10);
+  assert.equal(p.statistics.missingFrames,0);
+});
+
+test("re-enabling an overlapping loop retires the exhausted EOF chunk",()=>{
+  const p=createSourcePCMRenderer({sourceFrames:32,sourceSampleRate:8,
+    outputSampleRate:8,channelCount:1,speed:1,startFrame:31,
+    loopStartFrame:4,loopEndFrame:12,loopEnabled:false});
+  p.installRenderedChunk({generation:0,sequence:0,startFrame:24,endFrame:32,
+    speed:1,coreFrames:8,channels:[new Float32Array(8).fill(1)]});
+  const staged=p.stageRenderedState({generation:1,speed:1,pitchSemitones:0,
+    loopStartFrame:26,loopEndFrame:30,loopEnabled:true});
+  assert.equal(staged.sourceFrame,26);
+  p.installRenderedChunk({generation:1,sequence:staged.sequence,
+    startFrame:26,endFrame:30,speed:1,coreFrames:4,
+    channels:[new Float32Array(4).fill(2)]});
+
+  const output=[new Float32Array(5)];
+  assert.equal(p.renderBuffered(output),0);
+  assert.equal(p.workerState.generation,1,
+    "the old EOF PCM must not remain ahead of a loop inside its range");
+  assert.equal(p.takeWorkerActivation().sourceFrame,26);
+  assert.equal(p.timeline.state.loopStartFrame,26);
+  assert.ok(output[0].some(value=>value===2));
+  assert.equal(p.statistics.missingFrames,0);
+});
+
 test("disabling a Worker A/B loop exits at B without restarting the Worklet clock",()=>{
   const p=createSourcePCMRenderer({sourceFrames:32,sourceSampleRate:8,
     outputSampleRate:8,channelCount:1,speed:1,startFrame:4,

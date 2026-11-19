@@ -4,6 +4,19 @@
 import {createSourcePCMBridge} from "./source-pcm-bridge.mjs";
 import {RENDERED_CHUNK_SLOTS} from "./source-pcm-renderer.mjs";
 export const CHUNK_SECONDS=1.5;
+export function requiredSeekChunkCount({totalFrames,sampleRate,speed,
+  loopEnabled,plan}={}){
+  if(!Number.isSafeInteger(totalFrames)||totalFrames<1||
+     !Number.isFinite(sampleRate)||sampleRate<=0||
+     !Number.isFinite(speed)||speed<=0||typeof loopEnabled!=="boolean"||
+     !plan||!Number.isSafeInteger(plan.core)||plan.core<1||
+     !Number.isSafeInteger(plan.nextFrame))
+    throw RangeError("invalid Worker seek chunk requirement");
+  const normalChunkFrames=Math.ceil(CHUNK_SECONDS*sampleRate);
+  if(!loopEnabled&&(plan.core<normalChunkFrames||
+     plan.nextFrame>=totalFrames))return 1;
+  return plan.core<normalChunkFrames||speed>1.5?2:1;
+}
 export function repeatLoopContext(source,loopStartFrame,loopEndFrame,count,side){
   if(!(source instanceof Float32Array)||
      !Number.isSafeInteger(loopStartFrame)||loopStartFrame<0||
@@ -444,11 +457,8 @@ export async function createModelStream({ctx,sourceChannels,sampleRate,speed,sem
         longFftSize:next.longFftSize,referenceWindows:next.referenceWindows,
         jointBackend:next.jointBackend,loopStartFrame:next.loopStartFrame,
         loopEndFrame:next.loopEndFrame,loopEnabled:next.loopEnabled});
-      const terminalUnlooped=!next.loopEnabled&&
-        seekPlan.nextFrame>=totalFrames;
-      const requiredChunks=terminalUnlooped?1:
-        seekPlan.core<Math.ceil(CHUNK_SECONDS*sampleRate)||
-          next.speed>1.5?2:1;
+      const requiredChunks=requiredSeekChunkCount({totalFrames,sampleRate,
+        speed:next.speed,loopEnabled:next.loopEnabled,plan:seekPlan});
       stagingOperations++;
       try{
         const staged=await bridge.stageWorkerSeekPlayback({frame:seekPlan.start,

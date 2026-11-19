@@ -322,6 +322,9 @@ export function createSourcePCMRenderer({
       if(renderedChunks.length>=RENDERED_CHUNK_SLOTS)
         throw RangeError("rendered PCM chunk queue full");
       const previous=renderedChunks.at(-1)||previousRendered;
+      const retiringLoopHandoff=staged&&!staged.firstChunkAccepted&&
+        previous?.retireAfterLoop&&queueSequence===previous.sequence+1&&
+        startFrame===staged.frame;
       const lateHandoffResult=
         (active&&stagedWorkerState&&stagedWorkerState.kind!=="seek"&&
           queueSequence>stagedWorkerState.sequence)||
@@ -331,7 +334,8 @@ export function createSourcePCMRenderer({
         const expected=nextRenderedFrame(previous.endFrame,
           staged&&staged.kind!=="seek"&&queueSequence>=staged.sequence?
             staged:timeline.state);
-        if(startFrame!==expected||queueSequence!==previous.sequence+1){
+        if((startFrame!==expected&&!retiringLoopHandoff)||
+           queueSequence!==previous.sequence+1){
           if(lateHandoffResult)return false;
           throw RangeError("rendered PCM chunks are not source-contiguous");
         }
@@ -405,7 +409,7 @@ export function createSourcePCMRenderer({
       let frame,sequence;
       if(current){
         const currentIndex=activeChunks.indexOf(current);
-        const retained=activeChunks.slice(currentIndex,currentIndex+2);
+        let retained=activeChunks.slice(currentIndex,currentIndex+2);
         const boundary=nextRenderedFrame(current.endFrame,state);
         if(!loopEnabled&&state.loopEnabled&&
            current.endFrame>=state.loopEndFrame){
@@ -429,6 +433,15 @@ export function createSourcePCMRenderer({
            current.startFrame<=state.loopStartFrame&&
            current.endFrame>=state.loopEndFrame)
           current.retireAfterLoop=true;
+        if(loopChanged&&state.loopEnabled&&loopEnabled&&
+           current.endFrame>=state.loopEndFrame&&
+           (frame<current.startFrame||frame>current.endFrame)){
+          current.retireAfterLoop=true;
+          // A new A beyond the current loop cannot consume already queued
+          // repetitions of the old loop. Keep only the audible old segment;
+          // the next sequence is reserved for the staged new A boundary.
+          retained=[current];
+        }
         if(loopEnabled&&frame===loopStartFrame&&
            current.startFrame===loopStartFrame&&
            current.endFrame>=loopEndFrame)
@@ -629,8 +642,12 @@ export function createSourcePCMRenderer({
              segment.generation===stagedWorkerState.generation&&
              segment.sequence===stagedWorkerState.sequence)){
           // A loop re-enabled in the final unlooped chunk has no old-timeline
-          // boundary after EOF. Wait until its replacement PCM is ready, then
-          // re-arm the same source clock at the new A point for normal handoff.
+          // boundary after EOF. Retire exhausted old PCM before re-arming so
+          // an overlapping new loop cannot keep the old chunk at the queue head.
+          const generation=stagedWorkerState.generation;
+          renderedChunks.splice(0,renderedChunks.length,
+            ...renderedChunks.filter(segment=>segment.generation===generation));
+          previousRendered=null;
           timeline.setLoopConfiguration(stagedWorkerState.loopStartFrame,
             stagedWorkerState.loopEndFrame,true);
           state=timeline.state;

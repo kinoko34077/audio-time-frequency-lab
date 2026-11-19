@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {planChunk,CHUNK_SECONDS,repeatLoopContext} from './lab-stream.mjs';
+import * as labStream from './lab-stream.mjs';
 import {renderPCM} from './lab-dsp.mjs';
 
 test('long 4-minute 48k stereo 0.5x track is split into strictly bounded preview chunks',()=>{
@@ -17,6 +18,22 @@ test('long 4-minute 48k stereo 0.5x track is split into strictly bounded preview
    assert.ok(plan.outputStart+plan.outputFrames<=Math.ceil(inputFrames/.5)+2);
   }
  }
+});
+test('terminal unlooped seeks require only PCM chunks that can actually exist',()=>{
+ const choose=labStream.requiredSeekChunkCount;
+ const sr=8,full=Math.ceil(CHUNK_SECONDS*sr);
+ assert.equal(choose?.({totalFrames:32,sampleRate:sr,speed:2,loopEnabled:false,
+  plan:{core:4,nextFrame:32}}),1,
+  'the final partial source chunk cannot provide a second lookahead chunk');
+ assert.equal(choose?.({totalFrames:32,sampleRate:sr,speed:2,loopEnabled:false,
+  plan:{core:full,nextFrame:32}}),1,
+  'a full-sized chunk ending exactly at EOF also has no successor');
+ assert.equal(choose?.({totalFrames:64,sampleRate:sr,speed:2,loopEnabled:false,
+  plan:{core:full,nextFrame:12}}),2,
+  'two chunks remain available before EOF');
+ assert.equal(choose?.({totalFrames:32,sampleRate:sr,speed:2,loopEnabled:true,
+  plan:{core:4,nextFrame:32}}),2,
+  'an enabled loop can render its wrapped successor');
 });
 test('the final full-track Worker chunk includes bounded wrapped PCM for its interpolation neighbor',()=>{
  const sr=48000,total=sr*6,speed=1.33;
