@@ -183,8 +183,31 @@ test('full Chrome: inherited Rust AudioWorklet live independent speed/pitch UI',
       lab:document.querySelector('#lab-status')?.textContent}));
     throw Error('Rust Worklet failed from shared model transport: '+JSON.stringify({stateBefore,...info})+' / '+error.message);
   }
+  await page.waitForFunction(()=>document.querySelector('#granular-optin-status')
+    ?.dataset.processingState==='applied'&&
+    document.querySelector('#granular-optin-status')?.dataset.renderRunning==='true',
+    {timeout:10000});
   assert.equal(await page.$eval('#granular-speed-value',e=>e.value),'1.5');
   assert.equal(await page.$eval('#granular-pitch-value',e=>e.value),'12');
+  const visibleProcessingStatus=await page.$eval('#granular-optin-status',element=>({
+    text:element.textContent,state:element.dataset.processingState,
+    height:element.getBoundingClientRect().height,
+    lineHeight:Number.parseFloat(getComputedStyle(element).lineHeight)}));
+  assert.equal(visibleProcessingStatus.text,
+    '再生中・反映済み・Rust/WASM\n+1.500×・+12.000半音');
+  assert.equal(visibleProcessingStatus.state,'applied');
+  assert.ok(Math.abs(visibleProcessingStatus.height-
+    visibleProcessingStatus.lineHeight*2)<2,
+    'status reserves two lines so updates cannot move the player layout: '+
+      JSON.stringify(visibleProcessingStatus));
+  await page.evaluate(()=>{
+    window.__playerStatusHistory=[];
+    const status=document.querySelector('#granular-optin-status');
+    const observer=new MutationObserver(()=>
+      window.__playerStatusHistory.push(status.textContent));
+    observer.observe(status,{childList:true,characterData:true,subtree:true});
+    window.__playerStatusObserver=observer;
+  });
   await page.waitForFunction(()=>window.__rustOutputAnalysers?.length>0,
    {timeout:10000});
   await page.waitForFunction(()=>window.__rustOutputRoutes?.media>0,
@@ -200,6 +223,22 @@ test('full Chrome: inherited Rust AudioWorklet live independent speed/pitch UI',
    startupOutputIsolation.gains.every(value=>value===0),
    'all device and MediaStream output routes must be muted before PCM verification: '+
     JSON.stringify(startupOutputIsolation));
+  await page.click('#play-main');
+  await page.waitForFunction(()=>{
+    const status=document.querySelector('#granular-optin-status');
+    return status?.dataset.renderRunning==='false'&&
+      status.textContent.startsWith('一時停止中・');
+  },{timeout:10000});
+  await sleep(100);
+  assert.ok((await page.$eval('#granular-optin-status',e=>e.textContent))
+    .startsWith('一時停止中・'),
+    'a late silent receipt must not replace paused with stopped');
+  await page.click('#play-main');
+  await page.waitForFunction(()=>{
+    const status=document.querySelector('#granular-optin-status');
+    return status?.dataset.renderRunning==='true'&&
+      status.textContent.startsWith('再生中・');
+  },{timeout:10000});
   const setSpeed=async speed=>{
    const previous=Number(await page.$eval('#granular-optin-status',
     e=>e.dataset.renderRevision||0));
@@ -209,9 +248,25 @@ test('full Chrome: inherited Rust AudioWorklet live independent speed/pitch UI',
    await page.waitForFunction(({speed,previous})=>{
     const status=document.querySelector('#granular-optin-status');
     return Number(document.querySelector('#granular-speed-value')?.value)===speed&&
+      status?.dataset.processingState==='applied'&&
       status?.dataset.renderRunning==='true'&&
+      Number(status?.dataset.renderSpeed)===speed&&
       Number(status?.dataset.renderRevision)>previous;
    },{timeout:10000},{speed,previous});
+   const statusText=await page.$eval('#granular-optin-status',e=>e.textContent);
+   const visibleSpeed=speed===0?'0.000':(speed<0?'−':'+')+
+    Math.abs(speed).toFixed(3);
+   const selectedPitch=Number(await page.$eval('#granular-pitch-value',e=>e.value));
+   const visiblePitch=selectedPitch===0?'0.000':
+    (selectedPitch<0?'−':'+')+Math.abs(selectedPitch).toFixed(3);
+   assert.ok(statusText.includes(`\n${visibleSpeed}×・${visiblePitch}半音`),
+    'visible status must follow the selected signed speed and pitch: '+statusText);
+   const statusHeight=await page.$eval('#granular-optin-status',e=>e.getBoundingClientRect().height);
+   assert.equal(statusHeight,visibleProcessingStatus.height,
+    'status updates keep their reserved height');
+   const pendingWasVisible=await page.evaluate(()=>
+    window.__playerStatusHistory.some(text=>text.includes('・反映中・')));
+   assert.ok(pendingWasVisible,'status must expose a pending settings change');
    await sleep(100);
    const readings=[];
    for(let i=0;i<7;i++){

@@ -980,7 +980,6 @@ body.model-lab[data-main-tab="player"] #play-main{
 .player-rail-setting select{padding:6px;border:1px solid #456b68;color:#e2f7f1;background:#0e2830;border-radius:6px}
 .player-tune-advanced .player-quality-note{margin:7px 0 0}
 .player-tune #granular-rail-note:empty{display:none}
-.player-tune .player-processing-status{font-size:10px;margin:0;line-height:1.3;color:#91b7b3}
 body.model-lab[data-main-tab="player"] #player-loop-controls{
   gap:3px;margin:1px 0 0;padding:9px 12px;border:1px solid #305158;
   border-radius:9px;background:transparent
@@ -1242,6 +1241,11 @@ body.model-lab:not([data-legacy-tools="1"]) .audio-status-row{
   display:flex;align-items:center;justify-content:space-between;
   gap:8px;min-width:0;min-height:30px;margin-top:3px;
   font-size:11px;color:#a9c8c9;
+}
+.player-processing-status{
+  box-sizing:border-box;width:100%;min-height:2.6em;max-height:2.6em;
+  overflow:hidden;white-space:pre-line;font-size:10px;margin:0;line-height:1.3;
+  font-variant-numeric:tabular-nums;color:#91b7b3
 }
 body.model-lab:not([data-legacy-tools="1"]) #audio-state-summary{
   flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;

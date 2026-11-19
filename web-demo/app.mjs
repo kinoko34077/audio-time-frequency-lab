@@ -20,6 +20,8 @@ import {reconcileFrequencyBounds} from "./frequency-bounds.mjs";
 import {prepareStreamSettings} from "./stream-parameter-contract.mjs";
 import {displaySourceFrameFromProgress} from "./player-display-clock.mjs";
 import {createPlaybackFeedback} from "./playback-feedback.mjs";
+import {formatPlaybackStatus,rendererMatchesSelection,
+  transportFromReceipt,transportFromPlayer,phaseForModelStart} from "./playback-status.mjs";
 import {axisShiftUnits,axisShiftCanonical,axisShiftView} from "./axis-shift-view.mjs";
 
 const $=id=>document.querySelector(id);
@@ -72,6 +74,21 @@ const state={
   effective:{low:20,high:16000},raf:0,lastStats:null,mathCore:null,wasmPromise:null,rebuildTimer:null,sine:null,loadToken:0,transportEpoch:0
 };
 const lab={mode:initialModel,speed:1,semitones:0,fftSize:2048,shortFftSize:512,longFftSize:2048,referenceWindows:8,periodCycles:8,individual:false,processed:null,worker:null,job:0};
+function setPlayerProcessingStatus(phase,{transport,model=lab.mode,
+  individual=lab.individual,speed=granular.speed,pitch=granular.pitch}={}){
+  const status=$("#granular-optin-status");
+  if(!status)return;
+  const currentPlayer=state.player;
+  const resolvedTransport=transport||
+    (currentPlayer?.paused?"paused":currentPlayer?"playing":"stopped");
+  status.dataset.processingState=phase;
+  status.textContent=formatPlaybackStatus({transport:resolvedTransport,
+    phase,model,individual,speed,pitch});
+}
+function setPlayerProcessingDetail(text){
+  const detail=$("#rt-telemetry");
+  if(detail)detail.textContent=text;
+}
 const labReady=()=>lab.mode!=="live"&&!isPCMModel(lab.mode)&&
   lab.processed?.model===lab.mode&&lab.processed?.speed===lab.speed&&lab.processed?.semitones===lab.semitones;
 
@@ -252,9 +269,10 @@ function editGranular(kind,raw,fromModelTab=false){
   input.setCustomValidity("");
   if(Object.is(granular[kind],value)){refreshGranular();return;}
   granular[kind]=value;refreshGranular();
-  const bridge=state.player?.pcmBridge,status=$("#granular-optin-status");
+  const bridge=state.player?.pcmBridge;
   if(!bridge||!isPCMModel(bridge.processingMode)){
-    status.textContent="設定保持中。現在の選択モデルで適用するには再生状態を確認してください。";
+    setPlayerProcessingStatus(state.player&&state.player.mode!=="dry"?
+      "pending":state.player?"saved":"ready");
     // Keep selected model parameters synchronized even while stopped.
     // This also rechecks a pending model when its requested speed becomes
     // feasible, without changing the canonical value or faking application.
@@ -263,13 +281,14 @@ function editGranular(kind,raw,fromModelTab=false){
     return;
   }
   if(kind==="speed"&&temporaryScrubSpeed!==null){
-    status.textContent="設定速度を保持しました。スクラブ終了後に反映します。";return;
+    setPlayerProcessingStatus("pending");return;
   }
-  status.textContent="処理へ設定を要求しました（音声反映は未確認）。";
+  setPlayerProcessingStatus("pending");
   void (kind==="speed"?bridge.setSpeed(value):bridge.setPitch(value))
     .catch(error=>{
       if(state.player?.pcmBridge!==bridge)return;
-      status.textContent="未反映: "+error.message;
+      setPlayerProcessingStatus("failed");
+      setPlayerProcessingDetail("PCM設定失敗: "+error.message);
       message("実験音声設定の反映失敗: "+error.message,"error");
     });
   // The previously selected model may have been pending; honor it as soon as
@@ -869,8 +888,8 @@ function waveHoverSample(owner,sourceFrame){
        state.player.paused)))return false;
   if(!state.player&&navigator.userActivation &&
      !navigator.userActivation.hasBeenActive&&state.ctx?.state!=="running"){
-    $("#granular-optin-status").textContent=
-      "ブラウザの音声開始制限: 最初に再生を押すと、非押下ホバーで試聴できます。";
+    setPlayerProcessingStatus("failed",{transport:"stopped"});
+    setPlayerProcessingDetail("ブラウザの音声開始制限。最初に再生を押してください。");
     return false;
   }
   const frame=clamp(Math.round(sourceFrame),0,state.dry[0].length-1);
@@ -1274,6 +1293,8 @@ async function setMainPlayerPaused(paused){
     controls.main.textContent=paused?"▶ 再開":"⏸ 一時停止";
     controls.main.setAttribute("aria-label",paused?"同じ位置から再生を再開":"再生を一時停止");
     mediaStatus(!paused);
+    setPlayerProcessingStatus(paused?"saved":"applied",
+      {transport:paused?"paused":"playing"});
     indicator(paused?"一時停止中 · 再生位置と設定を保持":"再生中 · 速度/音程・区間を保持");
     refreshStatusSeek();
   }catch(error){
@@ -1372,13 +1393,16 @@ async function stop(){
     controls.main.disabled=!state.dry;
     mediaStatus(false);
     indicator("停止中");
+    setPlayerProcessingStatus("saved",{transport:"stopped"});
     return;
   }
   state.seek=playPosition();
   state.player=null;
   if(p.labStream){
     p.stream.stop();mediaStatus(false);controls.stop.disabled=true;refreshAB();
-    $("#rt-telemetry").textContent="";indicator("停止中");refreshStatusSeek();return;
+    $("#rt-telemetry").textContent="";indicator("停止中");
+    setPlayerProcessingStatus("saved",{transport:"stopped"});
+    refreshStatusSeek();return;
   }
   if(p.rawPCM){
     p.pcmBridge.dispose();
@@ -1388,7 +1412,7 @@ async function stop(){
     $("#rt-telemetry").textContent="";
     delete $("#rt-telemetry").dataset.pcmTransport;
     indicator("停止中 · PCM実験経路を終了");
-    if(p.granular)$("#granular-optin-status").textContent="停止中・設定保持";
+    if(p.granular)setPlayerProcessingStatus("saved",{transport:"stopped"});
     refreshStatusSeek();return;
   }
   try{p.source?.stop();}catch{}
@@ -1402,6 +1426,7 @@ async function stop(){
   controls.stop.disabled=true;
   $("#rt-telemetry").textContent="";
   indicator("停止中 · Rust / WASM AudioWorklet");
+  setPlayerProcessingStatus("saved",{transport:"stopped"});
   refreshStatusSeek();
 }
 async function play(mode="wet",offset=null){
@@ -1478,6 +1503,8 @@ async function play(mode="wet",offset=null){
     // p.granular is the legacy boolean meaning "PCM time/pitch synth active".
     const granularActive=mode==="player"||GRANULAR_EXPERIMENT;
     const activeSynthMode=mode==="player"?lab.mode:"granular";
+    if(granularActive)setPlayerProcessingStatus("pending",{
+      transport:"playing",model:activeSynthMode});
     // The main player is an explicit independent pitch/time engine. The
     // original button retains its prior semantics and mode identity.
     let bridge=null;
@@ -1517,19 +1544,39 @@ async function play(mode="wet",offset=null){
           if(granularActive&&state.player?.pcmBridge===bridge){
             const status=$("#granular-optin-status");
             if(data.type==="command-accepted"){
-              status.textContent="命令受理 #"+data.requestId+" revision "+data.revision+
-                " · 音声ブロック反映待ち";
+              setPlayerProcessingStatus("pending");
+              setPlayerProcessingDetail("PCM命令 #"+data.requestId+
+                " · revision "+data.revision+" · 音声ブロック反映待ち");
             }else if(data.type==="render-applied"){
               status.dataset.renderRevision=String(data.revision);
               status.dataset.renderPitch=String(data.pitchSemitones);
+              status.dataset.renderSpeed=String(data.speed);
               status.dataset.renderFrame=String(data.sourceFrame);
               status.dataset.renderRunning=String(data.running);
-              status.textContent=(data.running?"音声処理済み":"再生前の位置設定済み（出力は無音）")+
-                " revision "+data.revision+
+              const matchesSelection=rendererMatchesSelection({
+                processingMode:data.processingMode,
+                selectedMode:mode==="player"?lab.mode:activeSynthMode,
+                individual:mode==="player"&&lab.individual,speed:data.speed,
+                selectedSpeed:granular.speed,
+                pitchSemitones:data.pitchSemitones,
+                selectedPitch:granular.pitch
+              });
+              if(matchesSelection){
+                setPlayerProcessingStatus("applied",{
+                  transport:transportFromReceipt({
+                    paused:state.player?.paused===true,running:data.running
+                  })});
+              }else if(!["unsupported","failed"].includes(
+                status.dataset.processingState)){
+                setPlayerProcessingStatus("pending");
+              }
+              setPlayerProcessingDetail("PCM revision "+data.revision+
                 " · sourceFrame "+data.sourceFrame+
-                " · cache不足 "+data.missingFramesInBlock;
+                " · cache不足 "+data.missingFramesInBlock);
             }else if(data.type==="render-superseded"){
-              status.textContent="受理済み命令 #"+data.requestId+" は音声反映前に上書き";
+              setPlayerProcessingStatus("pending");
+              setPlayerProcessingDetail("PCM命令 #"+data.requestId+
+                " は反映前に上書き · revision "+data.revision);
             }
           }
           if(data.type==="progress"&&state.player?.pcmBridge===bridge){
@@ -1545,6 +1592,8 @@ async function play(mode="wet",offset=null){
               // the launch has temporarily disabled both playback buttons.
               controls.main.disabled=!state.dry;controls.dry.disabled=!state.dry;
               controls.wet.disabled=!state.dry;
+              setPlayerProcessingStatus("failed",{transport:"stopped"});
+              setPlayerProcessingDetail("PCM再生エンジン異常終了: "+data.message);
               indicator("PCM実験再生エンジンの異常終了");
               message("PCM実験再生を停止しました。音源は保持されています: "+
                 data.message,"error");
@@ -1669,6 +1718,10 @@ async function play(mode="wet",offset=null){
         controls.main.disabled=!state.dry;controls.dry.disabled=!state.dry;
         controls.wet.disabled=!state.dry;
       }
+      if(granularActive){
+        setPlayerProcessingStatus("failed",{transport:"stopped",model:activeSynthMode});
+        setPlayerProcessingDetail("PCM再生開始失敗: "+err.message);
+      }
       message("PCM実験経路の起動失敗（原音再生に自動置換しません）: "+err.message,"error");
     }finally{
       if(launchEpoch===state.transportEpoch){
@@ -1695,6 +1748,8 @@ async function play(mode="wet",offset=null){
       };
       state.player=player;
       startSource(player,offset===null?state.seek:offset);
+      setPlayerProcessingStatus(offlineRequest?"applied":"saved",
+        {transport:"playing"});
       mediaStatus(true);
       void mediaBridge(player);
       controls.stop.disabled=false;
@@ -2613,7 +2668,10 @@ async function labSettingsChanged(){
     // A pending model request must not destroy the last-good audio stream.
     // Keep the requested canonical speed and model; do not silently start a
     // different DSP or claim that an unsupported render was applied.
-    const playing=state.player&&state.player.mode!=="dry";
+    const player=state.player;
+    const playing=Boolean(player&&player.mode!=="dry");
+    const transport=transportFromPlayer({paused:player?.paused===true,
+      active:playing});
     const active=state.player?.labStream?(state.player.appliedLabMode||previous):
       state.player?.labRealtime?"live":
       state.player?.rawPCM&&state.player.granular?
@@ -2621,16 +2679,22 @@ async function labSettingsChanged(){
     const explanation="この処理モデルは現在の指定速度にまだ対応していません。"+
       "指定値とモデル選択は保持します。"+(playing?
       "再生中の"+active+"を維持し、モデル切替は保留しています。":"");
+    setPlayerProcessingStatus("unsupported",{
+      transport,model:nextMode,
+      individual:lab.individual,speed:nextSpeed,pitch:nextSemi});
+    setPlayerProcessingDetail("モデル未対応: "+capability.reason);
     labStatusText("適用待ち: "+explanation);
     message(explanation,"warning");
     return;
   }
   const player=state.player;
-  $("#granular-optin-status").textContent=capability.supported?
-    "選択モデル: "+nextMode+"。"+(capability.sampleAB?
-      "サンプル単位A/B・正逆・0倍対応。":
-      "0/逆再生とサンプル単位A/B・即時スクラブは未対応。設定値は保持。"):
-    "未適用: "+capability.reason;
+  const activePlayer=Boolean(player&&player.mode!=="dry");
+  setPlayerProcessingStatus(activePlayer?"pending":"ready",{
+    transport:activePlayer?"playing":undefined,model:nextMode,
+    individual:lab.individual,speed:nextSpeed,pitch:nextSemi});
+  if(!activePlayer&&player?.mode==="dry")
+    setPlayerProcessingStatus("ready",{transport:"playing",model:nextMode,
+      individual:lab.individual,speed:nextSpeed,pitch:nextSemi});
   if(player&&player.mode!=="dry"){
     if(player.labStream&&!isPCMModel(nextMode,nextIndividual)){
       const nextConfig=Object.freeze({mode:nextMode,speed:nextSpeed,
@@ -2650,6 +2714,8 @@ async function labSettingsChanged(){
       if(ticket!==modelSelectionEpoch||state.player!==player)return;
       player.appliedConfig=nextConfig;player.appliedLabMode=nextMode;
       player.sourceTimeRate=nextSpeed;player.offset=currentTime;
+      setPlayerProcessingStatus("applied",{transport:"playing",model:nextMode,
+        individual:lab.individual,speed:nextSpeed,pitch:nextSemi});
     }else if(previous!==nextMode||
        (nextMode==="wsola"&&!nextIndividual&&previousShort!==nextShort)||
        (nextMode==="dual"&&!nextIndividual&&
@@ -2674,6 +2740,8 @@ async function labSettingsChanged(){
       p.appliedSpeed=lab.speed;
       p.source?.playbackRate.setValueAtTime(lab.speed,state.ctx.currentTime);
       updateParams("lab");
+      setPlayerProcessingStatus("applied",{transport:"playing",model:nextMode,
+        individual:lab.individual,speed:nextSpeed,pitch:nextSemi});
     }else if(!isPCMModel(nextMode,nextIndividual)){
       await stop();
       if(ticket!==modelSelectionEpoch)return;
@@ -2726,6 +2794,7 @@ async function startModelPlayback(offset=null,appliedOverride=null){
     referenceWindows:lab.referenceWindows,periodCycles:lab.periodCycles
   });
   const pending=labSettingsPending(applied);
+  setPlayerProcessingStatus("pending",{transport:"playing"});
   const where=clamp(offset??(state.player?playPosition():state.seek),0,Math.max(0,duration()-.001));
   if(state.player)await stop();
   // Native AudioContext (and original file decoder/transport) is inherited;
@@ -2748,13 +2817,18 @@ async function startModelPlayback(offset=null,appliedOverride=null){
       periodCycles:applied.periodCycles,startSeconds:where,
       onStatus:text=>{
         if(state.player!==player)return;
-        if(labSettingsPending(player.appliedConfig))
-          $("#rt-telemetry").textContent=text;
-        else labStatusText(text);
+        setPlayerProcessingDetail(text);
       },
       onStarted:at=>{
         if(state.player!==player)return;
         player.at=at;controls.stop.disabled=false;
+        const selectedCapability=primaryModelCapability(lab.mode,lab.speed,
+          {individual:lab.individual});
+        setPlayerProcessingStatus(phaseForModelStart({
+          supported:selectedCapability.supported,
+          settingsPending:labSettingsPending(applied)
+        }),{transport:"playing",model:lab.mode,individual:lab.individual,
+          speed:lab.speed,pitch:lab.semitones});
         indicator("モデル再生中 · "+(applied.individual?"個別波長＋":"")+
           applied.mode.toUpperCase()+" · 自動先読み"+
           (labSettingsPending(player.appliedConfig)?
@@ -2771,6 +2845,8 @@ async function startModelPlayback(offset=null,appliedOverride=null){
           await stop();
           if(state.player)return;
           state.seek=resume;
+          setPlayerProcessingStatus("failed",{transport:"stopped"});
+          setPlayerProcessingDetail("Workerモデル処理失敗: "+error);
           indicator("選択モデルの処理失敗 · 再生停止");
           message("選択モデルで音声処理できませんでした: "+error,"error");
         })();
@@ -2788,6 +2864,10 @@ async function startModelPlayback(offset=null,appliedOverride=null){
   }catch(error){
     labStatusText("処理開始失敗: "+error.message);
     if(state.player===player)await stop();
+    setPlayerProcessingStatus("failed",{transport:"stopped",model:applied.mode,
+      individual:applied.individual,speed:applied.speed,pitch:applied.semitones});
+    setPlayerProcessingDetail("Workerモデル開始失敗: "+error.message);
   }
 }
 labRefresh();
+setPlayerProcessingStatus("ready",{transport:"stopped"});
