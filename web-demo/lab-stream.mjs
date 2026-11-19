@@ -476,9 +476,11 @@ export async function createModelStream({ctx,sourceChannels,sampleRate,speed,sem
   };
   const stageSettings=({frame,speed,semitones,...settings}={})=>{
     const targetFrame=frame??latestFrame;
+    const validationFrame=frame===undefined&&targetFrame===totalFrames?
+      totalFrames-1:targetFrame;
     // Validate against the caller's source position, but the audible source
     // clock chooses the next safe retained-PCM boundary for activation.
-    const next=validateNext(targetFrame,{...settings,
+    const next=validateNext(validationFrame,{...settings,
       speed:speed??config.speed,semitones:semitones??config.semitones});
     for(const id of [...transitionWaiters.keys()])
       resolveTransition(id,{stale:true});

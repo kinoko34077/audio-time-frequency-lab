@@ -362,6 +362,22 @@ export function createSourcePCMRenderer({
         throw RangeError("invalid staged Worker playback state");
       const state=timeline.state;
       const position=state.sourceFrame;
+      if(state.ended){
+        if(loopEnabled)
+          return api.stageRenderedSeekState({generation,
+            frame:loopStartFrame,speed,pitchSemitones,requiredChunks:1,
+            loopStartFrame,loopEndFrame,loopEnabled});
+        timeline.setLoopConfiguration(loopStartFrame,loopEndFrame,false);
+        renderedChunks.length=0;
+        previousRendered=null;
+        stagedWorkerState={kind:"terminal",generation,frame:sourceFrames,
+          sequence:nextRenderedSequence,speed,pitchSemitones,
+          loopStartFrame,loopEndFrame,loopEnabled:false,
+          firstChunkAccepted:true};
+        workerMode=true;
+        return {sourceFrame:sourceFrames,sequence:nextRenderedSequence,
+          bufferedSegments:0,terminal:true,activated:false};
+      }
       const activeChunks=renderedChunks.filter(segment=>
         segment.generation===renderedGeneration);
       const current=activeChunks.find(segment=>
@@ -450,11 +466,17 @@ export function createSourcePCMRenderer({
     },
     /** Prepare a seek while the active source clock keeps consuming old PCM. */
     stageRenderedSeekState({generation,frame,speed,pitchSemitones,
-      requiredChunks=1,reuseCompatible=false,reuseGeneration=null}={}){
+      requiredChunks=1,reuseCompatible=false,reuseGeneration=null,
+      loopStartFrame=timeline.state.loopStartFrame,
+      loopEndFrame=timeline.state.loopEndFrame,
+      loopEnabled=timeline.state.loopEnabled}={}){
       if(!Number.isSafeInteger(generation)||generation<=renderedGeneration||
          !Number.isSafeInteger(frame)||frame<0||frame>=sourceFrames||
          !Number.isFinite(speed)||speed<.5||speed>2||
          !Number.isFinite(pitchSemitones)||pitchSemitones<-12||pitchSemitones>12||
+         !Number.isSafeInteger(loopStartFrame)||loopStartFrame<0||
+         !Number.isSafeInteger(loopEndFrame)||loopStartFrame>=loopEndFrame||
+         loopEndFrame>sourceFrames||typeof loopEnabled!=="boolean"||
          !Number.isSafeInteger(requiredChunks)||requiredChunks<1||
          requiredChunks>RENDERED_CHUNK_SLOTS||
          typeof reuseCompatible!=="boolean"||
@@ -494,6 +516,7 @@ export function createSourcePCMRenderer({
         activeChunks.slice(0,retainedLimit);
       renderedChunks.splice(0,renderedChunks.length,...retained);
       stagedWorkerState={generation,frame,sequence:0,speed,pitchSemitones,
+        loopStartFrame,loopEndFrame,loopEnabled,
         kind:"seek",requiredChunks,retainedLimit,
         preparedChunks:reusableChunks,reusedChunks:reusableChunks.length,
         firstChunkAccepted:reusableChunks.length>0};
@@ -578,13 +601,14 @@ export function createSourcePCMRenderer({
             revision:activated.revision,sampleOffset:i,terminal:true};
           state=timeline.state;
         }
-        let position=timeline.sourceFrameAt(0);
-        if(position===null){for(const ch of output)ch[i]=0;continue;}
         const seek=stagedWorkerState?.kind==="seek"&&
           stagedWorkerState.preparedChunks.length>=
             stagedWorkerState.requiredChunks?stagedWorkerState:null;
+        let position=timeline.sourceFrameAt(0);
         if(seek){
           beginOutputTransition(output,i);
+          timeline.setLoopConfiguration(seek.loopStartFrame,
+            seek.loopEndFrame,seek.loopEnabled);
           const activated=timeline.scrub(seek.frame,seek.speed);
           const prepared=seek.preparedChunks;
           renderedChunks.splice(0,renderedChunks.length,...prepared);
@@ -600,6 +624,7 @@ export function createSourcePCMRenderer({
           state=timeline.state;
           position=timeline.sourceFrameAt(0);
         }
+        if(position===null){for(const ch of output)ch[i]=0;continue;}
         while(renderedChunks.length){
           const head=renderedChunks[0];
           const wrapped=state.loopEnabled&&head.endFrame>=state.loopEndFrame&&

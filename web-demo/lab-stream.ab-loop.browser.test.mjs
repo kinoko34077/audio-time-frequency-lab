@@ -581,6 +581,48 @@ test("individual-period Worker applies and wraps edited source-frame A/B without
         {timeout:12000},{generation:endSeek.generation,
           frame:totalFrames-1,missingBefore:missingBeforeEndSeek});
 
+      await page.waitForFunction(({end,generation})=>
+        window.__labAudit.messages.some(message=>
+          message.type==="progress"&&message.processingMode==="worker"&&
+          message.workerGeneration===generation&&!message.loopEnabled&&
+          message.sourceFrame===end),
+        {timeout:12000},{end:totalFrames,generation:endSeek.generation});
+      const editedTerminalA=terminalA+1200;
+      await page.evaluate(a=>{
+        const input=document.querySelector("#player-loop-a");
+        input.value=String(a);input.dispatchEvent(new Event("change",
+          {bubbles:true}));
+      },editedTerminalA);
+      await page.waitForFunction(({a,b})=>
+        document.querySelector("#player-loop-hint")?.textContent
+          .includes("反映しました")&&window.__labAudit.messages.some(message=>
+            message.type==="progress"&&message.processingMode==="worker"&&
+            !message.loopEnabled&&message.loopStartFrame===a&&
+            message.loopEndFrame===b),
+        {timeout:12000},{a:editedTerminalA,b:totalFrames});
+      const beforeReenable=await page.evaluate(()=>window.__labAudit.messages
+        .filter(message=>message.type==="progress"&&
+          message.processingMode==="worker").at(-1)?.workerGeneration||0);
+      await page.evaluate(()=>{
+        const loop=document.querySelector("#player-loop-enabled");
+        loop.checked=true;
+        loop.dispatchEvent(new Event("change",{bubbles:true}));
+      });
+      await page.waitForFunction(({a,b,generation})=>{
+        const audit=window.__labAudit;
+        const progress=audit.messages.filter(message=>
+          message.type==="progress"&&message.processingMode==="worker"&&
+          message.loopEnabled&&message.loopStartFrame===a&&
+          message.loopEndFrame===b&&message.workerGeneration>generation);
+        const current=progress.at(-1);
+        return current&&audit.jobs.some(job=>job.generation===current.workerGeneration&&
+          job.start===a&&job.end===b&&audit.results.some(result=>
+            result.job===job.job&&result.generation===job.generation&&
+            result.ok===true))&&document.querySelector("#player-loop-hint")
+              ?.textContent.includes("反映しました");
+      },{timeout:20000},{a:editedTerminalA,b:totalFrames,
+        generation:beforeReenable});
+
       assert.deepEqual(errors,[]);
       await page.evaluate(()=>document.querySelector("#stop").click());
     }finally{

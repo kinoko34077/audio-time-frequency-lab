@@ -348,6 +348,32 @@ test("terminal loop exit applies changed Worker settings after the final PCM",()
   assert.equal(p.statistics.missingFrames,0);
 });
 
+test("a Worker loop can be re-enabled after terminal loop-off drains",()=>{
+  const p=createSourcePCMRenderer({sourceFrames:32,sourceSampleRate:8,
+    outputSampleRate:8,channelCount:1,speed:1,startFrame:28,
+    loopStartFrame:0,loopEndFrame:32,loopEnabled:true});
+  p.installRenderedChunk({generation:0,sequence:0,startFrame:28,endFrame:32,
+    speed:1,coreFrames:4,channels:[new Float32Array(4).fill(1)]});
+  p.stageRenderedState({generation:1,speed:1,pitchSemitones:0,
+    loopStartFrame:0,loopEndFrame:32,loopEnabled:false});
+  p.renderBuffered([new Float32Array(8)]);
+  assert.equal(p.timeline.state.ended,true);
+
+  const staged=p.stageRenderedState({generation:2,speed:1,pitchSemitones:0,
+    loopStartFrame:8,loopEndFrame:24,loopEnabled:true});
+  assert.equal(staged.sourceFrame,8);
+  p.installRenderedChunk({generation:2,sequence:staged.sequence,
+    startFrame:8,endFrame:16,speed:1,coreFrames:8,
+    channels:[new Float32Array(8).fill(2)]});
+  p.renderBuffered([new Float32Array(2)]);
+
+  assert.equal(p.workerState.generation,2);
+  assert.equal(p.takeWorkerActivation().sourceFrame,8);
+  assert.equal(p.timeline.state.loopEnabled,true);
+  assert.equal(p.timeline.state.ended,false);
+  assert.equal(p.statistics.missingFrames,0);
+});
+
 test("fractional Worker output reaches EOF without a terminal interpolation sample",()=>{
   const speed=1.1,p=createSourcePCMRenderer({sourceFrames:32,
     sourceSampleRate:48000,outputSampleRate:48000,channelCount:1,speed,
@@ -360,6 +386,28 @@ test("fractional Worker output reaches EOF without a terminal interpolation samp
   assert.equal(p.timeline.state.sourceFrame,32);
   assert.equal(p.timeline.state.ended,true);
   assert.deepEqual(Array.from(output[0].slice(4)),[0,0,0,0]);
+  assert.equal(p.statistics.missingFrames,0);
+});
+
+test("a prepared Worker seek reactivates the source clock after terminal EOF",()=>{
+  const p=createSourcePCMRenderer({sourceFrames:32,sourceSampleRate:8,
+    outputSampleRate:8,channelCount:1,speed:1,startFrame:28,
+    loopStartFrame:0,loopEndFrame:32,loopEnabled:false});
+  p.installRenderedChunk({generation:0,sequence:0,startFrame:28,endFrame:32,
+    speed:1,coreFrames:4,channels:[new Float32Array(4).fill(1)]});
+  p.renderBuffered([new Float32Array(8)]);
+  assert.equal(p.timeline.state.ended,true);
+
+  p.stageRenderedSeekState({generation:1,frame:31,speed:1,
+    pitchSemitones:0,requiredChunks:1});
+  p.installRenderedChunk({generation:1,sequence:0,startFrame:31,endFrame:32,
+    speed:1,coreFrames:1,channels:[new Float32Array(1).fill(2)]});
+  p.renderBuffered([new Float32Array(2)]);
+
+  assert.equal(p.workerState.generation,1);
+  assert.equal(p.takeWorkerActivation().sourceFrame,31);
+  assert.equal(p.timeline.state.ended,true,
+    "the restarted terminal seek drains cleanly after its final frame");
   assert.equal(p.statistics.missingFrames,0);
 });
 
