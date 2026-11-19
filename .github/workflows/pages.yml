@@ -20,8 +20,6 @@ jobs:
     # Playwright 1.56.0 Chromium does not support ubuntu26.04 runners.
     runs-on: ubuntu-24.04
     timeout-minutes: 28
-    env:
-      LAB_PLAYWRIGHT_CHANNEL: chrome
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -132,6 +130,7 @@ jobs:
       - name: Browser tooling (test runtime only)
         run: |
           python3 -m pip install --user playwright==1.56.0
+          python3 -m playwright install chromium
       - name: Inherited native file picker, Rust streaming and model overlay
         run: |
           python3 -m http.server 8123 --bind 127.0.0.1 --directory _site > /tmp/audio-lab-source-server.log 2>&1 &

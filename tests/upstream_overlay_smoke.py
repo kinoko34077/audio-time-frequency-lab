@@ -4,7 +4,6 @@ Not an iPhone Safari hardware acceptance test.
 """
 import math, os, struct, tempfile, wave
 from playwright.sync_api import sync_playwright
-from playwright_runtime import launch_chromium
 
 URL=os.environ.get("LAB_TEST_ORIGIN","http://127.0.0.1:8123/")
 fd,path=tempfile.mkstemp(suffix=".wav"); os.close(fd)
@@ -13,7 +12,7 @@ try:
     w.setnchannels(1);w.setsampwidth(2);w.setframerate(16000)
     w.writeframes(b"".join(struct.pack("<h",int(8000*math.sin(2*math.pi*440*n/16000))) for n in range(16000)))
   with sync_playwright() as p:
-    browser=launch_chromium(p,headless=True,args=["--no-sandbox","--disable-dev-shm-usage","--autoplay-policy=no-user-gesture-required", "--mute-audio"])
+    browser=p.chromium.launch(channel="chromium",headless=True,args=["--no-sandbox","--disable-dev-shm-usage","--autoplay-policy=no-user-gesture-required", "--mute-audio"])
     for mobile in (False,True):
       page=browser.new_page(viewport={"width":390 if mobile else 1200,"height":844 if mobile else 850},is_mobile=mobile,has_touch=mobile)
       page.add_init_script("""(() => {

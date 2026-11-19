@@ -5,7 +5,6 @@ first-chunk output and ability to switch settings during playback.
 """
 import math,os,struct,tempfile,wave
 from playwright.sync_api import sync_playwright
-from playwright_runtime import launch_chromium
 url=os.environ.get('LAB_TEST_ORIGIN','http://127.0.0.1:8123/')
 fd,path=tempfile.mkstemp(suffix='.wav');os.close(fd)
 try:
@@ -19,7 +18,7 @@ try:
         f.setnchannels(2);f.setsampwidth(2);f.setframerate(rate)
         f.writeframes(bytes(a)*181)
     with sync_playwright() as p:
-        browser=launch_chromium(p,headless=True,args=['--no-sandbox','--autoplay-policy=no-user-gesture-required','--disable-dev-shm-usage', "--mute-audio"])
+        browser=p.chromium.launch(channel='chromium',headless=True,args=['--no-sandbox','--autoplay-policy=no-user-gesture-required','--disable-dev-shm-usage', "--mute-audio"])
         page=browser.new_page()
         page.add_init_script("""(() => {
           window.__labWorkerResults=[];
