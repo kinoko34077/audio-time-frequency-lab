@@ -12,7 +12,7 @@ permissions:
 
 concurrency:
   group: time-frequency-lab-pages-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   verify:
