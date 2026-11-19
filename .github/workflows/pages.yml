@@ -54,11 +54,6 @@ jobs:
       - name: Rust engine 3 source-time PCM and pitch measurements
         run: |
           WARP_WEB_ROOT=_site node --test web-demo/core-wasm.test.mjs web-demo/source-rust.test.mjs
-      - name: Install Japanese glyphs for actual UI screenshot review
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq fonts-noto-cjk
-          fc-match 'Noto Sans CJK JP'
       - name: Native Chrome real Rust AudioWorklet with Lab live factors
         run: |
           WARP_WEB_ROOT=_site node --test web-demo/lab-live-smoke.test.mjs
@@ -71,9 +66,6 @@ jobs:
       - name: Native Chrome individual-period Worker on shared PCM source clock
         run: |
           node --test web-demo/lab-stream.browser.test.mjs
-      - name: Native Chrome individual-period Worker A/B editing and loop
-        run: |
-          node --test web-demo/lab-stream.ab-loop.browser.test.mjs
       - name: Native Chrome recorded CC0 upright piano file-to-R3 Worklet (real recording)
         run: |
           node --test web-demo/source-recorded-player.browser.test.mjs
@@ -96,6 +88,14 @@ jobs:
       - name: Native Chrome main-player recorded sound output and gesture integration (R2/R3)
         run: |
           node --test web-demo/player-output-integration.browser.test.mjs
+      - name: Native Chrome individual-period Worker A/B editing and loop
+        run: |
+          node --test web-demo/lab-stream.ab-loop.browser.test.mjs
+      - name: Install Japanese glyphs for actual UI screenshot review
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq fonts-noto-cjk
+          fc-match 'Noto Sans CJK JP'
       - name: Native Chrome UI visual audit with desktop and mobile screenshots
         if: always()
         run: |
