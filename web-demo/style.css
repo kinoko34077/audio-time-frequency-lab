@@ -1317,14 +1317,14 @@ body.model-lab .model-extra-controls>summary{padding:3px 0}
   white-space:nowrap!important;border:0!important
 }
 .wave-detail-ruler{
-  position:absolute;z-index:6;top:0;left:0;right:0;height:36px;pointer-events:none;
+  position:absolute;z-index:6;top:0;left:0;right:0;height:48px;pointer-events:none;
   border-bottom:1px solid #35545c88;
   background:linear-gradient(180deg,#071820f2 0%,#071820d0 76%,#07182078 100%);
   color:#d0e6e2;font:11px/1.25 ui-monospace,monospace;font-variant-numeric:tabular-nums
 }
-.wave-detail-ruler>[data-ruler-tick]{position:absolute;top:8px;white-space:nowrap}
+.wave-detail-ruler>[data-ruler-tick]{position:absolute;top:17px;white-space:nowrap}
 .wave-center-head{z-index:4}
-.wave-marker{top:38px}
+.wave-marker{top:50px}
 .wave-detail-wrap>.transport{
   position:absolute;z-index:6;left:0;right:0;bottom:0;display:flex;justify-content:space-between;
   gap:8px;margin:0;padding:3px 8px 4px;color:#d0e6e2;
