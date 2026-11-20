@@ -479,26 +479,26 @@ function applyABRange(next,{enabled=ab.enabled,hint="A/B区間を更新しまし
   refreshAB();syncLoopToPlayer();
   return true;
 }
-function setLoopEndpoint(edge){
+function setLoopEndpoint(edge,frame=currentSourceFrame()){
   if(!hasAudioSource())return;
-  editAB(edge,String(currentSourceFrame()));
+  editAB(edge,String(frame));
 }
-function shiftLoopAtCurrentFrame(edge){
+function shiftLoopAtCurrentFrame(edge,frame=currentSourceFrame()){
   if(!hasAudioSource())return;
-  const next=shiftLoopToFrame(ab,edge,currentSourceFrame(),sourceFrames());
+  const next=shiftLoopToFrame(ab,edge,frame,sourceFrames());
   if(next)applyABRange(next,{hint:"A/B区間を移動しました。"});
 }
-function toggleMarkerAtCurrentFrame(){
+function toggleMarkerAtCurrentFrame(frame=currentSourceFrame()){
   if(!hasAudioSource())return;
-  loopMarkers=toggleSourceMarker(loopMarkers,currentSourceFrame());
+  loopMarkers=toggleSourceMarker(loopMarkers,frame);
   detailWaveEditor?.refresh(true);
 }
 function clearLoopMarkers(){
   loopMarkers=[];detailWaveEditor?.refresh(true);
 }
-function loopBetweenNearestMarkers(){
+function loopBetweenNearestMarkers(frame=currentSourceFrame()){
   if(!hasAudioSource())return;
-  const next=nearestMarkerLoop(loopMarkers,currentSourceFrame(),sourceFrames());
+  const next=nearestMarkerLoop(loopMarkers,frame,sourceFrames());
   if(next)applyABRange(next,{enabled:true,hint:"目印間をループします。"});
 }
 function resetFullTrackLoop(){
@@ -513,46 +513,93 @@ function toggleLoop(){
   input.dispatchEvent(new Event("change",{bubbles:true}));
 }
 function installAudioStretchAction(element,{single,double,long,preventDefault=false}){
-  let holdTimer=0,clickTimer=0,longPressFired=false;
+  const doubleClickDelay=500;
+  let holdTimer=0,clickTimer=0,longPressFired=false,gestureCanceled=false;
+  let activePointerId=null,pointerContext=null,suppressClick=false,doubleClickHandled=false;
+  const contextAt=event=>({sourceFrame:Number.isSafeInteger(event?.sourceFrame)?
+    event.sourceFrame:currentSourceFrame()});
+  const clearHold=()=>{if(holdTimer){clearTimeout(holdTimer);holdTimer=0;}};
+  const clearClick=()=>{if(clickTimer){clearTimeout(clickTimer);clickTimer=0;}};
   element.addEventListener("pointerdown",event=>{
-    if(event.button!==0)return;
-    longPressFired=false;
+    if(event.button!==0||event.isPrimary===false)return;
+    activePointerId=event.pointerId;
+    pointerContext=contextAt(event);
+    gestureCanceled=false;longPressFired=false;
+    try{element.setPointerCapture(event.pointerId);}catch{}
     holdTimer=window.setTimeout(()=>{
-      holdTimer=0;longPressFired=true;
-      if(clickTimer){clearTimeout(clickTimer);clickTimer=0;}
-      long();
+      holdTimer=0;longPressFired=true;clearClick();
+      long(pointerContext);
     },520);
   });
-  const release=()=>{if(holdTimer){clearTimeout(holdTimer);holdTimer=0;}};
+  const cancelOnPointerExit=event=>{
+    if(event.pointerId!==activePointerId||!holdTimer)return;
+    const bounds=element.getBoundingClientRect();
+    const margin=8;
+    if(event.clientX<bounds.left-margin||event.clientX>bounds.right+margin||
+       event.clientY<bounds.top-margin||event.clientY>bounds.bottom+margin){
+      clearHold();gestureCanceled=true;suppressClick=true;
+    }
+  };
+  element.addEventListener("pointermove",cancelOnPointerExit);
+  window.addEventListener("pointermove",cancelOnPointerExit);
+  const release=event=>{
+    if(event.pointerId!==activePointerId)return;
+    clearHold();activePointerId=null;
+    if(gestureCanceled){
+      window.setTimeout(()=>{suppressClick=false;gestureCanceled=false;},0);
+    }
+  };
+  const cancel=event=>{
+    if(event.pointerId!==activePointerId)return;
+    clearHold();activePointerId=null;pointerContext=null;
+    gestureCanceled=true;longPressFired=false;suppressClick=true;
+    window.setTimeout(()=>{suppressClick=false;gestureCanceled=false;},0);
+  };
   element.addEventListener("pointerup",release);
-  element.addEventListener("pointercancel",()=>{release();longPressFired=false;});
+  element.addEventListener("pointercancel",cancel);
+  element.addEventListener("lostpointercapture",event=>{
+    if(event.pointerId===activePointerId){clearHold();activePointerId=null;}
+  });
+  window.addEventListener("pointerup",release);
+  window.addEventListener("pointercancel",cancel);
   element.addEventListener("click",event=>{
     if(preventDefault)event.preventDefault();
-    if(event.button!==0)return;
+    if(event.button!==0&&event.detail!==0)return;
+    if(suppressClick||gestureCanceled){suppressClick=false;gestureCanceled=false;return;}
+    const context=pointerContext||contextAt(event);
+    pointerContext=null;
     if(longPressFired){longPressFired=false;return;}
+    if(event.detail>1){
+      clearClick();doubleClickHandled=true;double(context);return;
+    }
     if(clickTimer)return;
-    clickTimer=window.setTimeout(()=>{clickTimer=0;single();},230);
+    clickTimer=window.setTimeout(()=>{clickTimer=0;single(context);},doubleClickDelay);
   });
   element.addEventListener("dblclick",event=>{
     if(preventDefault)event.preventDefault();
-    if(clickTimer){clearTimeout(clickTimer);clickTimer=0;}
+    if(doubleClickHandled){doubleClickHandled=false;return;}
+    clearClick();
     if(longPressFired){longPressFired=false;return;}
-    double();
+    double(pointerContext||contextAt(event));pointerContext=null;
   });
 }
 installAudioStretchAction($("#player-marker-toggle"),{
-  single:toggleMarkerAtCurrentFrame,double:toggleMarkerAtCurrentFrame,long:clearLoopMarkers
+  single:({sourceFrame})=>toggleMarkerAtCurrentFrame(sourceFrame),
+  double:({sourceFrame})=>toggleMarkerAtCurrentFrame(sourceFrame),long:clearLoopMarkers
 });
 installAudioStretchAction($("#player-loop-a-now"),{
-  single:()=>setLoopEndpoint("a"),double:()=>shiftLoopAtCurrentFrame("a"),
+  single:({sourceFrame})=>setLoopEndpoint("a",sourceFrame),
+  double:({sourceFrame})=>shiftLoopAtCurrentFrame("a",sourceFrame),
   long:()=>{if(hasAudioSource())editAB("a","0");}
 });
 installAudioStretchAction($("#player-loop-b-now"),{
-  single:()=>setLoopEndpoint("b"),double:()=>shiftLoopAtCurrentFrame("b"),
+  single:({sourceFrame})=>setLoopEndpoint("b",sourceFrame),
+  double:({sourceFrame})=>shiftLoopAtCurrentFrame("b",sourceFrame),
   long:()=>{if(hasAudioSource())editAB("b",String(sourceFrames()));}
 });
 installAudioStretchAction($("#player-loop-toggle"),{
-  single:toggleLoop,double:loopBetweenNearestMarkers,long:resetFullTrackLoop,
+  single:toggleLoop,double:({sourceFrame})=>loopBetweenNearestMarkers(sourceFrame),
+  long:resetFullTrackLoop,
   preventDefault:true
 });
 function message(text,type="info"){

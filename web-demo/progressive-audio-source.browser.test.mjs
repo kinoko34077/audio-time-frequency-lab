@@ -117,8 +117,10 @@ test('native browser decodes exact requested WAV PCM, loads the app without eage
       transfer.items.add(window.__progressiveTestFile);input.files=transfer.files;
       input.dispatchEvent(new Event('change',{bubbles:true}));
     });
-    await page.waitForFunction(()=>document.querySelector('#file-meta')?.textContent
-      .includes('progressive-tone.wav · 8.0秒'),{timeout:20000});
+    await page.waitForFunction(()=>{
+      const meta=document.querySelector('#file-meta')?.textContent||'';
+      return meta.includes('progressive-tone.wav')&&meta.includes('48000Hz')&&meta.includes('2ch');
+    },{timeout:20000});
     await page.waitForSelector('#play-dry:not([disabled])',{timeout:10000});
     const loading=await page.evaluate(()=>({
       contexts:window.__audioContextCreations,
@@ -129,6 +131,8 @@ test('native browser decodes exact requested WAV PCM, loads the app without eage
     assert.equal(loading.contexts,0,'source selection must not create an audio output context');
     assert.equal(loading.audioOutputRoutes,0,'loading must not connect an audio route');
     assert.match(loading.meta,/progressive-tone\.wav/);
+    assert.doesNotMatch(loading.meta,/8\.0秒/,
+      'source duration is shown once in the waveform instead of repeated in file metadata');
     assert.equal(loading.duration,'0:08.0');
 
     await page.evaluate(()=>{

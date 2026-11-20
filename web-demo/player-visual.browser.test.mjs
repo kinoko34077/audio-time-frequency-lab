@@ -169,6 +169,49 @@ test("R4 usability visual captures: desktop and mobile player and folded researc
     assert.equal(await page.$eval("#runtime-hud",e=>e.getClientRects().length),0,
       "user-facing player must not show a second telemetry card");
     await page.screenshot({path:path.join(captureDir,"01-player-desktop.png"),fullPage:true});
+    await page.evaluate(()=>{
+      const set=(id,value)=>{
+        const input=document.querySelector(id);
+        input.value=String(value);
+        input.dispatchEvent(new Event("change",{bubbles:true}));
+      };
+      set("#player-loop-a",1000);set("#player-loop-b",3000);
+    });
+    await page.evaluate(async()=>{
+      const button=document.querySelector("#player-loop-a-now");
+      button.dispatchEvent(new MouseEvent("click",{bubbles:true,button:0,detail:1}));
+      await new Promise(resolve=>setTimeout(resolve,260));
+      button.dispatchEvent(new MouseEvent("click",{bubbles:true,button:0,detail:2}));
+      button.dispatchEvent(new MouseEvent("dblclick",{bubbles:true,button:0,detail:2}));
+    });
+    await page.waitForFunction(()=>document.querySelector("#player-loop-a")?.value==="0"&&
+      document.querySelector("#player-loop-b")?.value==="2000",{timeout:3000});
+    await page.evaluate(()=>{
+      document.querySelector("#player-loop-a").value="1000";
+      document.querySelector("#player-loop-a").dispatchEvent(new Event("change",{bubbles:true}));
+      document.querySelector("#player-loop-b").value="3000";
+      document.querySelector("#player-loop-b").dispatchEvent(new Event("change",{bubbles:true}));
+    });
+    const loopBButton=await page.$eval("#player-loop-b-now",el=>{
+      const r=el.getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2};
+    });
+    await page.mouse.move(loopBButton.x,loopBButton.y);
+    await page.mouse.down();
+    await page.mouse.move(4,4,{steps:6});
+    await page.mouse.up();
+    await new Promise(resolve=>setTimeout(resolve,580));
+    const cancelledLongPress=await page.evaluate(()=>({
+      a:document.querySelector("#player-loop-a").value,
+      b:document.querySelector("#player-loop-b").value
+    }));
+    assert.deepEqual(cancelledLongPress,{a:"1000",b:"3000"},
+      "releasing a captured A/B pointer outside the control cancels long-press behavior");
+    const loopAButton=await page.$eval("#player-loop-a-now",el=>{
+      const r=el.getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2};
+    });
+    await page.mouse.click(loopAButton.x,loopAButton.y);
+    await page.waitForFunction(()=>document.querySelector("#player-loop-a")?.value==="0"&&
+      document.querySelector("#player-loop-b")?.value==="3000",{timeout:1200});
     await page.click("#main-tab-model");
     assert.equal(await page.$eval(".model-extra-controls",el=>el.open),true);
     assert.equal(await page.$eval(".model-legacy-fold",el=>el.getClientRects().length),0,
