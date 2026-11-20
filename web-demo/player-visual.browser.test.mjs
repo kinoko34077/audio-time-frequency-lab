@@ -47,11 +47,29 @@ async function layoutEvidence(page,tag){
         document.querySelector("#granular-range").closest("details")===null,
       rulerAtTop:(()=>{
         const waveform=document.querySelector(".wave-detail-wrap").getBoundingClientRect();
+        const ruler=document.querySelector(".wave-detail-ruler").getBoundingClientRect();
         return [...document.querySelectorAll(".wave-detail-ruler [data-ruler-tick]")]
+          .filter(element=>element.textContent.trim())
           .every(element=>{
             const bounds=element.getBoundingClientRect();
-            return bounds.top>=waveform.top+7&&bounds.bottom<=waveform.top+30;
+            return bounds.top>=ruler.top+6&&bounds.bottom<=ruler.bottom-6&&
+              Math.abs(ruler.top-waveform.top)<=1.5;
           });
+      })(),
+      rulerBandHeight:Math.round(document.querySelector(".wave-detail-ruler").getBoundingClientRect().height),
+      rulerLabelsCentered:(()=>{
+        const ruler=document.querySelector(".wave-detail-ruler").getBoundingClientRect();
+        return [...document.querySelectorAll(".wave-detail-ruler [data-ruler-tick]")]
+          .filter(element=>element.textContent.trim())
+          .every(element=>{
+            const bounds=element.getBoundingClientRect();
+            return Math.abs((bounds.top+bounds.bottom)/2-(ruler.top+ruler.height/2))<=3;
+          });
+      })(),
+      markerBelowRuler:(()=>{
+        const ruler=document.querySelector(".wave-detail-ruler").getBoundingClientRect();
+        const marker=document.querySelector(".wave-marker").getBoundingClientRect();
+        return marker.top>=ruler.bottom;
       })(),
       clockAtBottom:(()=>{
         const waveform=document.querySelector(".wave-detail-wrap").getBoundingClientRect();
@@ -111,6 +129,10 @@ async function layoutEvidence(page,tag){
     "expected waveform > transport > speed/pitch hierarchy "+tag);
   assert.equal(value.railRangeVisible,true,"speed rail width is directly available");
   assert.equal(value.rulerAtTop,true,"waveform ruler labels stay inside its top edge");
+  assert.ok(value.rulerBandHeight>=44&&value.rulerBandHeight<=52,
+    "top ruler has a deliberate, compact band height: "+value.rulerBandHeight);
+  assert.equal(value.rulerLabelsCentered,true,"ruler labels are vertically centered in their band");
+  assert.equal(value.markerBelowRuler,true,"A/B markers begin below the top ruler band");
   assert.equal(value.clockAtBottom,true,"elapsed and total time sit inside the waveform bottom edge");
   assert.equal(value.sliderAlignment,true,"speed and pitch sliders share the same left and right edges");
   assert.equal(value.tuningValueAlignment.aligned,true,
