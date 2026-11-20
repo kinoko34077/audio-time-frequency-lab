@@ -413,25 +413,17 @@ test("individual-period Worker applies and wraps edited source-frame A/B without
         const job=audit.jobs.findLast(item=>item.generation===generation&&
           item.loopEnabled&&item.loopStartFrame===a&&item.loopEndFrame===b&&
           item.start===a);
-        return Boolean(job&&audit.results.some(item=>item.job===job.job&&
-          item.generation===generation&&item.ok===true));
-      },{timeout:15000},{a:shiftedA,b:shortB});
-      const shiftedLoop=await page.evaluate(({a,b})=>{
-        const audit=window.__labAudit;
-        const progress=audit.messages.filter(message=>
-          message.type==="progress"&&message.processingMode==="worker"&&
-          message.loopEnabled&&message.loopStartFrame===a&&
-          message.loopEndFrame===b);
-        const generation=progress.at(-1)?.workerGeneration;
-        const job=audit.jobs.findLast(item=>item.generation===generation&&
-          item.loopEnabled&&item.loopStartFrame===a&&item.loopEndFrame===b&&
-          item.start===a);
         const result=job&&audit.results.findLast(item=>item.job===job.job&&
           item.generation===generation);
-        return {generation,sourceFrame:progress.at(-1)?.sourceFrame,
-          missingFrames:progress.at(-1)?.missingFrames||0,job,result,
+        if(!job||result?.ok!==true)return false;
+        const latest=progress.at(-1);
+        audit.shiftedLoopSnapshot={generation,sourceFrame:latest?.sourceFrame,
+          missingFrames:latest?.missingFrames||0,job,result,
           worklets:audit.worklets.length};
-      },{a:shiftedA,b:shortB});
+        return true;
+      },{timeout:15000},{a:shiftedA,b:shortB});
+      const shiftedLoop=await page.evaluate(()=>
+        window.__labAudit.shiftedLoopSnapshot);
       assert.equal(shiftedLoop.result?.ok,true,JSON.stringify(shiftedLoop));
       assert.ok(shiftedLoop.sourceFrame>=shiftedA&&
         shiftedLoop.sourceFrame<shortB,JSON.stringify(shiftedLoop));
