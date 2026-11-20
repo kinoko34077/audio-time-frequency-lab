@@ -1149,7 +1149,7 @@ test("Chrome real-time Rust AudioWorklet streams, changes controls, seeks at wav
     const longPath=path.join(temp,"six-hundred.wav");
     await writeFile(longPath,sineWav(601));
     await (await page.$("#audio-file")).uploadFile(longPath);
-    await page.waitForFunction(()=>document.querySelector("#file-meta").textContent.includes("600.0秒"),{timeout:45000});
+    await page.waitForFunction(()=>document.querySelector("#duration").textContent==="10:00.0",{timeout:45000});
     assert.equal(await page.$eval("#duration",el=>el.textContent),"10:00.0");
     await page.$eval("#wave",el=>el.scrollIntoView({block:"center",behavior:"instant"}));
     const longWave=await (await page.$("#wave")).boundingBox();
@@ -1221,7 +1221,7 @@ test("Chrome real-time Rust AudioWorklet streams, changes controls, seeks at wav
       throw Error("cold-start recovery: "+status+" | "+err.message);
     });
     assert.match(await coldPage.$eval("#status",el=>el.textContent),/読み込み完了/);
-    assert.equal(await coldPage.$eval("#file-meta",el=>el.textContent.includes("12.0秒")),true);
+    assert.equal(await coldPage.$eval("#duration",el=>el.textContent),"0:12.0");
     const outputIsolation=await page.evaluate(()=>window.__audioSilenceAudit);
     assert.ok(outputIsolation.mutedOutputRoutes>0,outputIsolation);
     assert.ok(outputIsolation.audioOutputMuteGains.length>0,outputIsolation);

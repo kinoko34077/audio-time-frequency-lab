@@ -498,7 +498,7 @@ test("individual-period Worker applies and wraps edited source-frame A/B without
         const diagnostic=await page.evaluate(({a,b,errors})=>{
           const audit=window.__labAudit;
           const meta=document.querySelector("#file-meta")?.textContent||"";
-          const sourceRate=Number(meta.match(/· ([0-9.]+)秒 · ([0-9]+)Hz/)?.[2]);
+          const sourceRate=Number(meta.match(/· ([0-9]+)Hz/)?.[1]);
           const progress=audit.messages.filter(message=>
             message.type==="progress"&&message.processingMode==="worker");
           return {a,b,sourceRate,contextRate:audit.audioContext?.sampleRate,

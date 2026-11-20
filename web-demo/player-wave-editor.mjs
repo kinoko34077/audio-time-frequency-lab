@@ -40,7 +40,7 @@ function peakHierarchy(channels){
 }
 export function createPlayerWaveEditor({
   canvas,wrap,overviewSelection,markerA,markerB,zoomIn,zoomOut,zoomLabel,
-  visibleStart,visibleEnd,getPosition,onPosition,onStart,onAB,onScrubState,
+  rulerTicks=[],getMarkers=()=>[],getPosition,onPosition,onStart,onAB,onScrubState,
   onScrubMotion=()=>{},onHoverFrame=()=>false,onHoverEnd=()=>{}
 }){
   let channels=null,source=null,detailPeaks=null,detailStart=0,detailEnd=0;
@@ -67,6 +67,8 @@ export function createPlayerWaveEditor({
     detailFailedKey=null;detailRetriedKey=null;detailRevision++;
     rate=nextRate||48000;
     frames=source?.sourceFrames||channels?.[0]?.length||0;
+    if(rulerTicks[0]?.parentElement)rulerTicks[0].parentElement.hidden=!frames;
+    markerA.hidden=!frames;markerB.hidden=!frames;
     levels=channels&&frames?peakHierarchy(channels):null;
     spanFrames=Math.max(2,Math.min(frames,rate*12));
     lastFrame=NaN;lastSpan=NaN;refresh(true);
@@ -277,13 +279,28 @@ export function createPlayerWaveEditor({
         context.strokeStyle=color;context.lineWidth=2*ratio;
         context.beginPath();context.moveTo(x,0);context.lineTo(x,height);context.stroke();
       }
-      const font=Math.round(10*scale);
-      context.fillStyle="#b2cecd";context.font=font+"px ui-monospace, monospace";
-      context.textBaseline="top";
+      context.strokeStyle="#c69cffb0";context.lineWidth=ratio;
+      context.setLineDash([3*ratio,3*ratio]);
+      for(const frame of getMarkers()){
+        const x=boundsToX(frame,c,width);
+        if(x<0||x>width)continue;
+        context.beginPath();context.moveTo(x,28*scale);
+        context.lineTo(x,height-25*scale);context.stroke();
+      }
+      context.setLineDash([]);
+      context.strokeStyle="#507075";context.lineWidth=ratio;
       for(let n=0;n<=4;n++){
         const x=n*width/4,time=(start+n*spanFrames/4)/rate;
-        if(time>=0&&time<=frames/rate)
-          context.fillText(timestamp(time),Math.min(width-50*scale,x+4*scale),30*scale);
+        const tick=rulerTicks[n];
+        if(tick){
+          tick.textContent=time>=0&&time<=frames/rate?timestamp(time):"";
+          tick.style.left=25*n+"%";
+          tick.style.transform=n===0?"none":n===4?"translateX(-100%)":"translateX(-50%)";
+        }
+        if(time>=0&&time<=frames/rate){
+          context.beginPath();context.moveTo(x,20*scale);
+          context.lineTo(x,27*scale);context.stroke();
+        }
       }
     }
     const {a,b}=onAB();
@@ -295,8 +312,6 @@ export function createPlayerWaveEditor({
     const overview=overviewSelection;
     overview.style.left=100*a/frames+"%";
     overview.style.width=100*(b-a)/frames+"%";
-    visibleStart.textContent=timestamp(Math.max(0,c-spanFrames/2)/rate);
-    visibleEnd.textContent=timestamp(Math.min(frames,c+spanFrames/2)/rate);
     zoomLabel.textContent=spanFrames/rate>=1?(spanFrames/rate).toFixed(1)+"秒":"ms "+Math.round(spanFrames/rate*1000);
     canvas.setAttribute("aria-valuemax",String(Math.max(0,frames-1)));
     canvas.setAttribute("aria-valuenow",String(c));
