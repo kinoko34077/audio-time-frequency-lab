@@ -32,7 +32,7 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, swit
     assert.equal(await page.$eval("#audio-lab",el=>getComputedStyle(el).display),"none");
     await (await page.$("#audio-file")).uploadFile(recording);
     await page.waitForFunction(()=>document.querySelector("#file-meta")?.textContent
-      .includes("meta-piano-a0-cc0-3s-48khz.wav · 3.0秒"),{timeout:20000});
+      .includes("meta-piano-a0-cc0-3s-48khz.wav"),{timeout:20000});
     await page.waitForSelector("#play-main:not([disabled])",{timeout:10000});
     assert.equal(await page.$eval("#player-loop-controls",el=>el.hidden),false);
     const sourceRate=Number((await page.$eval("#file-meta",el=>el.textContent)).match(/(\d+)Hz/)?.[1]);
@@ -56,6 +56,15 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, swit
     await page.waitForFunction(()=>document.querySelector("#granular-optin-status")
       ?.dataset.renderPitch==="7.1234"&&document.querySelector("#granular-optin-status")
       ?.dataset.renderRunning==="true",{timeout:20000});
+    const playingSummary=await page.$eval("#audio-state-summary",element=>({
+      screenReaderOnly:element.classList.contains("sr-only"),
+      rowHeight:element.closest(".audio-status-row").getBoundingClientRect().height,
+      text:element.textContent
+    }));
+    assert.equal(playingSummary.screenReaderOnly,true,
+      "normal playback state remains accessible without duplicating the transport label");
+    assert.equal(playingSummary.rowHeight,0,
+      "normal playback status does not consume player space");
     const starts=await page.$eval("#rt-telemetry",el=>Number(el.dataset.pcmNodeStarts));
     assert.equal(starts,1);
     // Real user function (R4), not another R2 quality benchmark: a single
@@ -411,11 +420,12 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, swit
       const speed=document.getElementById("granular-speed-value");
       speed.value="-1.125";
       speed.dispatchEvent(new Event("change",{bubbles:true}));
-      document.getElementById("player-loop-enabled").click();
     });
+    await page.click("#player-loop-toggle");
     try{
-      await page.waitForFunction(()=>document.querySelector("#player-loop-hint")
-        ?.textContent.includes("反映が完了"),{timeout:20000});
+      await page.waitForFunction(()=>!document.querySelector("#player-loop-enabled")?.checked&&
+        document.querySelector("#player-loop-hint")?.textContent.includes("反映が完了"),
+        {timeout:20000});
     }catch(error){
       const state=await page.evaluate(()=>({
         hint:document.querySelector("#player-loop-hint")?.textContent,
@@ -451,8 +461,10 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, swit
     // #63 U4: the user moves beyond old B and chooses "current position
     // as A". This must USE the tapped source sample, not reject it with a
     // browser validity bubble or require manually editing the old B first.
-    assert.equal(await page.$eval(".player-loop-precision",el=>el.open),true);
+    assert.equal(await page.$eval("#player-loop-fields",el=>el.hidden),true);
     await page.click("#player-loop-a-now");
+    await page.waitForFunction(frame=>Number(document.querySelector("#player-loop-a")?.value)===frame,
+      {timeout:1500},finalSample);
     assert.equal(Number(await page.$eval("#player-loop-a",e=>e.value)),finalSample,
       "new A must be exactly the selected source frame even when A passes old B");
     assert.equal(Number(await page.$eval("#player-loop-b",e=>e.value)),3*sourceRate,
@@ -665,7 +677,7 @@ test("U1/U5 primary Play routes to REAL selected live/PV/Granular engines and on
       ?.dataset.pcmTransport==="rust-engine3-source-time"&&
       document.querySelector("#granular-optin-status")?.dataset.renderRunning==="true",
       {timeout:20000});
-    assert.match(await page.$eval("#rt-indicator",el=>el.textContent),/Rust engine 3部分音＋残差/);
+    assert.match(await page.$eval("#rt-indicator",el=>el.textContent),/Rust · 再生中/);
     assert.match(await page.$eval("#lab-model-compatibility",el=>el.textContent),/0\/逆再生・サンプル単位A\/B/);
     const rustNodeStarts=await page.$eval("#rt-telemetry",el=>el.dataset.pcmNodeStarts);
     assert.equal(await page.evaluate(()=>window.__engineCreations.filter(e=>
@@ -711,8 +723,7 @@ test("U1/U5 primary Play routes to REAL selected live/PV/Granular engines and on
       {timeout:20000});
     // Normal PV is now a real peak-phase-locked AudioWorklet, not the
     // historical 1.5s Worker buffer disguised as realtime scratch.
-    assert.match(await page.$eval("#rt-indicator",el=>el.textContent),
-      /PVピーク位相ロック/);
+    assert.match(await page.$eval("#rt-indicator",el=>el.textContent),/PV · 再生中/);
     await set("lab-model","granular");
     await page.waitForFunction(()=>document.querySelector("#rt-telemetry")
       ?.dataset.pcmTransport==="granular-experimental",{timeout:20000});
@@ -1044,14 +1055,15 @@ test("shared A/B updates every realtime model and compact numeric controls stay 
     const ui=await page.evaluate(()=>({
       modelInfo:document.querySelector(".model-info-controls").open,
       modelDetails:document.querySelector(".model-extra-controls").open,
-      loopDetails:document.querySelector(".player-loop-precision").open,
+      loopDetails:document.querySelector("#player-loop-fields").hidden,
       inlinePitch:document.querySelector("#granular-pitch-value").closest(".player-tune-control")===
         document.querySelector("#granular-pitch").closest(".player-tune-control"),
       inlineSpeed:document.querySelector("#granular-speed-value").closest(".player-tune-control")===
         document.querySelector("#granular-speed").closest(".player-tune-control"),
       railRangeAlwaysVisible:document.querySelector("#granular-range").closest("details")===null,
       noDevelopmentQualityNote:document.querySelector(".player-quality-note")===null,
-      inlineAB:document.querySelector("#player-loop-a").closest(".loop-point")!==null,
+      inlineAB:document.querySelector("#player-loop-fields").hidden&&
+        document.querySelectorAll("#player-loop-fields input[type=hidden]").length===2,
       modelNumbers:["lab-short","lab-long","lab-windows","lab-period-cycles"]
         .every(id=>document.querySelector("#"+id+"-value")?.type==="number"),
       hiddenOutputs:["granular-pitch-output","granular-speed-output","lab-short-output"]

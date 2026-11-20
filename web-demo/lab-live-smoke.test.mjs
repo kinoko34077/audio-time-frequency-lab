@@ -176,7 +176,7 @@ test('full Chrome: inherited Rust AudioWorklet live independent speed/pitch UI',
   await page.click('#play-main');
   try{
     await page.waitForFunction(()=>document.querySelector('#rt-indicator')
-      ?.textContent.includes('Rust engine 3部分音＋残差合成中 · 共通サンプル時計'),{timeout:20000});
+      ?.textContent.includes('Rust · 再生中'),{timeout:20000});
   }catch(error){
     const info=await page.evaluate(()=>({status:document.querySelector('#status')?.textContent,
       indicator:document.querySelector('#rt-indicator')?.textContent,
@@ -189,17 +189,18 @@ test('full Chrome: inherited Rust AudioWorklet live independent speed/pitch UI',
     {timeout:10000});
   assert.equal(await page.$eval('#granular-speed-value',e=>e.value),'1.5');
   assert.equal(await page.$eval('#granular-pitch-value',e=>e.value),'12');
-  const visibleProcessingStatus=await page.$eval('#granular-optin-status',element=>({
+  const processingState=await page.$eval('#granular-optin-status',element=>({
     text:element.textContent,state:element.dataset.processingState,
+    hidden:element.hidden,
     height:element.getBoundingClientRect().height,
     lineHeight:Number.parseFloat(getComputedStyle(element).lineHeight)}));
-  assert.equal(visibleProcessingStatus.text,
+  assert.equal(processingState.text,
     '再生中・反映済み・Rust/WASM\n+1.500×・+12.000半音');
-  assert.equal(visibleProcessingStatus.state,'applied');
-  assert.ok(Math.abs(visibleProcessingStatus.height-
-    visibleProcessingStatus.lineHeight*2)<2,
-    'status reserves two lines so updates cannot move the player layout: '+
-      JSON.stringify(visibleProcessingStatus));
+  assert.equal(processingState.state,'applied');
+  assert.equal(processingState.hidden,true,
+    'internal processing detail is retained for diagnostics, not exposed in the player');
+  assert.equal(processingState.height,0,
+    'hidden processing detail does not reserve vertical space: '+JSON.stringify(processingState));
   await page.evaluate(()=>{
     window.__playerStatusHistory=[];
     const status=document.querySelector('#granular-optin-status');
@@ -260,13 +261,13 @@ test('full Chrome: inherited Rust AudioWorklet live independent speed/pitch UI',
    const visiblePitch=selectedPitch===0?'0.000':
     (selectedPitch<0?'−':'+')+Math.abs(selectedPitch).toFixed(3);
    assert.ok(statusText.includes(`\n${visibleSpeed}×・${visiblePitch}半音`),
-    'visible status must follow the selected signed speed and pitch: '+statusText);
+    'processing state must retain the selected signed speed and pitch: '+statusText);
    const statusHeight=await page.$eval('#granular-optin-status',e=>e.getBoundingClientRect().height);
-   assert.equal(statusHeight,visibleProcessingStatus.height,
-    'status updates keep their reserved height');
-   const pendingWasVisible=await page.evaluate(()=>
+   assert.equal(statusHeight,processingState.height,
+    'hidden processing detail stays out of the player layout during updates');
+   const pendingWasObserved=await page.evaluate(()=>
     window.__playerStatusHistory.some(text=>text.includes('・反映中・')));
-   assert.ok(pendingWasVisible,'status must expose a pending settings change');
+   assert.ok(pendingWasObserved,'processing state retains a pending settings change');
    await sleep(100);
    const readings=[];
    for(let i=0;i<7;i++){

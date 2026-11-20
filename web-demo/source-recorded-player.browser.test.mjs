@@ -163,12 +163,17 @@ test("recorded CC0 upright piano goes through the real granular file picker and 
     const input=await page.$("#audio-file");
     assert.ok(input);
     await input.uploadFile(WAV);
-    await page.waitForFunction(()=>document.querySelector("#file-meta")?.textContent
-      .includes("meta-piano-a0-cc0-3s-48khz.wav · 3.0秒"),
+    await page.waitForFunction(()=>{
+      const meta=document.querySelector("#file-meta")?.textContent||"";
+      return meta.includes("meta-piano-a0-cc0-3s-48khz.wav")&&
+        /\d+Hz · 1ch/.test(meta)&&!document.querySelector("#play-dry")?.disabled;
+    },
       {timeout:20000});
     const meta=await page.$eval("#file-meta",e=>e.textContent);
     const decodedRate=Number(meta.match(/(\d+)Hz/)?.[1]);
-    const durationSeconds=Number(meta.match(/(\d+(?:\.\d+)?)秒/)?.[1]);
+    const durationLabel=await page.$eval("#duration",e=>e.textContent);
+    const [,minutes,seconds]=durationLabel.match(/^(\d+):([\d.]+)$/)||[];
+    const durationSeconds=Number(minutes)*60+Number(seconds);
     const totalSourceFrames=Math.round(decodedRate*durationSeconds);
     assert.ok(decodedRate>=8000&&decodedRate<=192000,
       "actual decoder sample rate required; native AudioContext may resample");

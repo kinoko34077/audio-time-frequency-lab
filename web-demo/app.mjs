@@ -5,6 +5,7 @@ import {createSourcePCMBridge} from "./source-pcm-bridge.mjs";
 import {createProgressiveAudioSource} from "./progressive-audio-source.mjs";
 import {returnToPlaySpeed,scrubSpeed,releaseScrubSpeed} from "./scrub-kinetics.mjs";
 import {createPlayerWaveEditor} from "./player-wave-editor.mjs";
+import {toggleSourceMarker,nearestMarkerLoop,shiftLoopToFrame} from "./player-ab-markers.mjs";
 import {primaryModelCapability} from "./model-route.mjs";
 import {validatePlaybackSpeed,validateSpeedRailRange,speedOnRail,formatPlaybackSpeed} from "./source-timeline.mjs";
 import {frequencyFromSlider,sliderFromFrequency,holdFromFrequency,drawCrusherPreview} from "./crusher-visual.mjs";
@@ -51,6 +52,7 @@ let temporaryScrubSpeed=null,scrubMotionToken=0,scrubMotionFrame=0;
 // without overwriting the user-selected playback speed or model settings.
 let hoverWave=null,hoverLaunching=false;
 const ab={a:0,b:0,enabled:true};
+let loopMarkers=[];
 function mainTab(){
   return document.body.dataset.mainTab==="model"?"model":"player";
 }
@@ -366,7 +368,7 @@ function refreshAB(){
   $("#player-loop-enabled").checked=ab.enabled;
   const workerPlayback=Boolean(state.player?.labStream);
   for(const id of ["player-loop-a","player-loop-b","player-loop-enabled",
-    "player-loop-a-now","player-loop-b-now"])
+    "player-loop-a-now","player-loop-b-now","player-marker-toggle"])
     $("#"+id).disabled=false;
   if(workerPlayback)
     $("#player-loop-hint").textContent=
@@ -453,18 +455,156 @@ for(const edge of ["a","b"]){
   input.addEventListener("input",()=>input.setCustomValidity(""));
   input.addEventListener("change",()=>editAB(edge,input.value));
   input.addEventListener("keydown",e=>{if(e.key==="Enter")input.blur();});
-  $("#player-loop-"+edge+"-now").addEventListener("click",()=>{
-    if(!hasAudioSource())return;
-    const frame=Math.round(playPosition()*state.decoded.sampleRate);
-    editAB(edge,String(Math.min(sourceFrames(),Math.max(0,frame))));
-  });
 }
 $("#player-loop-enabled").addEventListener("change",event=>{
   if(!hasAudioSource())return;
   ab.enabled=event.target.checked;
   $("#player-loop-hint").textContent=ab.enabled?
-    "区間をループします（最短1サンプル）。":"区間ループをOFFにしました。";
+    "区間をループします。":"区間ループをOFFにしました。";
   syncLoopToPlayer();
+});
+function currentSourceFrame(){
+  if(!hasAudioSource())return 0;
+  return clamp(Math.round(playPosition()*state.decoded.sampleRate),0,sourceFrames());
+}
+function applyABRange(next,{enabled=ab.enabled,hint="A/B区間を更新しました。"}={}){
+  const frames=sourceFrames();
+  if(!next||!frames||!Number.isSafeInteger(next.a)||!Number.isSafeInteger(next.b)||
+     next.a<0||next.a>=next.b||next.b>frames)return false;
+  const changed=ab.a!==next.a||ab.b!==next.b||ab.enabled!==enabled;
+  if(!changed){refreshAB();return false;}
+  ab.a=next.a;ab.b=next.b;ab.enabled=enabled;
+  $("#player-loop-enabled").checked=enabled;
+  $("#player-loop-hint").textContent=hint;
+  refreshAB();syncLoopToPlayer();
+  return true;
+}
+function setLoopEndpoint(edge,frame=currentSourceFrame()){
+  if(!hasAudioSource())return;
+  editAB(edge,String(frame));
+}
+function shiftLoopAtCurrentFrame(edge,frame=currentSourceFrame()){
+  if(!hasAudioSource())return;
+  const next=shiftLoopToFrame(ab,edge,frame,sourceFrames());
+  if(next)applyABRange(next,{hint:"A/B区間を移動しました。"});
+}
+function toggleMarkerAtCurrentFrame(frame=currentSourceFrame()){
+  if(!hasAudioSource())return;
+  loopMarkers=toggleSourceMarker(loopMarkers,frame);
+  detailWaveEditor?.refresh(true);
+}
+function clearLoopMarkers(){
+  loopMarkers=[];detailWaveEditor?.refresh(true);
+}
+function loopBetweenNearestMarkers(frame=currentSourceFrame()){
+  if(!hasAudioSource())return;
+  const next=nearestMarkerLoop(loopMarkers,frame,sourceFrames());
+  if(next)applyABRange(next,{enabled:true,hint:"目印間をループします。"});
+}
+function resetFullTrackLoop(){
+  if(!hasAudioSource())return;
+  const frames=sourceFrames();
+  if(!frames)return;
+  applyABRange({a:0,b:frames},{enabled:false,hint:"全体区間へ戻し、ループをOFFにしました。"});
+}
+function toggleLoop(){
+  const input=$("#player-loop-enabled");
+  input.checked=!input.checked;
+  input.dispatchEvent(new Event("change",{bubbles:true}));
+}
+function installAudioStretchAction(element,{single,double,long,preventDefault=false}){
+  const doubleClickDelay=500;
+  const nativeToggle=element.querySelector('input[type="checkbox"]');
+  let holdTimer=0,clickTimer=0,longPressFired=false,gestureCanceled=false;
+  let activePointerId=null,pointerContext=null,suppressClick=false,doubleClickHandled=false;
+  const contextAt=event=>({sourceFrame:Number.isSafeInteger(event?.sourceFrame)?
+    event.sourceFrame:currentSourceFrame()});
+  const clearHold=()=>{if(holdTimer){clearTimeout(holdTimer);holdTimer=0;}};
+  const clearClick=()=>{if(clickTimer){clearTimeout(clickTimer);clickTimer=0;}};
+  element.addEventListener("pointerdown",event=>{
+    if(event.button!==0||event.isPrimary===false)return;
+    activePointerId=event.pointerId;
+    pointerContext=contextAt(event);
+    gestureCanceled=false;longPressFired=false;
+    try{element.setPointerCapture(event.pointerId);}catch{}
+    holdTimer=window.setTimeout(()=>{
+      holdTimer=0;longPressFired=true;clearClick();
+      long(pointerContext);
+    },520);
+  });
+  const cancelOnPointerExit=event=>{
+    if(event.pointerId!==activePointerId||!holdTimer)return;
+    const bounds=element.getBoundingClientRect();
+    const margin=8;
+    if(event.clientX<bounds.left-margin||event.clientX>bounds.right+margin||
+       event.clientY<bounds.top-margin||event.clientY>bounds.bottom+margin){
+      clearHold();gestureCanceled=true;suppressClick=true;
+    }
+  };
+  element.addEventListener("pointermove",cancelOnPointerExit);
+  window.addEventListener("pointermove",cancelOnPointerExit);
+  const release=event=>{
+    if(event.pointerId!==activePointerId)return;
+    clearHold();activePointerId=null;
+    if(gestureCanceled){
+      window.setTimeout(()=>{suppressClick=false;gestureCanceled=false;},0);
+    }
+  };
+  const cancel=event=>{
+    if(event.pointerId!==activePointerId)return;
+    clearHold();activePointerId=null;pointerContext=null;
+    gestureCanceled=true;longPressFired=false;suppressClick=true;
+    window.setTimeout(()=>{suppressClick=false;gestureCanceled=false;},0);
+  };
+  element.addEventListener("pointerup",release);
+  element.addEventListener("pointercancel",cancel);
+  element.addEventListener("lostpointercapture",event=>{
+    if(event.pointerId===activePointerId){clearHold();activePointerId=null;}
+  });
+  window.addEventListener("pointerup",release);
+  window.addEventListener("pointercancel",cancel);
+  element.addEventListener("click",event=>{
+    // Keyboard activation and programmatic checkbox clicks have no pointer
+    // gesture to disambiguate. Keep the checkbox's native single-toggle path.
+    if(nativeToggle&&event.target===nativeToggle&&event.detail===0)return;
+    if(preventDefault)event.preventDefault();
+    if(event.button!==0&&event.detail!==0)return;
+    if(suppressClick||gestureCanceled){suppressClick=false;gestureCanceled=false;return;}
+    const context=pointerContext||contextAt(event);
+    pointerContext=null;
+    if(longPressFired){longPressFired=false;return;}
+    if(event.detail>1){
+      clearClick();doubleClickHandled=true;double(context);return;
+    }
+    if(clickTimer)return;
+    clickTimer=window.setTimeout(()=>{clickTimer=0;single(context);},doubleClickDelay);
+  });
+  element.addEventListener("dblclick",event=>{
+    if(preventDefault)event.preventDefault();
+    if(doubleClickHandled){doubleClickHandled=false;return;}
+    clearClick();
+    if(longPressFired){longPressFired=false;return;}
+    double(pointerContext||contextAt(event));pointerContext=null;
+  });
+}
+installAudioStretchAction($("#player-marker-toggle"),{
+  single:({sourceFrame})=>toggleMarkerAtCurrentFrame(sourceFrame),
+  double:({sourceFrame})=>toggleMarkerAtCurrentFrame(sourceFrame),long:clearLoopMarkers
+});
+installAudioStretchAction($("#player-loop-a-now"),{
+  single:({sourceFrame})=>setLoopEndpoint("a",sourceFrame),
+  double:({sourceFrame})=>shiftLoopAtCurrentFrame("a",sourceFrame),
+  long:()=>{if(hasAudioSource())editAB("a","0");}
+});
+installAudioStretchAction($("#player-loop-b-now"),{
+  single:({sourceFrame})=>setLoopEndpoint("b",sourceFrame),
+  double:({sourceFrame})=>shiftLoopAtCurrentFrame("b",sourceFrame),
+  long:()=>{if(hasAudioSource())editAB("b",String(sourceFrames()));}
+});
+installAudioStretchAction($("#player-loop-toggle"),{
+  single:toggleLoop,double:({sourceFrame})=>loopBetweenNearestMarkers(sourceFrame),
+  long:resetFullTrackLoop,
+  preventDefault:true
 });
 function message(text,type="info"){
   const node=$("#status");
@@ -1107,8 +1247,9 @@ detailWaveEditor=createPlayerWaveEditor({
   markerA:$("#wave-a-marker"),markerB:$("#wave-b-marker"),
   zoomIn:$("#wave-zoom-in"),zoomOut:$("#wave-zoom-out"),
   zoomLabel:$("#wave-zoom-label"),
-  visibleStart:$("#wave-visible-start"),visibleEnd:$("#wave-visible-end"),
+  rulerTicks:[...document.querySelectorAll(".wave-detail-ruler [data-ruler-tick]")],
   getPosition:()=>displayPlayPosition(),
+  getMarkers:()=>loopMarkers,
   onScrubMotion:waveformScrubMotion,
   onHoverFrame:frame=>waveHoverSample("detail",frame),
   onHoverEnd:restore=>waveHoverEnd("detail",restore),
@@ -1737,30 +1878,10 @@ async function play(mode="wet",offset=null){
       telemetry.dataset.pcmNodeStarts=String(
         Number(telemetry.dataset.pcmNodeStarts||0)+1
       );
-      indicator(granularActive?
-        (activeSynthMode==="spectral"?
-          "STFT位相合成中 · ソース位置同期/±8/0倍（音響品質検証中）":
-          activeSynthMode==="live"?
-          "Rust engine 3部分音＋残差合成中 · 共通サンプル時計/±8/0倍":
-          activeSynthMode==="pv"?
-          "PVピーク位相ロック合成中 · 元音源同期/±8/0倍（音響品質検証中）":
-          activeSynthMode==="wsola"?
-          "WSOLA波形相関合成中 · 元音源同期/±8/0倍（音響品質検証中）":
-          activeSynthMode==="dual"?
-          "Dual短窓WSOLA＋長窓PV合成中 · 元音源同期/±8/0倍（音響品質検証中）":
-          activeSynthMode==="am"?
-          "AM包絡＋PV合成中 · 元音源同期/±8/0倍（音響品質検証中）":
-          "粒状合成中 · 独立音程/±8/0倍（音質未受入）"):
-        "原音再生中 · PCM実験経路（速度と音程は未連動）");
-      message(granularActive?
-        "再生中。"+(activeSynthMode==="live"?"Rust部分音＋残差合成":
-          activeSynthMode==="spectral"?"STFT位相合成":
-          activeSynthMode==="pv"?"PVピーク位相ロック":
-          activeSynthMode==="wsola"?"WSOLA波形相関":
-          activeSynthMode==="dual"?"Dual短窓/長窓合成":
-          activeSynthMode==="am"?"AM包絡＋PV":"Granular")+
-        "・極短ループ・実機可聴遅延は音響品質検証中。":
-        "実験用PCM再生中。音程変更・0倍の音響品質は未実装です。","warning");
+      const shortMode={live:"Rust",spectral:"STFT",pv:"PV",wsola:"WSOLA",
+        dual:"Dual",am:"AM",granular:"Granular"}[activeSynthMode]||"再生";
+      indicator(granularActive?shortMode+" · 再生中":"原音再生中");
+      message(granularActive?"再生中":"原音再生中");
     }catch(err){
       if(launchEpoch!==state.transportEpoch){bridge?.dispose();return;}
       await stop();
@@ -2260,7 +2381,10 @@ async function load(file){
     if(file.size>75_000_000&&!window.confirm(
       `この音源は ${(file.size/1_000_000).toFixed(0)} MB です。\n`+
       "再生位置を優先して段階読込します。続けますか?"))return;
+    $("#file-meta").hidden=false;
     $("#file-meta").textContent=file.name+" · 読み込み中"+(previousReady?"（現在の音声は保持）":"");
+    $("#audio-picker-label").textContent=previousReady?"音源を変更":"読み込み中";
+    $("#drop").setAttribute("aria-label",previousReady?"音源を変更":"音源を選ぶ");
     message("音声を開いています…"+(previousReady?" 現在の音声はそのまま使えます。":""));
     candidate=await createProgressiveAudioSource(file);
     state.loadingSource=candidate;
@@ -2283,14 +2407,17 @@ async function load(file){
     state.dry=null;state.overviewPeaks=Array.from({length:96},()=>null);
     state.seek=0;
     ab.a=0;ab.b=state.source.sourceFrames;ab.enabled=true;
+    loopMarkers=[];
     detailWaveEditor?.setSource(state.source,state.source.sampleRate);
     refreshAB();
     labRefresh();state.lastStats=null;
     state.name=file.name.replace(/\.[^.]+$/,"");
     mediaStatus(false);
-    state.fileMeta=file.name+" · "+duration().toFixed(1)+"秒 · "+
-      state.source.sampleRate+"Hz · "+state.source.channelCount+"ch";
+    state.fileMeta=file.name+" · "+state.source.sampleRate+"Hz · "+
+      state.source.channelCount+"ch";
     $("#file-meta").textContent=state.fileMeta;
+    $("#audio-picker-label").textContent="音源を変更";
+    $("#drop").setAttribute("aria-label","音源を変更");
     labels("high");drawCurve();drawAudio();refreshStatusSeek();
     controls.main.disabled=false;controls.dry.disabled=false;controls.wet.disabled=false;
     controls.stop.disabled=true;
@@ -2303,7 +2430,10 @@ async function load(file){
     candidate?.dispose();
     if(state.loadingSource===candidate)state.loadingSource=null;
     if(token!==state.loadToken)return;
+    $("#file-meta").hidden=false;
     $("#file-meta").textContent=previousReady?state.fileMeta:"読み込み失敗（ファイルを選び直せます）";
+    $("#audio-picker-label").textContent=previousReady?"音源を変更":"音源を選び直す";
+    $("#drop").setAttribute("aria-label",previousReady?"音源を変更":"音源を選び直す");
     message("音声を開けませんでした: "+error.message+
       (previousReady?"。以前の音声は保持しています。":""),"error");
   }

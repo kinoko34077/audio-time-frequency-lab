@@ -800,14 +800,9 @@ body[data-main-tab="model"] .player .wave-wrap{height:132px}
 .player-loop-top strong{font-size:13px}
 .player-loop-top label{display:flex;gap:6px;align-items:center;font-size:13px;cursor:pointer}
 .player-loop-top input{accent-color:#64deb8;width:19px;height:19px}
-.player-loop-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
-.player-loop-fields label{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:7px;color:#c4dfdc;font-size:12px}
-.player-loop-fields input{grid-column:1 / -1;width:100%;min-width:0;padding:9px 10px;background:#0b1d24;color:#f4fffc;border:1px solid #45666a;border-radius:8px}
-.player-loop-fields button{font-size:12px;padding:7px 11px;grid-column:1 / -1}
 .player-loop .lab-note{margin-top:0}
 @media(max-width:700px){
   .main-workspace-tabs{max-width:none}
-  .player-loop-fields{gap:9px}
   .player-pitch-speed .lab-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
   body[data-main-tab="player"] .player .wave-wrap{height:172px}
   body[data-main-tab="player"] .player #wave{height:154px}
@@ -853,7 +848,6 @@ body.model-lab .player-pitch-speed .lab-grid .lab-field:first-child{grid-column:
 @media(max-width:560px){
   body.model-lab .player-pitch-speed .lab-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
   body.model-lab .player-pitch-speed .lab-grid .lab-field:first-child{grid-column:auto}
-  .player-loop-fields{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
 
 /* #36 R4 — AudioStretch / Voice Memos interaction patterns, original UI.
@@ -865,7 +859,7 @@ body.model-lab .player-pitch-speed .lab-grid .lab-field:first-child{grid-column:
 .wave-zoom-actions{display:flex;align-items:center;gap:5px}
 .wave-zoom-actions button{height:36px;min-width:40px;padding:4px 8px;font-size:20px;line-height:1}
 .wave-zoom-actions output{min-width:59px;text-align:center;font:12px/1.4 ui-monospace,monospace;color:#a1e3cb}
-.wave-detail-wrap{position:relative;overflow:hidden;border:1px solid #3a6064;border-radius:11px;background:#0a1e27;height:clamp(185px,31vh,280px);touch-action:none}
+.wave-detail-wrap{position:relative;overflow:hidden;border:1px solid #3a6064;border-radius:11px;background:#0a1e27;height:clamp(180px,28vh,245px);touch-action:none}
 .wave-detail-wrap canvas{display:block;width:100%;height:100%;touch-action:none;cursor:grab;outline-offset:-3px}
 .wave-detail-wrap canvas:active{cursor:grabbing}
 .wave-detail-time-bounds{
@@ -891,7 +885,7 @@ body[data-main-tab="model"] .wave-editor .wave-wrap{height:51px!important}
 body[data-main-tab="model"] .wave-editor #wave{height:41px!important}
 @media(max-width:560px){
  .wave-editor-toolbar{gap:5px}
- .wave-detail-wrap{height:min(33vh,250px)}
+ .wave-detail-wrap{height:min(26vh,220px)}
  .wave-editor .wave-wrap{height:53px!important}
  .wave-editor #wave{height:43px!important}
  .wave-zoom-actions button{min-width:42px;height:40px}
@@ -981,12 +975,6 @@ body.model-lab[data-main-tab="player"] #play-main{
 .player-tune-control>.inline-number{grid-column:3;grid-row:1}
 .player-tune-control output[hidden]{display:none!important}
 .player-tune-control .inline-number input[type=number]{min-height:40px;height:40px;width:64px}
-.player-loop-precision{font-size:11px;color:#a6c1c3}
-.player-loop-precision>summary{
-  width:max-content;max-width:100%;padding:5px 0;cursor:pointer;color:#acd5cf;
-  font-weight:550;font-size:11px
-}
-.player-loop-precision>summary:focus-visible{outline:2px solid #a0ebd5}
 .player-rail-setting{display:flex;align-items:center;gap:4px;margin:0;font-size:11px;white-space:nowrap;color:#bdd8d2}
 .player-rail-setting select{min-height:34px;padding:3px 5px;border:1px solid #456b68;color:#e2f7f1;background:#0e2830;border-radius:6px}
 .player-tune #granular-rail-note:empty{display:none}
@@ -997,7 +985,6 @@ body.model-lab[data-main-tab="player"] #player-loop-controls{
 body.model-lab[data-main-tab="player"] .player-loop-top strong{font-size:12px}
 body.model-lab[data-main-tab="player"] .player-loop-top label{font-size:12px}
 body.model-lab[data-main-tab="player"] .player-loop-top input{width:20px;height:20px}
-.player-loop-precision[open] .player-loop-fields{margin-top:7px}
 body.model-lab[data-main-tab="player"] #player-loop-hint{
   font-size:10px;margin:0;color:#9cb8bb;line-height:1.35
 }
@@ -1244,8 +1231,11 @@ body.model-lab[data-main-tab="model"] #runtime-hud.is-hidden{
    ordinary Audio Time page does not open a second status card by default. */
 body.model-lab:not([data-legacy-tools="1"]) .audio-status-row{
   display:flex;align-items:center;justify-content:space-between;
-  gap:8px;min-width:0;min-height:30px;margin-top:3px;
+  gap:8px;min-width:0;min-height:0;margin-top:0;
   font-size:11px;color:#a9c8c9;
+}
+body.model-lab:not([data-legacy-tools="1"]) .audio-status-row[data-visible="true"]{
+  min-height:30px;margin-top:3px;
 }
 .player-processing-status{
   box-sizing:border-box;width:100%;min-height:2.6em;max-height:2.6em;
@@ -1309,29 +1299,71 @@ body.model-lab .player-tune-control .inline-number input[type=number]{width:64px
 body.model-lab .lab-inline-control .inline-number input[type=number]{width:66px;min-height:38px}
 body.model-lab .model-extra-grid{row-gap:7px}
 body.model-lab .model-extra-grid .lab-field{gap:2px}
-body.model-lab .player-loop-fields{gap:6px}
-body.model-lab .player-loop-fields .loop-point{
-  min-width:0;display:flex;align-items:center;gap:5px;flex-wrap:wrap;
-  font-size:11px;color:#c4dfdc
-}
-body.model-lab .loop-point label{display:inline;font-size:11px;white-space:nowrap}
-body.model-lab .loop-point input[type=number]{
-  width:clamp(66px,9ch,100px);min-width:0;min-height:28px;padding:3px 5px;
-  border:1px solid #426660;border-radius:5px;background:#102a30;
-  color:#e6f8f2;text-align:right;font:12px ui-monospace,monospace
-}
-body.model-lab .loop-point button{min-height:28px;padding:3px 7px;font-size:10px;
-  background:transparent;border-radius:5px}
-body.model-lab .player-loop-precision>summary,
 body.model-lab .model-extra-controls>summary{padding:3px 0}
 @media(max-width:600px){
-  body.model-lab .player-loop-fields{grid-template-columns:1fr}
-  body.model-lab .player-loop-fields .loop-point{flex-wrap:nowrap}
-  body.model-lab .loop-point input[type=number]{flex:1;width:90px;max-width:135px}
-  body.model-lab .loop-point button{margin-left:auto}
   body.model-lab .player-tune-control input[type=range],
   body.model-lab .lab-inline-control input[type=range]{min-height:44px}
   body.model-lab .player-tune-control .inline-number input[type=number],
   body.model-lab .lab-inline-control .inline-number input[type=number]{height:44px;min-height:44px}
   body.model-lab .player-rail-setting select{min-height:44px}
+}
+
+/* #36 follow-up: put the time ruler and transport clock on the waveform,
+   keep tuning controls on a shared three-column grid, and make A/B gestures
+   the primary loop workflow. */
+.sr-only{
+  position:absolute!important;width:1px!important;height:1px!important;padding:0!important;
+  margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;
+  white-space:nowrap!important;border:0!important
+}
+.wave-detail-ruler{
+  position:absolute;z-index:6;top:0;left:0;right:0;height:28px;pointer-events:none;
+  background:linear-gradient(180deg,#071820df 0%,#071820a8 68%,transparent 100%);
+  color:#d0e6e2;font:11px/1.25 ui-monospace,monospace;font-variant-numeric:tabular-nums
+}
+.wave-detail-ruler>[data-ruler-tick]{position:absolute;top:4px;white-space:nowrap}
+.wave-center-head{z-index:4}
+.wave-marker{top:25px}
+.wave-detail-wrap>.transport{
+  position:absolute;z-index:6;left:0;right:0;bottom:0;display:flex;justify-content:space-between;
+  gap:8px;margin:0;padding:3px 8px 4px;color:#d0e6e2;
+  background:linear-gradient(0deg,#071820df 0%,#071820a8 68%,transparent 100%);
+  font:11px/1.3 ui-monospace,monospace;font-variant-numeric:tabular-nums;pointer-events:none
+}
+.player-tune-control{grid-template-columns:96px minmax(0,1fr) 100px;column-gap:8px}
+.player-tune-labels{justify-content:space-between;gap:4px}
+.player-rail-setting{gap:0}
+.player-rail-setting select{width:58px;min-width:58px;padding:3px 2px;text-align:center}
+body.model-lab[data-main-tab="player"] .player-tune-control>.inline-number{
+  display:grid;grid-template-columns:64px minmax(0,1fr);gap:4px;align-items:center;
+  width:100px;min-width:100px
+}
+body.model-lab[data-main-tab="player"] .player-tune-unit{
+  min-width:0;text-align:right;white-space:nowrap
+}
+body.model-lab[data-main-tab="player"] #player-loop-controls{
+  gap:4px;margin:0;padding:0;border:0;border-radius:0;background:transparent
+}
+.player-loop-toolbar{display:flex;align-items:center;gap:6px;min-width:0}
+.player-loop-toolbar>button,.player-loop-toggle{
+  min-width:44px;min-height:40px;padding:6px 10px;display:inline-flex;align-items:center;
+  justify-content:center;border:1px solid #3b6662;border-radius:7px;color:#e4f5ef;
+  background:#102a30;font-size:13px;font-weight:650;touch-action:manipulation
+}
+.player-loop-toolbar>button:first-child{min-width:58px}
+.player-loop-toggle{gap:6px;cursor:pointer}
+.player-loop-toggle input{width:18px;height:18px;margin:0;accent-color:#70e6bb}
+.player-loop-toggle:has(input:checked){border-color:#63b6a0;background:#17463e}
+.player-loop-toggle:focus-within,.player-loop-toolbar>button:focus-visible{
+  outline:2px solid #a0ebd5;outline-offset:2px
+}
+@media(max-width:600px){
+  body.model-lab[data-main-tab="player"] #main-player-panel .player-tune-grid{
+    grid-template-columns:minmax(0,1fr);gap:7px
+  }
+  body.model-lab[data-main-tab="player"] .player-tune-control{
+    grid-template-columns:96px minmax(0,1fr) 100px;column-gap:6px
+  }
+  body.model-lab[data-main-tab="player"] .player-loop-toolbar>button,
+  body.model-lab[data-main-tab="player"] .player-loop-toggle{min-height:42px}
 }

@@ -49,7 +49,7 @@ test("live Audio Lab routes the selected Rust model through the shared PCM node"
       input.dispatchEvent(new Event("change",{bubbles:true}));
     });
     await page.waitForFunction(()=>document.querySelector("#file-meta")?.textContent
-      .includes("pcm-optin.wav · 2.0秒"),{timeout:20000});
+      .includes("pcm-optin.wav · 48000Hz · 1ch"),{timeout:20000});
     await page.waitForSelector("#play-dry:not([disabled])",{timeout:10000});
     await page.click("#play-dry");
     await page.waitForFunction(()=>document.querySelector("#rt-telemetry")
@@ -66,7 +66,7 @@ test("live Audio Lab routes the selected Rust model through the shared PCM node"
     assert.equal(initial.starts,1);
     assert.equal(initial.stopEnabled,true);
     assert.equal(initial.wetEnabled,true);
-    assert.match(initial.indicator,/PCM実験経路/);
+    assert.equal(initial.indicator,"原音再生中");
     assert.match(initial.text,/cache不足 0/);
     // Seek the loaded audio while it is playing: old app used stop/startSource,
     // but the R2 opt-in must retain the same Worklet instance.
@@ -123,7 +123,7 @@ test("live Audio Lab routes the selected Rust model through the shared PCM node"
     }));
     assert.equal(rust.transport,"rust-engine3-source-time");
     assert.equal(rust.starts,initial.starts+1);
-    assert.match(rust.indicator,/Rust engine 3部分音＋残差合成中/);
+    assert.match(rust.indicator,/Rust · 再生中/);
     // The legacy wet button resolves to this same selected live model. A
     // duplicate request must keep the actual Rust renderer and node alive.
     await page.click("#play-wet");

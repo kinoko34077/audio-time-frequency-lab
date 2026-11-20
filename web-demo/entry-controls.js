@@ -89,16 +89,25 @@
   if(document.body.dataset.legacyTools!=="1"){
     $("#shared-transport").appendChild(hud);
     const summary=$("#audio-state-summary"),detail=$("#audio-diagnostics-toggle");
+    const statusRow=$("#audio-status-row");
     const indicator=$("#rt-indicator"),status=$("#status"),modelStatus=$("#lab-status");
     const displayState=()=>{
       const error=status.dataset.kind==="error";
       const warning=status.dataset.kind==="warning";
       const pending=modelStatus.textContent.includes("適用待ち");
       const actual=(indicator.textContent||"停止中").trim();
+      const visible=error||warning||pending;
+      const waitingForFile=$("#play-main")?.disabled===true&&!error;
+      summary.hidden=waitingForFile;
+      summary.classList.toggle("sr-only",!visible);
+      statusRow.dataset.visible=String(visible);
+      detail.hidden=waitingForFile||!(error||warning);
+      if(waitingForFile)return;
       // Requested/legacy diagnostic warnings may outlive Play/Pause/Stop.
       // Render the REAL transport state first, not a stale "playing" verb
       // copied from a previous warning. Keep the warning itself discoverable.
-      const transport=actual.split(" · ")[0]||"停止中";
+      const transport=actual.split(" · ").find(part=>
+        /再生中|一時停止中|停止中/.test(part))||actual.split(" · ")[0]||"停止中";
       summary.dataset.kind=error?"error":pending||warning?"warning":"info";
       if(error){
         summary.textContent=status.textContent||"音声の処理状態を確認してください。";
@@ -126,6 +135,7 @@
     monitor.observe(modelStatus,{childList:true,subtree:true,characterData:true});
     monitor.observe(status,{childList:true,subtree:true,characterData:true,
       attributes:true,attributeFilter:["data-kind"]});
+    monitor.observe($("#play-main"),{attributes:true,attributeFilter:["disabled"]});
     detail.addEventListener("click",()=>{
       const open=hud.classList.toggle("is-expanded");
       detail.setAttribute("aria-expanded",String(open));
