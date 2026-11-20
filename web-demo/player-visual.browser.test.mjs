@@ -50,7 +50,7 @@ async function layoutEvidence(page,tag){
         return [...document.querySelectorAll(".wave-detail-ruler [data-ruler-tick]")]
           .every(element=>{
             const bounds=element.getBoundingClientRect();
-            return bounds.top>=waveform.top&&bounds.bottom<=waveform.top+30;
+            return bounds.top>=waveform.top+7&&bounds.bottom<=waveform.top+30;
           });
       })(),
       clockAtBottom:(()=>{
@@ -64,16 +64,11 @@ async function layoutEvidence(page,tag){
       sliderAlignment:(()=>{
         const speed=document.querySelector("#granular-speed").getBoundingClientRect();
         const pitch=document.querySelector("#granular-pitch").getBoundingClientRect();
-        const speedGroup=document.querySelector("#granular-speed").closest(".player-tune-control").getBoundingClientRect();
-        const pitchGroup=document.querySelector("#granular-pitch").closest(".player-tune-control").getBoundingClientRect();
-        return Math.abs((speed.left-speedGroup.left)-(pitch.left-pitchGroup.left))<=1&&
-          Math.abs(speed.width-pitch.width)<=1;
+        return Math.abs(speed.left-pitch.left)<=1&&Math.abs(speed.right-pitch.right)<=1;
       })(),
       tuningValueAlignment:(()=>{
         const speedInput=document.querySelector("#granular-speed-value").getBoundingClientRect();
         const pitchInput=document.querySelector("#granular-pitch-value").getBoundingClientRect();
-        const speedGroup=document.querySelector("#granular-speed").closest(".player-tune-control").getBoundingClientRect();
-        const pitchGroup=document.querySelector("#granular-pitch").closest(".player-tune-control").getBoundingClientRect();
         const speedUnit=document.querySelector("#granular-speed").closest(".player-tune-control")
           .querySelector(".player-tune-unit");
         const pitchUnit=document.querySelector("#granular-pitch").closest(".player-tune-control")
@@ -81,18 +76,13 @@ async function layoutEvidence(page,tag){
         if(!speedUnit||!pitchUnit)return {aligned:false,missingUnits:true};
         const speedUnitRect=speedUnit.getBoundingClientRect();
         const pitchUnitRect=pitchUnit.getBoundingClientRect();
-        return {aligned:Math.abs((speedInput.left-speedGroup.left)-
-            (pitchInput.left-pitchGroup.left))<=1&&
-          Math.abs((speedUnitRect.left-speedGroup.left)-
-            (pitchUnitRect.left-pitchGroup.left))<=1&&
-          Math.abs((speedUnitRect.right-speedGroup.right)-
-            (pitchUnitRect.right-pitchGroup.right))<=1,
-          speedInputOffset:Math.round(speedInput.left-speedGroup.left),
-          pitchInputOffset:Math.round(pitchInput.left-pitchGroup.left),
-          speedUnitOffset:Math.round(speedUnitRect.left-speedGroup.left),
-          pitchUnitOffset:Math.round(pitchUnitRect.left-pitchGroup.left),
-          speedUnitRightOffset:Math.round(speedUnitRect.right-speedGroup.right),
-          pitchUnitRightOffset:Math.round(pitchUnitRect.right-pitchGroup.right)};
+        return {aligned:Math.abs(speedInput.left-pitchInput.left)<=1&&
+            Math.abs(speedInput.right-pitchInput.right)<=1&&
+            Math.abs(speedUnitRect.right-pitchUnitRect.right)<=1,
+          speedInputLeft:Math.round(speedInput.left),
+          pitchInputLeft:Math.round(pitchInput.left),
+          speedUnitRight:Math.round(speedUnitRect.right),
+          pitchUnitRight:Math.round(pitchUnitRect.right)};
       })(),
       abControlsVisible:["#player-marker-toggle","#player-loop-a-now","#player-loop-b-now",
         "#player-loop-toggle"].every(selector=>
@@ -169,6 +159,10 @@ test("R4 usability visual captures: desktop and mobile player and folded researc
     assert.equal(await page.$eval("#runtime-hud",e=>e.getClientRects().length),0,
       "user-facing player must not show a second telemetry card");
     await page.screenshot({path:path.join(captureDir,"01-player-desktop.png"),fullPage:true});
+    await page.setViewport({width:813,height:900,deviceScaleFactor:1});
+    await layoutEvidence(page,"compact-desktop-loaded");
+    await page.screenshot({path:path.join(captureDir,"01b-player-813.png"),fullPage:true});
+    await page.setViewport({width:1280,height:900,deviceScaleFactor:1});
     await page.evaluate(()=>{
       const set=(id,value)=>{
         const input=document.querySelector(id);
