@@ -514,6 +514,7 @@ function toggleLoop(){
 }
 function installAudioStretchAction(element,{single,double,long,preventDefault=false}){
   const doubleClickDelay=500;
+  const nativeToggle=element.querySelector('input[type="checkbox"]');
   let holdTimer=0,clickTimer=0,longPressFired=false,gestureCanceled=false;
   let activePointerId=null,pointerContext=null,suppressClick=false,doubleClickHandled=false;
   const contextAt=event=>({sourceFrame:Number.isSafeInteger(event?.sourceFrame)?
@@ -563,6 +564,9 @@ function installAudioStretchAction(element,{single,double,long,preventDefault=fa
   window.addEventListener("pointerup",release);
   window.addEventListener("pointercancel",cancel);
   element.addEventListener("click",event=>{
+    // Keyboard activation and programmatic checkbox clicks have no pointer
+    // gesture to disambiguate. Keep the checkbox's native single-toggle path.
+    if(nativeToggle&&event.target===nativeToggle&&event.detail===0)return;
     if(preventDefault)event.preventDefault();
     if(event.button!==0&&event.detail!==0)return;
     if(suppressClick||gestureCanceled){suppressClick=false;gestureCanceled=false;return;}

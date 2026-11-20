@@ -212,6 +212,14 @@ test("R4 usability visual captures: desktop and mobile player and folded researc
     await page.mouse.click(loopAButton.x,loopAButton.y);
     await page.waitForFunction(()=>document.querySelector("#player-loop-a")?.value==="0"&&
       document.querySelector("#player-loop-b")?.value==="3000",{timeout:1200});
+    const loopBefore=await page.$eval("#player-loop-enabled",el=>el.checked);
+    await page.$eval("#player-loop-enabled",el=>el.click());
+    const loopAfterClick=await page.$eval("#player-loop-enabled",el=>el.checked);
+    assert.equal(loopAfterClick,!loopBefore,
+      "native checkbox activation toggles Loop immediately");
+    await new Promise(resolve=>setTimeout(resolve,550));
+    assert.equal(await page.$eval("#player-loop-enabled",el=>el.checked),loopAfterClick,
+      "a native checkbox click does not schedule a duplicate Loop action");
     await page.click("#main-tab-model");
     assert.equal(await page.$eval(".model-extra-controls",el=>el.open),true);
     assert.equal(await page.$eval(".model-legacy-fold",el=>el.getClientRects().length),0,
