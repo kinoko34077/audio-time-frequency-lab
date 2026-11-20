@@ -959,7 +959,7 @@ body.model-lab[data-main-tab="player"] #play-main{
   border-top:1px solid #355159
 }
 .player-tune-grid{
-  display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px
+  display:grid;grid-template-columns:minmax(0,1fr);gap:4px
 }
 .player-tune-control{
   min-width:0;display:grid;grid-template-columns:minmax(88px,max-content) minmax(0,1fr) auto;
@@ -1317,13 +1317,14 @@ body.model-lab .model-extra-controls>summary{padding:3px 0}
   white-space:nowrap!important;border:0!important
 }
 .wave-detail-ruler{
-  position:absolute;z-index:6;top:0;left:0;right:0;height:28px;pointer-events:none;
-  background:linear-gradient(180deg,#071820df 0%,#071820a8 68%,transparent 100%);
+  position:absolute;z-index:6;top:0;left:0;right:0;height:36px;pointer-events:none;
+  border-bottom:1px solid #35545c88;
+  background:linear-gradient(180deg,#071820f2 0%,#071820d0 76%,#07182078 100%);
   color:#d0e6e2;font:11px/1.25 ui-monospace,monospace;font-variant-numeric:tabular-nums
 }
-.wave-detail-ruler>[data-ruler-tick]{position:absolute;top:4px;white-space:nowrap}
+.wave-detail-ruler>[data-ruler-tick]{position:absolute;top:8px;white-space:nowrap}
 .wave-center-head{z-index:4}
-.wave-marker{top:25px}
+.wave-marker{top:38px}
 .wave-detail-wrap>.transport{
   position:absolute;z-index:6;left:0;right:0;bottom:0;display:flex;justify-content:space-between;
   gap:8px;margin:0;padding:3px 8px 4px;color:#d0e6e2;
@@ -1359,7 +1360,7 @@ body.model-lab[data-main-tab="player"] #player-loop-controls{
 }
 @media(max-width:600px){
   body.model-lab[data-main-tab="player"] #main-player-panel .player-tune-grid{
-    grid-template-columns:minmax(0,1fr);gap:7px
+    grid-template-columns:minmax(0,1fr);gap:4px
   }
   body.model-lab[data-main-tab="player"] .player-tune-control{
     grid-template-columns:96px minmax(0,1fr) 100px;column-gap:6px
