@@ -95,7 +95,6 @@
         <p id="file-meta" class="meta" hidden></p>
         <section class="wave-editor" aria-label="拡大波形の操作">
           <div class="wave-editor-toolbar">
-            <span class="wave-editor-caption">波形</span>
             <div class="wave-zoom-actions" aria-label="波形表示倍率">
               <button type="button" id="wave-zoom-out" aria-label="波形を縮小">−</button>
               <output id="wave-zoom-label" aria-live="off">—</output>
@@ -114,7 +113,6 @@
             <span id="wave-b-marker" class="wave-marker wave-marker-b" aria-hidden="true" hidden>B</span>
             <div class="transport"><span id="elapsed">0:00.0</span><span id="wave-hint" class="sr-only">波形を押して移動</span><span id="duration">0:00.0</span></div>
           </div>
-          <div class="wave-overview-header">全体</div>
           <div class="wave-wrap"><canvas id="wave" role="button" tabindex="0" aria-label="全体波形をタップして位置を移動"></canvas><div id="wave-overview-selection" class="wave-overview-selection" aria-hidden="true"></div><div id="playhead" class="playhead"></div></div>
         </section>
         <div id="player-actions-slot"><div id="shared-transport">
@@ -350,7 +348,7 @@
       <progress id="progress" value="0" max="100" aria-label="書出し処理進捗"></progress>
       <button id="download" disabled>↓ WAVを保存</button>
     </details>
-    <footer><span>音声は端末内で処理</span><a href="https://github.com/kinoko34077/audio-time-frequency-lab">GitHub / Source</a></footer>
+    <footer><a href="https://github.com/kinoko34077/audio-time-frequency-lab">GitHub / Source</a></footer>
   </div>
 </main>
 <!-- Audio status is an overlay, not a child of the player layout. Updating

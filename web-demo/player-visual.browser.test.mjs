@@ -59,11 +59,13 @@ async function layoutEvidence(page,tag){
       return {top:Math.round(r.top+window.scrollY),bottom:Math.round(r.bottom+window.scrollY),
         width:Math.round(r.width),height:Math.round(r.height),visible:getComputedStyle(el).display!=="none"};
     };
+    const studioStyle=getComputedStyle(document.querySelector(".studio"));
     const abToolbar=document.querySelector(".player-loop-toolbar").getBoundingClientRect();
     const abControls=[...document.querySelectorAll(
       ".player-loop-toolbar > button,.player-loop-toolbar > label")]
       .map(element=>element.getBoundingClientRect());
     return {viewport:innerWidth,viewportHeight:innerHeight,
+      safeAreaPadding:{top:studioStyle.paddingTop,bottom:studioStyle.paddingBottom},
       viewportFitCover:/viewport-fit=cover/.test(
         document.querySelector('meta[name="viewport"]')?.content||""),
       scrollWidth:document.documentElement.scrollWidth,studio:box(".studio"),
@@ -96,10 +98,10 @@ async function layoutEvidence(page,tag){
               Math.abs(ruler.top-waveform.top)<=1.5;
           });
       })(),
-      playheadStartsBelowRuler:(()=>{
-        const ruler=document.querySelector(".wave-detail-ruler").getBoundingClientRect();
+      playheadTopOffset:(()=>{
+        const waveform=document.querySelector(".wave-detail-wrap").getBoundingClientRect();
         const playhead=document.querySelector(".wave-center-head").getBoundingClientRect();
-        return playhead.top>=ruler.bottom-1;
+        return Math.round((playhead.top-waveform.top)*100)/100;
       })(),
       rulerBandHeight:Math.round(document.querySelector(".wave-detail-ruler").getBoundingClientRect().height),
       rulerLabelsAtTop:(()=>{
@@ -147,6 +149,57 @@ async function layoutEvidence(page,tag){
           speedUnitRight:Math.round(speedUnitRect.right),
           pitchUnitRight:Math.round(pitchUnitRect.right)};
       })(),
+      compactControlSizing:(()=>{
+        const width=selector=>Math.round(document.querySelector(selector)
+          .getBoundingClientRect().width*100)/100;
+        const height=selector=>Math.round(document.querySelector(selector)
+          .getBoundingClientRect().height*100)/100;
+        const requiredInputWidth=(selector,text)=>{
+          const element=document.querySelector(selector),style=getComputedStyle(element);
+          const context=document.createElement("canvas").getContext("2d");
+          context.font=style.font;
+          return context.measureText(text).width+
+            ["paddingLeft","paddingRight","borderLeftWidth","borderRightWidth"]
+              .reduce((sum,key)=>sum+parseFloat(style[key]||"0"),0);
+        };
+        const nativeValueFits=(selector,text)=>{
+          const element=document.querySelector(selector),original=element.value;
+          element.value=text;
+          const fits=element.scrollWidth<=element.clientWidth;
+          element.value=original;
+          return fits;
+        };
+        const actions=[...document.querySelectorAll("#main-player-panel #shared-transport>.actions button")]
+          .filter(element=>getComputedStyle(element).display!=="none")
+          .map(element=>({id:element.id,width:Math.round(element.getBoundingClientRect().width*100)/100,
+            height:Math.round(element.getBoundingClientRect().height*100)/100}));
+        const loop=[...document.querySelectorAll(
+          ".player-loop-toolbar>button,.player-loop-toolbar>label")]
+          .map(element=>Math.round(element.getBoundingClientRect().width*100)/100);
+        return {speedValue:width("#granular-speed-value"),pitchValue:width("#granular-pitch-value"),
+          speedValueHeight:height("#granular-speed-value"),pitchValueHeight:height("#granular-pitch-value"),
+          speedTextFits:width("#granular-speed-value")>=requiredInputWidth("#granular-speed-value","-1.237"),
+          pitchTextFits:width("#granular-pitch-value")>=requiredInputWidth("#granular-pitch-value","-12.0"),
+          speedNativeValueFits:nativeValueFits("#granular-speed-value","-1.237"),
+          pitchNativeValueFits:nativeValueFits("#granular-pitch-value","-12.0"),
+          dryButton:width("#play-dry"),actions,loop,
+          loopHeights:[...document.querySelectorAll(
+            ".player-loop-toolbar>button,.player-loop-toolbar>label")]
+            .map(element=>Math.round(element.getBoundingClientRect().height*100)/100),
+          loopCenterOffset:(()=>{
+            const controls=document.querySelector(".player-loop-toolbar").getBoundingClientRect();
+            const first=document.querySelector(".player-loop-toolbar>*:first-child").getBoundingClientRect();
+            const last=document.querySelector(".player-loop-toolbar>*:last-child").getBoundingClientRect();
+            return Math.round(((first.left+last.right)/2-(controls.left+controls.right)/2)*100)/100;
+          })()};
+      })(),
+      redundantPlayerLabelsAbsent:(()=>{
+        const visible=selector=>[...document.querySelectorAll(selector)]
+          .some(element=>element.getClientRects().length>0&&getComputedStyle(element).visibility!=="hidden");
+        const footer=document.querySelector("footer").innerText;
+        return !visible(".wave-editor-caption,.wave-overview-header")&&
+          !footer.includes("音声は端末内で処理");
+      })(),
       abControlsVisible:["#player-marker-toggle","#player-loop-a-now","#player-loop-b-now",
         "#player-loop-toggle"].every(selector=>
         document.querySelector(selector).getClientRects().length>0),
@@ -174,14 +227,37 @@ async function layoutEvidence(page,tag){
     "expected waveform > transport > speed/pitch hierarchy "+tag);
   assert.equal(value.railRangeVisible,true,"speed rail width is directly available");
   assert.equal(value.rulerAtTop,true,"waveform ruler labels stay inside its top edge");
-  assert.equal(value.playheadStartsBelowRuler,true,
-    "center playhead starts below the compact time labels");
+  assert.ok(value.playheadTopOffset<=1,
+    "center playback position starts on the waveform edge: "+value.playheadTopOffset);
   assert.ok(value.rulerBandHeight>=12&&value.rulerBandHeight<=18,
     "top ruler stays compact against the waveform edge: "+value.rulerBandHeight);
   assert.equal(value.rulerLabelsAtTop,true,"ruler labels sit at the waveform top edge");
   assert.equal(value.markerBelowRuler,true,"A/B markers begin just below the compact ruler");
   assert.equal(value.clockAtBottom,true,"elapsed and total time sit inside the waveform bottom edge");
   assert.equal(value.sliderAlignment,true,"speed and pitch sliders share the same left and right edges");
+  assert.ok(value.compactControlSizing.speedValue<=54&&value.compactControlSizing.pitchValue<=54,
+    "numeric values use widths sized for their visible precision: "+JSON.stringify(value.compactControlSizing));
+  assert.ok(value.compactControlSizing.speedValueHeight<=38&&
+    value.compactControlSizing.pitchValueHeight<=38&&
+    value.compactControlSizing.speedTextFits&&value.compactControlSizing.pitchTextFits&&
+    value.compactControlSizing.speedNativeValueFits&&value.compactControlSizing.pitchNativeValueFits,
+    "compact numeric fields still show representative signed speed and pitch values: "+
+      JSON.stringify(value.compactControlSizing));
+  assert.ok(value.compactControlSizing.dryButton<=112,
+    "original-audio action is sized to its label instead of a full row: "+
+      JSON.stringify(value.compactControlSizing));
+  assert.ok(value.compactControlSizing.loop.every(width=>width<=82),
+    "Mark/A/B/Loop controls do not stretch beyond their labels: "+
+      JSON.stringify(value.compactControlSizing));
+  assert.ok(value.compactControlSizing.actions.every(action=>action.height<=40)&&
+    value.compactControlSizing.loopHeights.every(height=>height<=40),
+    "transport and loop buttons use compact, consistent heights: "+
+      JSON.stringify(value.compactControlSizing));
+  assert.ok(Math.abs(value.compactControlSizing.loopCenterOffset)<=2,
+    "the compact loop controls are centered in the available row: "+
+      JSON.stringify(value.compactControlSizing));
+  assert.equal(value.redundantPlayerLabelsAbsent,true,
+    "visible waveform headings and device-processing footer copy are removed");
   assert.equal(value.tuningValueAlignment.aligned,true,
     "speed and pitch values and units share fixed columns at desktop and mobile widths: "+
       JSON.stringify(value.tuningValueAlignment));
@@ -356,11 +432,22 @@ test("R4 usability visual captures: desktop and mobile player and folded researc
     // desktop page. Open a fresh mobile page instead; load the WAV there.
     const mobile=await browser.newPage();
     mobile.on("pageerror",e=>errors.push(e.message));
-    await mobile.setViewport({width:390,height:844,deviceScaleFactor:2,isMobile:true,hasTouch:true});
+    // Match the supplied screenshot's 0.5 aspect ratio and modeled safe area
+    // while keeping CSS viewport dimensions explicit. This is browser
+    // emulation, not a claim of physical iOS metrics or hardware acceptance.
+    await mobile.setViewport({width:393,height:786,deviceScaleFactor:1.5,isMobile:true,hasTouch:true});
+    const mobileMetrics=await mobile.createCDPSession();
+    await mobileMetrics.send("Emulation.setSafeAreaInsetsOverride",{insets:{
+      top:44,bottom:24,left:0,right:0,topMax:44,bottomMax:24,leftMax:0,rightMax:0
+    }});
     await mobile.goto(localUrl,{waitUntil:"domcontentloaded",timeout:20000});
     await mobile.waitForFunction(()=>document.documentElement.dataset.fwBoot==="ready",{timeout:20000});
     await waitForFile(mobile);
     const mobileLayout=await layoutEvidence(mobile,"mobile-touch-loaded");
+    assert.equal(Math.round(mobileLayout.viewport/mobileLayout.viewportHeight*1000)/1000,.5,
+      "mobile browser viewport uses the supplied screenshot's 0.5 aspect ratio");
+    assert.deepEqual(mobileLayout.safeAreaPadding,{top:"50px",bottom:"32px"},
+      "the page honors the modeled PWA status and home-indicator safe areas");
     assert.equal(mobileLayout.viewportFitCover,true,
       "mobile viewport leaves safe-area handling available to the PWA shell");
     assert.ok(mobileLayout.footer.bottom>=mobileLayout.viewportHeight-40,
@@ -369,12 +456,14 @@ test("R4 usability visual captures: desktop and mobile player and folded researc
     assert.ok(mobileLayout.footer.bottom<=mobileLayout.viewportHeight-8,
       "mobile footer remains visible above the bottom safe-area padding: "+
         JSON.stringify({footer:mobileLayout.footer,height:mobileLayout.viewportHeight}));
-    assert.ok(mobileLayout.waveform.height>=260,
-      "recovered vertical space is used by the main waveform: "+
+    assert.ok(mobileLayout.waveform.height>=150,
+      "the main waveform keeps a usable height on the screenshot-ratio viewport: "+
         JSON.stringify(mobileLayout.waveform));
-    assert.ok(Math.abs(mobileLayout.abToolbarSpan.left-mobileLayout.abToolbarSpan.toolbarLeft)<=2&&
-      Math.abs(mobileLayout.abToolbarSpan.right-mobileLayout.abToolbarSpan.toolbarRight)<=2,
-      "four A/B actions use the mobile toolbar width instead of clustering at left: "+
+    assert.ok(Math.abs((mobileLayout.abToolbarSpan.left+mobileLayout.abToolbarSpan.right)/2-
+      (mobileLayout.abToolbarSpan.toolbarLeft+mobileLayout.abToolbarSpan.toolbarRight)/2)<=2&&
+      mobileLayout.abToolbarSpan.right-mobileLayout.abToolbarSpan.left<
+        (mobileLayout.abToolbarSpan.toolbarRight-mobileLayout.abToolbarSpan.toolbarLeft)*.8,
+      "compact A/B actions are centered without stretching across the phone: "+
         JSON.stringify(mobileLayout.abToolbarSpan));
     const firstViewportPitch=await mobile.evaluate(()=>{
       const pitch=document.querySelector("#granular-pitch-value").getBoundingClientRect();
@@ -382,8 +471,8 @@ test("R4 usability visual captures: desktop and mobile player and folded researc
     });
     console.log("UI_FIRST_VIEWPORT_PITCH "+JSON.stringify(firstViewportPitch));
     assert.ok(firstViewportPitch.pitchBottom<=firstViewportPitch.viewportHeight,
-      "pitch editing must be reachable before first vertical scroll at 390x844");
-    await mobile.screenshot({path:path.join(captureDir,"03-player-mobile.png"),fullPage:true});
+      "pitch editing must be reachable before first vertical scroll at the screenshot-ratio viewport");
+    await mobile.screenshot({path:path.join(captureDir,"03-player-aspect-ratio-0.5.png")});
     await mobile.evaluate(()=>{
       const status=document.querySelector("#status");
       window.__mobileStatusBefore={text:status.textContent,kind:status.dataset.kind};
