@@ -245,6 +245,50 @@ test("a moving detail viewport redirects the next waveform read to the current p
   }
 });
 
+test("an aborted obsolete detail read restarts the latest paused viewport",async()=>{
+  const reads=[];let activeReads=0,rejectFirst;
+  const firstRead=new Promise((_,reject)=>{rejectFirst=reject;});
+  const source={sourceFrames:48_000*120,maxReadFrames:262_144,
+    overviewPeaks:Array.from({length:96},()=>[-.1,.1]),
+    async read(startFrame,frameCount){
+      reads.push({startFrame,frameCount});activeReads++;
+      try{
+        if(reads.length===1)await firstRead;
+        return {startFrame,channels:[new Float32Array(frameCount).fill(.25)]};
+      }finally{activeReads--;}
+    }};
+  Object.defineProperty(source,"activeReads",{get:()=>activeReads});
+  const original=Object.getOwnPropertyDescriptor(globalThis,"devicePixelRatio");
+  Object.defineProperty(globalThis,"devicePixelRatio",{configurable:true,value:1});
+  let editor;
+  try{
+    const created=makeEditor(source,30);
+    editor=created.editor;
+    await new Promise(resolve=>setTimeout(resolve,0));
+    assert.equal(reads.length,1,"the original viewport read should be pending");
+    created.setPosition(70);
+    editor.refresh(true);
+    const error=new Error("playback decode preempted the stale waveform read");
+    error.name="AbortError";
+    rejectFirst(error);
+    await waitForReadQuiet(source,reads);
+    assert.ok(reads.length>=2,
+      "the newest paused viewport must be read after the obsolete request aborts");
+    assert.ok(Math.abs(reads[1].startFrame-70*48_000)<=2*48_000,
+      "the restarted read should follow the latest seek instead of repeating the old range: "+
+        JSON.stringify(reads.slice(0,3)));
+  }finally{
+    if(rejectFirst){
+      const error=new Error("test cleanup");error.name="AbortError";
+      rejectFirst(error);rejectFirst=null;
+    }
+    editor?.setSource(null,48_000);
+    await waitForReadQuiet(source,reads);
+    if(original)Object.defineProperty(globalThis,"devicePixelRatio",original);
+    else delete globalThis.devicePixelRatio;
+  }
+});
+
 test("source-edge viewports keep one peak resolution and leave out-of-source time blank",async()=>{
   const sampleRate=48_000,sourceFrames=sampleRate*20,reads=[];
   let activeReads=0;

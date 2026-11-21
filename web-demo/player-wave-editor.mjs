@@ -196,6 +196,7 @@ export function createPlayerWaveEditor({
     const requestToken={};
     detailPending=requestToken;
     let activeKey=key;
+    let obsoleteRequestFailed=false;
     (async()=>{
       let chunkIndex=0;
       while(true){
@@ -284,6 +285,7 @@ export function createPlayerWaveEditor({
       if(source!==reader||revision!==detailRevision)return;
       const failedKey=activeKey;
       if(desiredDetailRange?.key!==failedKey){
+        obsoleteRequestFailed=true;
         detailFailedKey=null;detailRetriedKey=null;
         return;
       }
@@ -306,7 +308,8 @@ export function createPlayerWaveEditor({
         // read settles; ordinary completion and failed-key retry handling
         // must not recurse into another request here.
         if(source===reader&&target&&
-           (revision!==detailRevision||detailBlockFrames!==blockFrames))
+           (revision!==detailRevision||detailBlockFrames!==blockFrames||
+            obsoleteRequestFailed))
           requestDetail(target.start,target.end);
       }
     });

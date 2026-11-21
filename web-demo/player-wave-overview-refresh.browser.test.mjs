@@ -25,8 +25,14 @@ async function edgePixels(page,edge){
     if(edge==="start"){
       outside=count(0,half-2);source=count(half+2,half+82);
     }else{
-      outside=count(Math.ceil(width*.82),width);
-      source=count(Math.floor(width*.68),Math.floor(width*.77));
+      const center=Number(canvas.getAttribute("aria-valuenow"));
+      const zoomText=document.querySelector("#wave-zoom-label")?.textContent||"";
+      const spanValue=Number.parseFloat(zoomText.replace(/^ms\s*/,""));
+      const spanSeconds=zoomText.startsWith("ms ")?spanValue/1000:spanValue;
+      const sourceEndX=width*(.5+(144_000-center)/(spanSeconds*48_000));
+      outside=count(Math.ceil(sourceEndX)+2,width);
+      source=count(Math.floor(sourceEndX)-82,Math.floor(sourceEndX)-2);
+      return {outside,source,sourceEndX,center,spanSeconds,width};
     }
     return {outside,source};
   },edge);
@@ -117,7 +123,8 @@ test("PCM and overview progress are coalesced to a single waveform paint per fra
     await new Promise(resolve=>setTimeout(resolve,100));
     const endEdge=await edgePixels(page,"end");
     assert.equal(endEdge.outside,0,"source-end margin stays empty when zoomed in");
-    assert.ok(endEdge.source>0,"recorded PCM remains visible before source end");
+    assert.ok(endEdge.source>0,"recorded PCM remains visible before source end: "+
+      JSON.stringify(endEdge));
   }finally{
     await cleanupTestProcesses(browser,[server],"waveform overview browser server");
   }

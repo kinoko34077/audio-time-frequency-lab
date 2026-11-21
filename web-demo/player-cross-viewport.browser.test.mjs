@@ -57,8 +57,13 @@ test("real recorded waveform UX across mobile, Android-size, tablet and desktop 
         "--autoplay-policy=no-user-gesture-required", "--mute-audio"]
     });
     for(const profile of profiles){
-      const page=await browser.newPage(),errors=[];
+      const page=await browser.newPage(),errors=[],consoleErrors=[],requestFailures=[];
       page.on("pageerror",error=>errors.push(error.message));
+      page.on("console",message=>{
+        if(message.type()==="error")consoleErrors.push(message.text());
+      });
+      page.on("requestfailed",request=>requestFailures.push({url:request.url(),
+        error:request.failure()?.errorText}));
       await page.setViewport({width:profile.width,height:profile.height,
         deviceScaleFactor:profile.dpr??(profile.touch?2:1),isMobile:profile.touch,
         hasTouch:profile.touch});
@@ -67,7 +72,15 @@ test("real recorded waveform UX across mobile, Android-size, tablet and desktop 
           waitUntil:"domcontentloaded",timeout:20000
         });
         await page.waitForFunction(()=>document.documentElement.dataset.fwBoot==="ready",
-          {timeout:20000});
+          {timeout:20000}).catch(async error=>{
+            const state=await page.evaluate(()=>({url:location.href,
+              readyState:document.readyState,boot:document.documentElement.dataset.fwBoot,
+              body:document.body.innerText.slice(0,240),
+              scripts:[...document.scripts].map(script=>script.src)})).catch(()=>null);
+            throw new Error(`${profile.name} player boot did not become ready: `+
+              JSON.stringify({state,errors,consoleErrors,requestFailures,
+                cause:error.message}));
+          });
         await (await page.$("#audio-file")).uploadFile(WAV);
         await page.waitForFunction(()=>document.querySelector("#file-meta")?.textContent
           .includes("meta-piano-a0-cc0-3s-48khz.wav"),{timeout:20000});
