@@ -43,9 +43,9 @@ export function createPlayerWaveEditor({
   rulerTicks=[],getMarkers=()=>[],getPosition,onPosition,onStart,onAB,onScrubState,
   onScrubMotion=()=>{},onHoverFrame=()=>false,onHoverEnd=()=>{}
 }){
-  let channels=null,source=null,detailPeaks=null,detailStart=0,detailEnd=0;
-  let detailBlockFrames=0;
-  let detailPending=null,detailFailedKey=null,detailRetriedKey=null;
+  let channels=null,source=null,detailBuckets=new Map(),detailBlockFrames=0;
+  let detailPending=null,desiredDetailRange=null;
+  let detailFailedKey=null,detailRetriedKey=null;
   let detailRetryTimer=null,detailRevision=0;
   let rate=48000,levels=null,frames=0,spanFrames=rate*8;
   let lastFrame=NaN,lastSpan=NaN,lastWidth=0,lastHeight=0;
@@ -62,7 +62,7 @@ export function createPlayerWaveEditor({
     channels=source?null:nextChannels;
     if(detailRetryTimer!==null)clearTimeout(detailRetryTimer);
     detailRetryTimer=null;
-    detailPeaks=null;detailStart=detailEnd=0;detailBlockFrames=0;
+    detailBuckets.clear();detailBlockFrames=0;desiredDetailRange=null;
     detailPending=null;
     detailFailedKey=null;detailRetriedKey=null;detailRevision++;
     rate=nextRate||48000;
@@ -80,16 +80,22 @@ export function createPlayerWaveEditor({
     if(to<=from)return [0,0];
     let low=1,high=-1;
     if(source){
-      if(detailPeaks&&from>=detailStart&&to<=detailEnd){
-        const begin=clamp(Math.floor((from-detailStart)/detailBlockFrames),
-          0,detailPeaks.low.length-1);
-        const end=clamp(Math.floor((to-1-detailStart)/detailBlockFrames),
-          begin,detailPeaks.low.length-1);
-        for(let i=begin;i<=end;i++){
-          low=Math.min(low,detailPeaks.low[i]);
-          high=Math.max(high,detailPeaks.high[i]);
+      if(detailBlockFrames>0){
+        const begin=Math.floor(from/detailBlockFrames);
+        const end=Math.floor((to-1)/detailBlockFrames);
+        let complete=true;
+        for(let bucket=begin;bucket<=end;bucket++){
+          const peak=detailBuckets.get(bucket);
+          if(!peak){complete=false;break;}
+          low=Math.min(low,peak[0]);high=Math.max(high,peak[1]);
         }
-      }else if(source.overviewPeaks?.length){
+        if(complete)return [low,high];
+        // While the detailed range is pending, never paint coarse overview
+        // peaks into the zoomed waveform. A short blank edge is more honest
+        // than the recurring low-resolution "seaweed" tail.
+        return [0,0];
+      }
+      if(source.overviewPeaks?.length){
         const peaks=source.overviewPeaks;
         const begin=clamp(Math.floor(from*peaks.length/frames),0,peaks.length-1);
         const end=clamp(Math.floor((to-1)*peaks.length/frames),begin,peaks.length-1);
@@ -127,83 +133,138 @@ export function createPlayerWaveEditor({
     const pixelRatio=Math.min(devicePixelRatio||1,2);
     const maxSummaryBins=Math.max(1,
       Math.ceil(canvas.clientWidth*pixelRatio));
-    const blockFrames=Math.max(1,Math.ceil((to-from)/maxSummaryBins));
-    const summaryStart=Math.floor(from/blockFrames)*blockFrames;
-    const summaryEnd=Math.min(frames,
-      Math.ceil(to/blockFrames)*blockFrames);
     const reader=source;
     const maxRead=Number.isSafeInteger(reader.maxReadFrames)?
       reader.maxReadFrames:DETAIL_READ_FRAMES;
     const readFrames=Math.max(1,Math.min(DETAIL_READ_FRAMES,maxRead));
+    const blockFrames=Math.max(1,Math.min(readFrames,
+      Math.ceil((to-from)/maxSummaryBins)));
+    const summaryStart=Math.floor(from/blockFrames)*blockFrames;
+    const summaryEnd=Math.min(frames,
+      Math.ceil(to/blockFrames)*blockFrames);
+    if(blockFrames!==detailBlockFrames){
+      detailBuckets.clear();detailBlockFrames=blockFrames;
+      detailFailedKey=null;detailRetriedKey=null;
+    }
     if(summaryEnd-summaryStart>readFrames*DETAIL_MAX_READS){
-      // Wide zoom uses the fixed-size whole-track overview. Invalidate an
-      // obsolete detail read so it stops after its current bounded PCM chunk.
-      // Keep its token until that chunk settles to prevent overlapping reads
-      // if the user quickly zooms back into the detail range.
+      // Wide zoom uses the whole-track overview. Stop the old bounded read
+      // after its current chunk and keep no obsolete target queued.
+      desiredDetailRange=null;
       if(detailPending)detailRevision++;
+      detailBuckets.clear();detailBlockFrames=0;
+      detailFailedKey=null;detailRetriedKey=null;
       return;
     }
+    if(detailFailedKey&&detailFailedKey!==key){
+      detailFailedKey=null;detailRetriedKey=null;
+    }
+    desiredDetailRange={start:summaryStart,end:summaryEnd,blockFrames,
+      readFrames,maxSummaryBins,key};
     if(detailPending||detailFailedKey===key)return;
-    if(detailPeaks&&from>=detailStart&&to<=detailEnd&&
-       detailBlockFrames<=blockFrames)return;
-    const revision=++detailRevision;
+    const firstBucket=Math.floor(summaryStart/blockFrames);
+    const afterLastBucket=Math.ceil(summaryEnd/blockFrames);
+    let complete=true;
+    for(let bucket=firstBucket;bucket<afterLastBucket;bucket++){
+      if(!detailBuckets.has(bucket)){complete=false;break;}
+    }
+    if(complete){
+      detailFailedKey=null;detailRetriedKey=null;
+      if(detailRetryTimer!==null)clearTimeout(detailRetryTimer);
+      detailRetryTimer=null;
+      return;
+    }
+    const revision=detailRevision;
     const requestToken={};
-    const summaryCount=Math.ceil((summaryEnd-summaryStart)/blockFrames);
-    const low=new Float32Array(summaryCount),high=new Float32Array(summaryCount);
-    low.fill(Infinity);high.fill(-Infinity);
     detailPending=requestToken;
+    let activeKey=key;
     (async()=>{
       let chunkIndex=0;
-      for(let chunkStart=summaryStart;chunkStart<summaryEnd;){
+      while(true){
         if(source!==reader||revision!==detailRevision)return;
-        const count=Math.min(readFrames,summaryEnd-chunkStart);
+        const target=desiredDetailRange;
+        if(!target||target.blockFrames!==detailBlockFrames)return;
+        const firstBucket=Math.floor(target.start/blockFrames);
+        const afterLastBucket=Math.ceil(target.end/blockFrames);
+        const centerBucket=Math.floor(center()/blockFrames);
+        let bucket=-1,distance=Infinity;
+        for(let candidate=firstBucket;candidate<afterLastBucket;candidate++){
+          if(detailBuckets.has(candidate))continue;
+          const nextDistance=Math.abs(candidate-centerBucket);
+          if(nextDistance<distance){bucket=candidate;distance=nextDistance;}
+        }
+        if(bucket<0){
+          detailFailedKey=null;detailRetriedKey=null;
+          return;
+        }
+        const maxReadBuckets=Math.max(1,
+          Math.floor(target.readFrames/blockFrames));
+        let afterBucket=bucket+1;
+        while(afterBucket<afterLastBucket&&
+              afterBucket-bucket<maxReadBuckets&&
+              !detailBuckets.has(afterBucket))afterBucket++;
+        let firstReadBucket=bucket;
+        while(firstReadBucket>firstBucket&&
+              afterBucket-firstReadBucket<maxReadBuckets&&
+              !detailBuckets.has(firstReadBucket-1))firstReadBucket--;
+        const chunkStart=firstReadBucket*blockFrames;
+        const count=Math.min(target.readFrames,frames-chunkStart,
+          (afterBucket-firstReadBucket)*blockFrames);
+        activeKey=target.key;
         const range=await reader.read(chunkStart,count,{priority:'waveform'});
-        if(source!==reader||revision!==detailRevision)return;
+        if(source!==reader||revision!==detailRevision||
+           detailBlockFrames!==blockFrames)return;
         if(range?.startFrame!==chunkStart||!Array.isArray(range.channels)||
            !range.channels.length||
            !range.channels.every(channel=>channel instanceof Float32Array&&
              channel.length===count))
           throw Error('progressive waveform source returned an invalid PCM range');
-        for(let offset=0;offset<count;offset++){
-          const bucket=Math.floor((chunkStart+offset-summaryStart)/
-            blockFrames);
+        const chunkEnd=chunkStart+count;
+        const afterChunkBucket=Math.ceil(chunkEnd/blockFrames);
+        for(let index=firstReadBucket;index<afterChunkBucket;index++){
+          const bucketStart=index*blockFrames;
+          const offset=bucketStart-chunkStart;
+          const length=Math.min(blockFrames,frames-bucketStart);
+          let low=1,high=-1;
           for(const channel of range.channels){
-            const value=channel[offset];
-            if(value<low[bucket])low[bucket]=value;
-            if(value>high[bucket])high[bucket]=value;
+            for(let sample=offset;sample<offset+length;sample++){
+              const value=channel[sample];
+              if(value<low)low=value;
+              if(value>high)high=value;
+            }
           }
+          detailBuckets.set(index,low===1&&high===-1?[0,0]:[low,high]);
         }
-        chunkStart+=count;
         chunkIndex++;
-        // Let play, scrub and paint work run before summarizing another block.
-        if(chunkIndex%4===0&&chunkStart<summaryEnd)
-          await new Promise(resolve=>setTimeout(resolve,0));
+        const maxCachedBuckets=Math.min(8192,
+          Math.max(1024,target.maxSummaryBins*4));
+        if(detailBuckets.size>maxCachedBuckets){
+          const currentCenter=Math.floor(center()/blockFrames);
+          const keep=new Set([...detailBuckets.keys()].sort((a,b)=>
+            Math.abs(a-currentCenter)-Math.abs(b-currentCenter))
+            .slice(0,maxCachedBuckets));
+          for(const cached of detailBuckets.keys())
+            if(!keep.has(cached))detailBuckets.delete(cached);
+        }
+        // Retain completed absolute source buckets so a moving viewport only
+        // needs the newly exposed edge, not a full rescan on every pan.
+        if(chunkIndex%4===0)await new Promise(resolve=>setTimeout(resolve,0));
+        refresh(true);
       }
-      if(source!==reader||revision!==detailRevision)return;
-      for(let i=0;i<summaryCount;i++){
-        if(!Number.isFinite(low[i]))low[i]=0;
-        if(!Number.isFinite(high[i]))high[i]=0;
-      }
-      detailStart=summaryStart;detailEnd=summaryEnd;
-      detailBlockFrames=blockFrames;detailPeaks={low,high};
-      detailFailedKey=null;detailRetriedKey=null;
-      if(detailRetryTimer!==null)clearTimeout(detailRetryTimer);
-      detailRetryTimer=null;
     })().catch(error=>{
       if(source!==reader||revision!==detailRevision)return;
-      detailFailedKey=key;
-      if(error?.name==='AbortError'&&detailRetriedKey!==key){
+      const failedKey=activeKey;
+      if(desiredDetailRange?.key!==failedKey){
+        detailFailedKey=null;detailRetriedKey=null;
+        return;
+      }
+      detailFailedKey=failedKey;
+      if(error?.name==='AbortError'&&detailRetriedKey!==failedKey){
         if(detailRetryTimer!==null)clearTimeout(detailRetryTimer);
         detailRetryTimer=setTimeout(()=>{
           detailRetryTimer=null;
-          const rawStart=center()-spanFrames/2;
-          const currentFrom=clamp(Math.floor(Math.max(0,rawStart)),
-            0,Math.max(0,frames-1));
-          const currentTo=clamp(Math.ceil(Math.min(frames,
-            rawStart+spanFrames)),currentFrom+1,frames);
           if(source!==reader||revision!==detailRevision||
-             currentFrom+':'+currentTo!==key)return;
-          detailRetriedKey=key;detailFailedKey=null;refresh(true);
+             desiredDetailRange?.key!==failedKey)return;
+          detailRetriedKey=failedKey;detailFailedKey=null;refresh(true);
         },160);
       }
     }).finally(()=>{

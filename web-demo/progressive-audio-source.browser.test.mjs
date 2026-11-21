@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {spawn} from 'node:child_process';
+import path from 'node:path';
 import puppeteer from 'puppeteer-core';
 import {installTestAudioSilenceGuardForPage} from './test-audio-silence-guard.mjs';
 import {cleanupTestProcesses} from './test-process-cleanup.mjs';
@@ -10,8 +11,9 @@ test('native browser decodes exact requested WAV PCM, loads the app without eage
   const port=18761;
   const python=process.env.PYTHON_BIN||
     (process.platform==='win32'?'python':'python3');
+  const siteRoot=path.resolve(process.env.AUDIO_LAB_TEST_SITE||'_site');
   const server=spawn(python,['-m','http.server',String(port),'--bind','127.0.0.1'],{
-    cwd:'_site',stdio:'ignore'
+    cwd:siteRoot,stdio:'ignore'
   });
   let browser;
   try{

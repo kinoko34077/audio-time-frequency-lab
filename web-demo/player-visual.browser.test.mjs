@@ -19,6 +19,24 @@ async function waitForFile(page){
   await page.waitForFunction(()=>document.querySelector("#file-meta")?.textContent
     .includes("meta-piano-a0-cc0-3s-48khz.wav"),{timeout:20000});
   await page.waitForSelector("#play-main:not([disabled])",{timeout:15000});
+  await page.waitForFunction(()=>{
+    const canvas=document.querySelector("#wave");
+    if(!canvas?.width||!canvas.height)return false;
+    const pixels=canvas.getContext("2d").getImageData(
+      0,0,canvas.width,canvas.height).data;
+    let renderedColumns=0;
+    for(let x=0;x<canvas.width;x++){
+      let rendered=false;
+      for(let y=0;y<canvas.height;y++){
+        const offset=(y*canvas.width+x)*4;
+        if(pixels[offset+1]>140&&pixels[offset+1]>pixels[offset]*1.45){
+          rendered=true;break;
+        }
+      }
+      if(rendered)renderedColumns++;
+    }
+    return renderedColumns>=canvas.width*.97;
+  },{timeout:20000});
 }
 async function waitForServer(url,server){
   const deadline=Date.now()+10000;
