@@ -1320,6 +1320,7 @@ body.model-lab .inline-number input:disabled{opacity:.5}
 body.model-lab .player-tune-control .inline-number input[type=number]{
   width:3ch;min-width:2.2ch;max-width:12ch;min-height:38px;height:38px;
   padding-inline:2px;box-sizing:content-box;
+  flex:0 0 auto;
   appearance:textfield;-moz-appearance:textfield
 }
 body.model-lab .player-tune-control .inline-number input[type=number]::-webkit-inner-spin-button,
