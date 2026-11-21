@@ -975,7 +975,7 @@ body.model-lab[data-main-tab="player"] #play-main{
 }
 .player-tune-control>.inline-number{grid-column:3;grid-row:1}
 .player-tune-control output[hidden]{display:none!important}
-.player-tune-control .inline-number input[type=number]{min-height:38px;height:38px;width:8.5ch}
+.player-tune-control .inline-number input[type=number]{min-height:38px;height:38px;width:9ch}
 .player-rail-setting{display:flex;align-items:center;gap:4px;margin:0;font-size:11px;white-space:nowrap;color:#bdd8d2}
 .player-rail-setting select{min-height:34px;padding:3px 5px;border:1px solid #456b68;color:#e2f7f1;background:#0e2830;border-radius:6px}
 .player-tune #granular-rail-note:empty{display:none}
@@ -1308,7 +1308,14 @@ body.model-lab .inline-number input[type=number]{
   font:12px ui-monospace,monospace
 }
 body.model-lab .inline-number input:disabled{opacity:.5}
-body.model-lab .player-tune-control .inline-number input[type=number]{width:8.5ch;min-height:38px;height:38px}
+body.model-lab .player-tune-control .inline-number input[type=number]{
+  width:9ch;min-height:38px;height:38px;padding-inline:2px;
+  appearance:textfield;-moz-appearance:textfield
+}
+body.model-lab .player-tune-control .inline-number input[type=number]::-webkit-inner-spin-button,
+body.model-lab .player-tune-control .inline-number input[type=number]::-webkit-outer-spin-button{
+  -webkit-appearance:none;margin:0
+}
 body.model-lab .lab-inline-control .inline-number input[type=number]{width:66px;min-height:38px}
 body.model-lab .model-extra-grid{row-gap:7px}
 body.model-lab .model-extra-grid .lab-field{gap:2px}
@@ -1349,7 +1356,7 @@ body.model-lab .model-extra-controls>summary{padding:3px 0}
 .player-rail-setting{gap:0}
 .player-rail-setting select{width:58px;min-width:58px;padding:3px 2px;text-align:center}
 body.model-lab[data-main-tab="player"] .player-tune-control>.inline-number{
-  display:grid;grid-template-columns:8.5ch 2.2em;gap:3px;align-items:center;
+  display:grid;grid-template-columns:9ch 2.2em;gap:3px;align-items:center;
   width:max-content;min-width:0
 }
 body.model-lab[data-main-tab="player"] .player-tune-unit{
@@ -1384,10 +1391,10 @@ body.model-lab[data-main-tab="player"] #player-loop-controls{
     width:46px;min-width:46px;min-height:36px;font-size:10px
   }
   body.model-lab[data-main-tab="player"] .player-tune-control .inline-number input[type=number]{
-    width:8.5ch;height:34px;min-height:34px
+    width:9ch;height:34px;min-height:34px
   }
   body.model-lab[data-main-tab="player"] .player-tune-control>.inline-number{
-    grid-template-columns:8.5ch 2.2em
+    grid-template-columns:9ch 2.2em
   }
   body.model-lab[data-main-tab="player"] .player-loop-toolbar>button,
   body.model-lab[data-main-tab="player"] .player-loop-toggle{

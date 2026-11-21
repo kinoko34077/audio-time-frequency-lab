@@ -162,6 +162,13 @@ async function layoutEvidence(page,tag){
             ["paddingLeft","paddingRight","borderLeftWidth","borderRightWidth"]
               .reduce((sum,key)=>sum+parseFloat(style[key]||"0"),0);
         };
+        const nativeValueFits=(selector,text)=>{
+          const element=document.querySelector(selector),original=element.value;
+          element.value=text;
+          const fits=element.scrollWidth<=element.clientWidth;
+          element.value=original;
+          return fits;
+        };
         const actions=[...document.querySelectorAll("#main-player-panel #shared-transport>.actions button")]
           .filter(element=>getComputedStyle(element).display!=="none")
           .map(element=>({id:element.id,width:Math.round(element.getBoundingClientRect().width*100)/100,
@@ -173,6 +180,8 @@ async function layoutEvidence(page,tag){
           speedValueHeight:height("#granular-speed-value"),pitchValueHeight:height("#granular-pitch-value"),
           speedTextFits:width("#granular-speed-value")>=requiredInputWidth("#granular-speed-value","-1.237"),
           pitchTextFits:width("#granular-pitch-value")>=requiredInputWidth("#granular-pitch-value","-12.0"),
+          speedNativeValueFits:nativeValueFits("#granular-speed-value","-1.237"),
+          pitchNativeValueFits:nativeValueFits("#granular-pitch-value","-12.0"),
           dryButton:width("#play-dry"),actions,loop,
           loopHeights:[...document.querySelectorAll(
             ".player-loop-toolbar>button,.player-loop-toolbar>label")]
@@ -230,7 +239,8 @@ async function layoutEvidence(page,tag){
     "numeric values use widths sized for their visible precision: "+JSON.stringify(value.compactControlSizing));
   assert.ok(value.compactControlSizing.speedValueHeight<=38&&
     value.compactControlSizing.pitchValueHeight<=38&&
-    value.compactControlSizing.speedTextFits&&value.compactControlSizing.pitchTextFits,
+    value.compactControlSizing.speedTextFits&&value.compactControlSizing.pitchTextFits&&
+    value.compactControlSizing.speedNativeValueFits&&value.compactControlSizing.pitchNativeValueFits,
     "compact numeric fields still show representative signed speed and pitch values: "+
       JSON.stringify(value.compactControlSizing));
   assert.ok(value.compactControlSizing.dryButton<=112,
