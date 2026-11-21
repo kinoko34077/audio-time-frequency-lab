@@ -110,7 +110,9 @@ try:
       assert page.locator("#model-transport-host #play-main").is_visible()
       assert page.locator("#granular-speed-value").input_value()=="1.5"
       assert page.locator("#granular-pitch-value").input_value()=="5"
-      # Model details are open by default, so clicking the summary would close them.
+      # The compatibility model tab starts with its specialist details collapsed.
+      assert page.locator(".model-extra-controls").get_attribute("open") is None
+      page.locator(".model-extra-controls > summary").click()
       assert page.locator(".model-extra-controls").get_attribute("open") is not None
       assert page.locator("#lab-short").is_visible()
 
@@ -133,7 +135,9 @@ try:
       assert page.locator("#rt-indicator").is_visible()
       assert page.locator("#lab-short-value").input_value()=="2048"
       assert page.locator("#lab-long-value").input_value()=="1024"
-      # Model information remains expanded, without a redundant toggle click.
+      # Open model information explicitly before asserting its description.
+      assert page.locator(".model-info-controls").get_attribute("open") is None
+      page.locator(".model-info-controls > summary").click()
       assert page.locator(".model-info-controls").get_attribute("open") is not None
       assert page.locator("#lab-model-description").is_visible()
       assert '個別波長' in page.locator('#lab-model-description').inner_text()
