@@ -70,7 +70,10 @@ try:
         },ensure_ascii=False),flush=True)
         close_browser();atexit.unregister(close_browser)
         raise
-      assert not page.locator("#runtime-hud").is_visible()
+      # legacyUi=1 deliberately retains the inherited detailed HUD for this
+      # compatibility route. The public player route separately verifies
+      # that the HUD is hidden after a source loads.
+      assert page.locator("#runtime-hud").is_visible()
       assert page.locator("#play-wet").is_enabled()
       # The Audio Time player owns the only editable speed/pitch pair.
       assert page.locator("#lab-speed,#lab-pitch").count()==0
