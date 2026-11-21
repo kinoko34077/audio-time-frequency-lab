@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <link rel="license" href="./vendor/THIRD_PARTY_NOTICES.md">
 <link rel="license" href="./vendor/mediabunny-MPL-2.0.txt">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="color-scheme" content="dark">
 <title>Audio Time–Frequency Lab | 再生・音程・速度</title>
 <link rel="stylesheet" href="./style.css">
@@ -114,22 +114,6 @@
             <span id="wave-b-marker" class="wave-marker wave-marker-b" aria-hidden="true" hidden>B</span>
             <div class="transport"><span id="elapsed">0:00.0</span><span id="wave-hint" class="sr-only">波形を押して移動</span><span id="duration">0:00.0</span></div>
           </div>
-          <section class="player-loop" id="player-loop-controls" aria-label="A/B区間" hidden>
-            <div class="player-loop-toolbar">
-              <button type="button" id="player-marker-toggle" title="タップで目印を追加・削除、長押しで全て削除">Mark</button>
-              <button type="button" id="player-loop-a-now" title="タップでAを設定、ダブルタップで区間移動、長押しで先頭へ">A</button>
-              <button type="button" id="player-loop-b-now" title="タップでBを設定、ダブルタップで区間移動、長押しで末尾へ">B</button>
-              <label id="player-loop-toggle" class="player-loop-toggle" title="タップで切替、ダブルタップで目印間、長押しで全体">
-                <input id="player-loop-enabled" type="checkbox" checked aria-label="ループ">
-                <span>Loop</span>
-              </label>
-            </div>
-            <div id="player-loop-fields" hidden aria-hidden="true">
-              <input id="player-loop-a" type="hidden" value="0">
-              <input id="player-loop-b" type="hidden" value="1">
-            </div>
-            <p id="player-loop-hint" class="sr-only" aria-live="polite">A/B区間を更新しました。</p>
-          </section>
           <div class="wave-overview-header">全体</div>
           <div class="wave-wrap"><canvas id="wave" role="button" tabindex="0" aria-label="全体波形をタップして位置を移動"></canvas><div id="wave-overview-selection" class="wave-overview-selection" aria-hidden="true"></div><div id="playhead" class="playhead"></div></div>
         </section>
@@ -167,6 +151,22 @@
             </div>
           </div>
           <p id="granular-rail-note" class="lab-note" aria-live="polite"></p>
+        </section>
+        <section class="player-loop" id="player-loop-controls" aria-label="A/B区間" hidden>
+          <div class="player-loop-toolbar">
+            <button type="button" id="player-marker-toggle" title="タップで目印を追加・削除、長押しで全て削除">Mark</button>
+            <button type="button" id="player-loop-a-now" title="タップでAを設定、ダブルタップで区間移動、長押しで先頭へ">A</button>
+            <button type="button" id="player-loop-b-now" title="タップでBを設定、ダブルタップで区間移動、長押しで末尾へ">B</button>
+            <label id="player-loop-toggle" class="player-loop-toggle" title="タップで切替、ダブルタップで目印間、長押しで全体">
+              <input id="player-loop-enabled" type="checkbox" checked aria-label="ループ">
+              <span>Loop</span>
+            </label>
+          </div>
+          <div id="player-loop-fields" hidden aria-hidden="true">
+            <input id="player-loop-a" type="hidden" value="0">
+            <input id="player-loop-b" type="hidden" value="1">
+          </div>
+          <p id="player-loop-hint" class="sr-only" aria-live="polite">A/B区間を更新しました。</p>
         </section>
         
         <audio id="background-output" playsinline preload="none" aria-hidden="true" hidden></audio>

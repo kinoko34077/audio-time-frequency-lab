@@ -1368,3 +1368,55 @@ body.model-lab[data-main-tab="player"] #player-loop-controls{
   body.model-lab[data-main-tab="player"] .player-loop-toolbar>button,
   body.model-lab[data-main-tab="player"] .player-loop-toggle{min-height:42px}
 }
+
+/* Mobile PWA: use the available viewport for the waveform instead of leaving
+   unused space below the footer. Keep the phone safe areas inside the page. */
+@media(max-width:600px){
+  body.model-lab[data-main-tab="player"] .studio{
+    display:flex;flex-direction:column;height:100vh;height:100dvh;
+    min-height:100vh;min-height:100dvh;
+    overflow-y:auto;overscroll-behavior-y:contain;
+    margin:0 auto;padding:calc(6px + env(safe-area-inset-top,0px)) 7px
+      calc(8px + env(safe-area-inset-bottom,0px))
+  }
+  body.model-lab[data-main-tab="player"] .main-workspace-tabs{flex:0 0 auto}
+  body.model-lab[data-main-tab="player"] .workspace-grid{
+    display:flex!important;flex:1 1 auto;flex-direction:column;min-height:auto;width:100%;margin:0 auto
+  }
+  body.model-lab[data-main-tab="player"] .workspace-left{
+    display:flex;flex:1 1 auto;flex-direction:column;min-height:auto
+  }
+  body.model-lab[data-main-tab="player"] #main-player-panel{flex:1 1 auto;min-height:auto}
+  body.model-lab[data-main-tab="player"] #main-player-panel>.wave-editor{
+    display:flex;flex:1 1 auto;flex-direction:column;min-height:auto
+  }
+  body.model-lab[data-main-tab="player"] #main-player-panel>.wave-editor .wave-detail-wrap{
+    /* Reserve the mobile chrome and footer before growing the waveform.
+       The 260px content floor wins on short windows, which scroll. */
+    flex:1 1 auto;height:auto!important;min-height:260px;
+    max-height:calc(100dvh - 572px - env(safe-area-inset-bottom,0px))
+  }
+  body.model-lab[data-main-tab="player"] #player-loop-controls{width:100%;align-self:stretch}
+  body.model-lab[data-main-tab="player"] .player-loop-toolbar{
+    display:grid;grid-template-columns:repeat(4,minmax(0,1fr));width:100%;gap:6px
+  }
+  body.model-lab[data-main-tab="player"] .player-loop-toolbar>button,
+  body.model-lab[data-main-tab="player"] .player-loop-toggle{
+    width:100%;min-width:0;padding-inline:3px
+  }
+  body.model-lab[data-main-tab="player"] .player-loop-toolbar>button:first-child{min-width:0}
+  body.model-lab[data-main-tab="player"] .below-workspace{flex:0 0 auto;margin-top:auto}
+  body.model-lab[data-main-tab="player"] footer{
+    margin-top:0;padding:10px 4px 2px;border-top-color:#2c4245
+  }
+}
+
+/* The ruler shares the waveform's top edge; text remains readable without a
+   tall opaque strip over the signal. */
+.wave-detail-ruler{
+  height:14px;border:0;background:transparent;color:#c5dcda;
+  font-size:10px;line-height:14px;text-shadow:0 1px 3px #07151a
+}
+.wave-detail-ruler>[data-ruler-tick]{top:0;line-height:14px}
+.wave-center-head{top:14px}
+.wave-marker{top:14px}

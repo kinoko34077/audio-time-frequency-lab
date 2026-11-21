@@ -7,7 +7,8 @@ import puppeteer from "puppeteer-core";
 import {cleanupTestProcesses} from "./test-process-cleanup.mjs";
 
 const WAV=path.resolve("web-demo/test-fixtures/meta-piano-a0-cc0-3s-48khz.wav");
-const imageDir=path.resolve("ui-review-screenshots");
+const imageDir=path.resolve(process.env.AUDIO_LAB_REVIEW_DIR||"ui-review-screenshots");
+const siteRoot=path.resolve(process.env.AUDIO_LAB_TEST_SITE||"_site");
 const profiles=[
   {name:"compact-320",width:320,height:568,touch:true},
   {name:"android-360",width:360,height:800,touch:true},
@@ -23,7 +24,7 @@ test("real recorded waveform UX across mobile, Android-size, tablet and desktop 
   mkdirSync(imageDir,{recursive:true});
   const port=18792;
   const server=spawn("python3",["-m","http.server",String(port),"--bind","127.0.0.1"],{
-    cwd:path.resolve("_site"),stdio:"ignore"
+    cwd:siteRoot,stdio:"ignore"
   });
   let browser;
   try{
@@ -66,6 +67,9 @@ test("real recorded waveform UX across mobile, Android-size, tablet and desktop 
           "no full-page sideways scroll on "+profile.name);
         assert.ok(geometry.wave.width>=260&&geometry.wave.height>=150,
           "waveform must be operable on "+profile.name);
+        assert.ok(geometry.wave.bottom<=geometry.play.top,
+          "waveform must not cover playback controls on "+profile.name+": "+
+            JSON.stringify({wave:geometry.wave,play:geometry.play}));
         assert.ok(geometry.play.height>=40,
           "main play target must be touch accessible on "+profile.name);
         if(profile.name==="compact-320")
@@ -95,6 +99,10 @@ test("real recorded waveform UX across mobile, Android-size, tablet and desktop 
           e.value="-1.237";e.dispatchEvent(new Event("change",{bubbles:true}));
           const p=document.querySelector("#granular-pitch-value");
           p.value="7.1234";p.dispatchEvent(new Event("change",{bubbles:true}));
+        });
+        await page.evaluate(()=>{
+          document.querySelector(".studio")?.scrollTo(0,0);
+          window.scrollTo(0,0);
         });
         await page.screenshot({path:path.join(imageDir,
           "responsive-"+profile.name+"-player.png"),fullPage:true});

@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {spawn} from "node:child_process";
-import {mkdirSync} from "node:fs";
+import {mkdirSync,mkdtempSync,rmSync} from "node:fs";
+import {tmpdir} from "node:os";
 import path from "node:path";
 import puppeteer from "puppeteer-core";
 import {cleanupTestProcesses} from "./test-process-cleanup.mjs";
@@ -10,7 +11,8 @@ import {cleanupTestProcesses} from "./test-process-cleanup.mjs";
 // and narrow touch viewport. Captures are review evidence, NOT a substitute
 // for physical iPhone Safari or subjective audio-quality checks.
 const recording=path.resolve("web-demo/test-fixtures/meta-piano-a0-cc0-3s-48khz.wav");
-const captureDir=path.resolve("ui-review-screenshots");
+const captureDir=path.resolve(process.env.AUDIO_LAB_REVIEW_DIR||"ui-review-screenshots");
+const siteRoot=path.resolve(process.env.AUDIO_LAB_TEST_SITE||"_site");
 
 async function waitForFile(page){
   await (await page.$("#audio-file")).uploadFile(recording);
@@ -39,10 +41,29 @@ async function layoutEvidence(page,tag){
       return {top:Math.round(r.top+window.scrollY),bottom:Math.round(r.bottom+window.scrollY),
         width:Math.round(r.width),height:Math.round(r.height),visible:getComputedStyle(el).display!=="none"};
     };
-    return {viewport:innerWidth,scrollWidth:document.documentElement.scrollWidth,
+    const abToolbar=document.querySelector(".player-loop-toolbar").getBoundingClientRect();
+    const abControls=[...document.querySelectorAll(
+      ".player-loop-toolbar > button,.player-loop-toolbar > label")]
+      .map(element=>element.getBoundingClientRect());
+    return {viewport:innerWidth,viewportHeight:innerHeight,
+      viewportFitCover:/viewport-fit=cover/.test(
+        document.querySelector('meta[name="viewport"]')?.content||""),
+      scrollWidth:document.documentElement.scrollWidth,studio:box(".studio"),
+      workspace:box(".workspace-grid"),workspaceLeft:box(".workspace-left"),
+      workspaceItems:[...document.querySelector(".workspace-grid").children].map(element=>({
+        className:element.className,display:getComputedStyle(element).display,
+        top:Math.round(element.getBoundingClientRect().top),
+        bottom:Math.round(element.getBoundingClientRect().bottom)})),
+      playerPanel:box("#main-player-panel"),waveEditor:box(".wave-editor"),
+      below:box(".below-workspace"),footer:box("footer"),
       waveform:box(".wave-detail-wrap"),transport:box(".actions"),
       statusRow:box(".audio-status-row"),
       speedPitch:box("#granular-optin-controls"),ab:box("#player-loop-controls"),
+      abControlsAfterTuning:document.querySelector("#player-loop-controls")
+        .getBoundingClientRect().top>=document.querySelector("#granular-optin-controls")
+          .getBoundingClientRect().bottom-1,
+      abToolbarSpan:{left:abControls[0]?.left,right:abControls.at(-1)?.right,
+        toolbarLeft:abToolbar.left,toolbarRight:abToolbar.right},
       railRangeVisible:document.querySelector("#granular-range").getClientRects().length>0&&
         document.querySelector("#granular-range").closest("details")===null,
       rulerAtTop:(()=>{
@@ -52,18 +73,24 @@ async function layoutEvidence(page,tag){
           .filter(element=>element.textContent.trim())
           .every(element=>{
             const bounds=element.getBoundingClientRect();
-            return bounds.top>=ruler.top+6&&bounds.bottom<=ruler.bottom-6&&
+            return bounds.top>=ruler.top-1&&bounds.top<=ruler.top+3&&
+              bounds.bottom<=ruler.bottom+1&&
               Math.abs(ruler.top-waveform.top)<=1.5;
           });
       })(),
+      playheadStartsBelowRuler:(()=>{
+        const ruler=document.querySelector(".wave-detail-ruler").getBoundingClientRect();
+        const playhead=document.querySelector(".wave-center-head").getBoundingClientRect();
+        return playhead.top>=ruler.bottom-1;
+      })(),
       rulerBandHeight:Math.round(document.querySelector(".wave-detail-ruler").getBoundingClientRect().height),
-      rulerLabelsCentered:(()=>{
+      rulerLabelsAtTop:(()=>{
         const ruler=document.querySelector(".wave-detail-ruler").getBoundingClientRect();
         return [...document.querySelectorAll(".wave-detail-ruler [data-ruler-tick]")]
           .filter(element=>element.textContent.trim())
           .every(element=>{
             const bounds=element.getBoundingClientRect();
-            return Math.abs((bounds.top+bounds.bottom)/2-(ruler.top+ruler.height/2))<=3;
+            return Math.abs(bounds.top-ruler.top)<=2;
           });
       })(),
       markerBelowRuler:(()=>{
@@ -129,15 +156,19 @@ async function layoutEvidence(page,tag){
     "expected waveform > transport > speed/pitch hierarchy "+tag);
   assert.equal(value.railRangeVisible,true,"speed rail width is directly available");
   assert.equal(value.rulerAtTop,true,"waveform ruler labels stay inside its top edge");
-  assert.ok(value.rulerBandHeight>=44&&value.rulerBandHeight<=52,
-    "top ruler has a deliberate, compact band height: "+value.rulerBandHeight);
-  assert.equal(value.rulerLabelsCentered,true,"ruler labels are vertically centered in their band");
-  assert.equal(value.markerBelowRuler,true,"A/B markers begin below the top ruler band");
+  assert.equal(value.playheadStartsBelowRuler,true,
+    "center playhead starts below the compact time labels");
+  assert.ok(value.rulerBandHeight>=12&&value.rulerBandHeight<=18,
+    "top ruler stays compact against the waveform edge: "+value.rulerBandHeight);
+  assert.equal(value.rulerLabelsAtTop,true,"ruler labels sit at the waveform top edge");
+  assert.equal(value.markerBelowRuler,true,"A/B markers begin just below the compact ruler");
   assert.equal(value.clockAtBottom,true,"elapsed and total time sit inside the waveform bottom edge");
   assert.equal(value.sliderAlignment,true,"speed and pitch sliders share the same left and right edges");
   assert.equal(value.tuningValueAlignment.aligned,true,
     "speed and pitch values and units share fixed columns at desktop and mobile widths: "+
       JSON.stringify(value.tuningValueAlignment));
+  assert.equal(value.abControlsAfterTuning,true,
+    "Mark/A/B/Loop follow the speed and pitch controls");
   assert.equal(value.abControlsVisible,true,"AudioStretch-style Mark/A/B/Loop controls are visible");
   assert.equal(value.pickerLabel,"音源を変更","loaded player offers a source replacement action");
   assert.equal(value.durationRepeated,false,"duration is not repeated below the waveform ruler");
@@ -149,21 +180,26 @@ async function layoutEvidence(page,tag){
   assert.equal(value.extraCopyAbsent,true,"developer-only and redundant copy is removed");
   assert.equal(value.precisionOpen,false, "sample-precision fields are secondary by default");
   assert.equal(value.legacyVisible,false);
+  return value;
 }
-test("R4 usability visual captures: desktop and mobile player and folded research",async()=>{
+test("R4 usability visual captures: desktop and mobile player and folded research",{
+  timeout:120000
+},async()=>{
   mkdirSync(captureDir,{recursive:true});
-  const port=18787;
+  const port=Number(process.env.AUDIO_LAB_VISUAL_PORT||18787);
+  const browserProfile=mkdtempSync(path.join(tmpdir(),"audio-lab-puppeteer-"));
   const python=process.env.PYTHON_EXECUTABLE||
     (process.platform==="win32"?"python":"python3");
   const server=spawn(python,["-m","http.server",String(port),"--bind","127.0.0.1"],{
-    cwd:path.resolve("_site"),stdio:"ignore",windowsHide:true
+    cwd:siteRoot,stdio:"ignore",windowsHide:true
   });
   let browser;
   try{
     browser=await puppeteer.launch({
-      executablePath:process.env.CHROME_BIN||"/usr/bin/google-chrome",
+      executablePath:process.env.CHROME_BIN||"/usr/bin/google-chrome",userDataDir:browserProfile,
       headless:true,args:["--no-sandbox","--disable-dev-shm-usage","--autoplay-policy=no-user-gesture-required", "--mute-audio"]
     });
+    console.log("VISUAL_TEST_PROCESS_IDS "+JSON.stringify({browser:browser.process()?.pid,server:server.pid}));
     const page=await browser.newPage(),errors=[];
     page.on("pageerror",e=>errors.push(e.message));
     await page.setViewport({width:1280,height:900,deviceScaleFactor:1});
@@ -306,7 +342,22 @@ test("R4 usability visual captures: desktop and mobile player and folded researc
     await mobile.goto(localUrl,{waitUntil:"domcontentloaded",timeout:20000});
     await mobile.waitForFunction(()=>document.documentElement.dataset.fwBoot==="ready",{timeout:20000});
     await waitForFile(mobile);
-    await layoutEvidence(mobile,"mobile-loaded");
+    const mobileLayout=await layoutEvidence(mobile,"mobile-touch-loaded");
+    assert.equal(mobileLayout.viewportFitCover,true,
+      "mobile viewport leaves safe-area handling available to the PWA shell");
+    assert.ok(mobileLayout.footer.bottom>=mobileLayout.viewportHeight-40,
+      "mobile footer reaches the bottom of the usable viewport: "+
+        JSON.stringify({footer:mobileLayout.footer,height:mobileLayout.viewportHeight}));
+    assert.ok(mobileLayout.footer.bottom<=mobileLayout.viewportHeight-8,
+      "mobile footer remains visible above the bottom safe-area padding: "+
+        JSON.stringify({footer:mobileLayout.footer,height:mobileLayout.viewportHeight}));
+    assert.ok(mobileLayout.waveform.height>=260,
+      "recovered vertical space is used by the main waveform: "+
+        JSON.stringify(mobileLayout.waveform));
+    assert.ok(Math.abs(mobileLayout.abToolbarSpan.left-mobileLayout.abToolbarSpan.toolbarLeft)<=2&&
+      Math.abs(mobileLayout.abToolbarSpan.right-mobileLayout.abToolbarSpan.toolbarRight)<=2,
+      "four A/B actions use the mobile toolbar width instead of clustering at left: "+
+        JSON.stringify(mobileLayout.abToolbarSpan));
     const firstViewportPitch=await mobile.evaluate(()=>{
       const pitch=document.querySelector("#granular-pitch-value").getBoundingClientRect();
       return {pitchBottom:pitch.bottom,viewportHeight:innerHeight};
@@ -315,6 +366,51 @@ test("R4 usability visual captures: desktop and mobile player and folded researc
     assert.ok(firstViewportPitch.pitchBottom<=firstViewportPitch.viewportHeight,
       "pitch editing must be reachable before first vertical scroll at 390x844");
     await mobile.screenshot({path:path.join(captureDir,"03-player-mobile.png"),fullPage:true});
+    await mobile.evaluate(()=>{
+      const status=document.querySelector("#status");
+      window.__mobileStatusBefore={text:status.textContent,kind:status.dataset.kind};
+      status.dataset.kind="error";
+      status.textContent="検証用：モバイル診断表示";
+    });
+    await mobile.waitForFunction(()=>!document.querySelector("#audio-diagnostics-toggle")?.hidden,
+      {timeout:3500});
+    await mobile.click("#audio-diagnostics-toggle");
+    const mobileDiagnostics=await mobile.evaluate(()=>{
+      const box=selector=>{
+        const r=document.querySelector(selector).getBoundingClientRect();
+        return {top:r.top,bottom:r.bottom};
+      };
+      const studio=document.querySelector(".studio");
+      return {wave:box(".wave-detail-wrap"),actions:box("#main-player-panel .actions"),
+        status:box(".audio-status-row"),tuning:box("#granular-optin-controls"),
+        ab:box("#player-loop-controls"),footer:box("footer"),
+        diagnosticsVisible:document.querySelector("#runtime-hud").getClientRects().length>0,
+        scrollHeight:studio.scrollHeight,clientHeight:studio.clientHeight};
+    });
+    console.log("MOBILE_DIAGNOSTICS_LAYOUT "+JSON.stringify(mobileDiagnostics));
+    assert.equal(mobileDiagnostics.diagnosticsVisible,true,
+      "an actionable mobile error can open DSP details");
+    assert.ok(mobileDiagnostics.wave.bottom<=mobileDiagnostics.actions.top&&
+      mobileDiagnostics.actions.bottom<=mobileDiagnostics.status.top&&
+      mobileDiagnostics.status.bottom<=mobileDiagnostics.tuning.top&&
+      mobileDiagnostics.ab.bottom<=mobileDiagnostics.footer.top,
+      "expanded mobile diagnostics do not overlap the waveform, controls or footer: "+
+        JSON.stringify(mobileDiagnostics));
+    assert.ok(mobileDiagnostics.scrollHeight>mobileDiagnostics.clientHeight,
+      "expanded mobile diagnostics scroll with the PWA shell instead of overlapping controls");
+    await mobile.click("#audio-diagnostics-toggle");
+    await mobile.evaluate(()=>{
+      const status=document.querySelector("#status");
+      status.dataset.kind=window.__mobileStatusBefore.kind;
+      status.textContent=window.__mobileStatusBefore.text;
+    });
+    await mobile.waitForFunction(()=>document.querySelector("#audio-diagnostics-toggle")?.hidden,
+      {timeout:3500});
+    await mobile.setViewport({width:390,height:980,deviceScaleFactor:2,isMobile:true,hasTouch:true});
+    const tallMobileLayout=await layoutEvidence(mobile,"mobile-tall-touch-loaded");
+    assert.ok(tallMobileLayout.waveform.height>=mobileLayout.waveform.height+60,
+      "a taller phone viewport gives its extra height to the main waveform: "+
+        JSON.stringify({normal:mobileLayout.waveform,tall:tallMobileLayout.waveform}));
     await mobile.click("#main-tab-model");
     assert.equal(await mobile.$eval("#runtime-hud",e=>e.getClientRects().length),0);
     assert.equal(await mobile.$eval("#model-transport-host #audio-state-summary",e=>e.getClientRects().length>0),true);
@@ -325,6 +421,10 @@ test("R4 usability visual captures: desktop and mobile player and folded researc
     await mobile.screenshot({path:path.join(captureDir,"04-model-mobile.png")});
     assert.deepEqual(errors,[],"no console page exceptions");
   }finally{
-    await cleanupTestProcesses(browser,[server],"visual audit HTTP server");
+    try{
+      await cleanupTestProcesses(browser,[server],"visual audit HTTP server");
+    }finally{
+      rmSync(browserProfile,{recursive:true,force:true});
+    }
   }
 });
