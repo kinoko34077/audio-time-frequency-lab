@@ -244,3 +244,52 @@ test("a moving detail viewport redirects the next waveform read to the current p
     else delete globalThis.devicePixelRatio;
   }
 });
+
+test("source-edge viewports keep one peak resolution and leave out-of-source time blank",async()=>{
+  const sampleRate=48_000,sourceFrames=sampleRate*20,reads=[];
+  let activeReads=0;
+  const source={sourceFrames,maxReadFrames:32_768,overviewPeaks:[],
+    async read(startFrame,frameCount){
+      activeReads++;
+      try{
+        reads.push({startFrame,frameCount});
+        return {startFrame,channels:[new Float32Array(frameCount).fill(.25)]};
+      }finally{activeReads--;}
+    }};
+  Object.defineProperty(source,"activeReads",{get:()=>activeReads});
+  const original=Object.getOwnPropertyDescriptor(globalThis,"devicePixelRatio");
+  Object.defineProperty(globalThis,"devicePixelRatio",{configurable:true,value:1});
+  let editor,created;
+  try{
+    created=makeEditor(source,.5);
+    editor=created.editor;
+    await waitForReadQuiet(source,reads);
+    const firstReads=reads.slice();
+    created.setPosition(6.5);
+    editor.refresh(true);
+    await waitForReadQuiet(source,reads);
+    const repeatedSourceFrames=reads.slice(firstReads.length).reduce((total,next)=>
+      total+firstReads.reduce((overlap,prior)=>overlap+
+        Math.max(0,Math.min(next.startFrame+next.frameCount,
+          prior.startFrame+prior.frameCount)-Math.max(next.startFrame,prior.startFrame)),0),0);
+    assert.equal(repeatedSourceFrames,0,
+      "moving the viewport through the source-start edge must reuse absolute peak buckets; "+
+        "re-read PCM frames: "+repeatedSourceFrames);
+
+    created.setPosition(.5);
+    editor.refresh(true);
+    await waitForReadQuiet(source,reads);
+    const outsideStartX=(created.editor.spanFrames/2-.5*sampleRate)/
+      created.editor.spanFrames*320;
+    const renderedOutside=created.waveSegments.filter(segment=>
+      segment.x<Math.floor(outsideStartX));
+    assert.equal(renderedOutside.length,0,
+      "pixels before source frame zero must stay blank: "+
+        JSON.stringify(renderedOutside.slice(0,3)));
+  }finally{
+    editor?.setSource(null,sampleRate);
+    await waitForReadQuiet(source,reads);
+    if(original)Object.defineProperty(globalThis,"devicePixelRatio",original);
+    else delete globalThis.devicePixelRatio;
+  }
+});

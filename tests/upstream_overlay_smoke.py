@@ -33,7 +33,8 @@ try:
       page.on("requestfailed",lambda request:failed_requests.append({
         "url":request.url,"failure":request.failure
       }))
-      page.goto(URL,wait_until="domcontentloaded")
+      legacy_url=URL+("&" if "?" in URL else "?")+"legacyUi=1"
+      page.goto(legacy_url,wait_until="domcontentloaded")
       page.locator("html[data-fw-boot=ready]").wait_for(timeout=18000)
       assert page.locator("#audio-file").count()==1
       # Crucial: a real interactive native input click, not set_input_files bypass.

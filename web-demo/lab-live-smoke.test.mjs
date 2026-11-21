@@ -105,7 +105,7 @@ test('full Chrome: inherited Rust AudioWorklet live independent speed/pitch UI',
     }
    };
   });
-  await page.goto(`http://127.0.0.1:${port}/`,{waitUntil:'domcontentloaded'});
+  await page.goto(`http://127.0.0.1:${port}/?legacyUi=1`,{waitUntil:'domcontentloaded'});
   await page.waitForSelector('html[data-fw-boot="ready"]');
   // The research/model controls now live on their explicit top-level tab.
   await page.click('#main-tab-model');

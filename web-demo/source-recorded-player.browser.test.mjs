@@ -143,7 +143,7 @@ test("recorded CC0 upright piano goes through the real granular file picker and 
     page.on("requestfailed",request=>failedRequests.push({
       url:request.url(),error:request.failure()?.errorText
     }));
-    await page.goto("http://127.0.0.1:"+port+"/?pcmTransport=granular",{
+    await page.goto("http://127.0.0.1:"+port+"/?pcmTransport=granular&legacyUi=1",{
       waitUntil:"domcontentloaded",timeout:20000
     });
     try{

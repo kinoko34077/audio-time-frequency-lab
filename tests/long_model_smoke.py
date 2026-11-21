@@ -64,7 +64,8 @@ try:
         })()""")
         failures=[]
         page.on('pageerror',lambda err: failures.append(str(err)))
-        page.goto(url,wait_until='domcontentloaded')
+        legacy_url=url+('&' if '?' in url else '?')+'legacyUi=1'
+        page.goto(legacy_url,wait_until='domcontentloaded')
         page.locator('html[data-fw-boot=ready]').wait_for(timeout=15000)
         page.locator('#audio-file').set_input_files(path)
         page.wait_for_function("""() => document.querySelector('#audio-state-summary')

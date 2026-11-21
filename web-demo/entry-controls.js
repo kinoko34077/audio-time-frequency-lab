@@ -9,6 +9,15 @@
   const $=id=>document.querySelector(id);
   const dialog=$("#settings-dialog");
   const opener=$("#settings-open");
+  if(document.body.dataset.legacyTools!=="1"){
+    $("#model-settings-host").appendChild($("#audio-lab"));
+    for(const id of ["stop","play-dry","play-wet"]){
+      const control=$("#"+id);
+      control.hidden=true;
+      control.setAttribute("aria-hidden","true");
+      control.tabIndex=-1;
+    }
+  }
   const show=()=>{
     if(dialog.open)return;
     try{if(typeof dialog.showModal!=="function")throw Error("no dialog API");dialog.showModal();}

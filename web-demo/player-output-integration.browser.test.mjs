@@ -56,7 +56,7 @@ test("recorded piano main player: gesture/parameter receipts AND actual output P
         return nativeConnect.call(this,destination,...rest);
       };
     },installTestAudioSilenceGuard.toString());
-    await page.goto("http://127.0.0.1:"+port+"/",{
+    await page.goto("http://127.0.0.1:"+port+"/?legacyUi=1",{
       waitUntil:"domcontentloaded",timeout:20000
     });
     await page.waitForFunction(()=>document.documentElement.dataset.fwBoot==="ready",{timeout:20000});
@@ -428,7 +428,7 @@ test(`native Chrome actual ${profile.model} output follows 0×, reverse and sign
         return post.call(this,message,...args);
       };
     },installTestAudioSilenceGuard.toString());
-    await page.goto(`http://127.0.0.1:${port}/`,{
+      await page.goto(`http://127.0.0.1:${port}/?legacyUi=1`,{
       waitUntil:"domcontentloaded",timeout:20000
     });
     try{

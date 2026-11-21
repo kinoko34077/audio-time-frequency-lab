@@ -137,8 +137,12 @@ export function createPlayerWaveEditor({
     const maxRead=Number.isSafeInteger(reader.maxReadFrames)?
       reader.maxReadFrames:DETAIL_READ_FRAMES;
     const readFrames=Math.max(1,Math.min(DETAIL_READ_FRAMES,maxRead));
+    // Peak resolution follows the complete viewport, not the portion that
+    // currently intersects the source. If it followed (to-from), the first
+    // and last seconds would change bin size as the head approached an edge;
+    // each change cleared every cached bucket and visibly blinked the wave.
     const blockFrames=Math.max(1,Math.min(readFrames,
-      Math.ceil((to-from)/maxSummaryBins)));
+      Math.ceil(spanFrames/maxSummaryBins)));
     const summaryStart=Math.floor(from/blockFrames)*blockFrames;
     const summaryEnd=Math.min(frames,
       Math.ceil(to/blockFrames)*blockFrames);
@@ -310,7 +314,8 @@ export function createPlayerWaveEditor({
       context.clearRect(0,0,width,height);
       context.fillStyle="#0a1e27";context.fillRect(0,0,width,height);
       const start=c-spanFrames/2;
-      requestDetail(Math.max(0,start),Math.min(frames,start+spanFrames));
+      const visibleStart=Math.max(0,start),visibleEnd=Math.min(frames,start+spanFrames);
+      if(visibleEnd>visibleStart)requestDetail(visibleStart,visibleEnd);
       const {a,b,enabled}=onAB();
       const xa=clamp(boundsToX(a,c,width),0,width);
       const xb=clamp(boundsToX(b,c,width),0,width);
@@ -324,9 +329,13 @@ export function createPlayerWaveEditor({
       context.strokeStyle="#75d9c5";context.lineWidth=Math.max(1,ratio);
       context.beginPath();
       for(let x=0;x<width;x++){
-        const from=Math.max(0,Math.floor(start+x*samplesPerPixel));
-        const to=Math.min(frames,Math.max(from+1,Math.ceil(start+(x+1)*samplesPerPixel)));
-        if(to<=0||from>=frames)continue;
+        const pixelStart=start+x*samplesPerPixel;
+        const pixelEnd=start+(x+1)*samplesPerPixel;
+        // A viewport may extend beyond either source edge. Leave those pixels
+        // empty instead of repeating the first/last PCM bucket into silence.
+        if(pixelEnd<=0||pixelStart>=frames)continue;
+        const from=clamp(Math.floor(pixelStart),0,frames-1);
+        const to=clamp(Math.ceil(pixelEnd),from+1,frames);
         const [lo,hi]=sampledPeak(from,to,level);
         const amp=Math.max(1,Math.abs(hi-lo)*height*.38);
         const y1=height/2-hi*height*.40,y2=height/2-lo*height*.40;

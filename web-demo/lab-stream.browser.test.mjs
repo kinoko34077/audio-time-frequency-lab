@@ -227,7 +227,7 @@ test("individual-period Worker plays through one shared PCM Worklet in Chrome",a
         return nativeBufferSource.apply(this,args);
       };
     },installTestAudioSilenceGuard.toString());
-    await page.goto(`http://127.0.0.1:${port}/index.html`,{
+    await page.goto(`http://127.0.0.1:${port}/index.html?legacyUi=1`,{
       waitUntil:"domcontentloaded",timeout:20000
     });
     try{

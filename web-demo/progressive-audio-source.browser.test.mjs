@@ -36,7 +36,7 @@ test('native browser decodes exact requested WAV PCM, loads the app without eage
     });
     const errors=[];
     page.on('pageerror',error=>errors.push(error.message));
-    await page.goto(`http://127.0.0.1:${port}/?pcmTransport=1`,{
+    await page.goto(`http://127.0.0.1:${port}/?pcmTransport=1&legacyUi=1`,{
       waitUntil:'domcontentloaded',timeout:20000
     });
     await page.waitForFunction(()=>document.documentElement.dataset.fwBoot==='ready',

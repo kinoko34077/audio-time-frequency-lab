@@ -19,7 +19,7 @@ test("R3 opt-in real page applies precise signed speed/pitch without replacing t
     });
     const page=await browser.newPage(),errors=[];
     page.on("pageerror",e=>errors.push(e.message));
-    await page.goto(`http://127.0.0.1:${port}/?pcmTransport=granular`,{
+    await page.goto(`http://127.0.0.1:${port}/?pcmTransport=granular&legacyUi=1`,{
       waitUntil:"domcontentloaded",timeout:20000
     });
     await page.waitForFunction(()=>document.documentElement.dataset.fwBoot==="ready",

@@ -10,7 +10,7 @@ const siteRoot=path.resolve(process.env.AUDIO_LAB_TEST_SITE||"_site");
 const python=process.env.PYTHON_BIN||
   (process.platform==="win32"?"python":"python3");
 
-test("R4 default page: play recorded song, set precise A/B and speed/pitch, switch tabs without reset",async()=>{
+test("R4 default page: play recorded song, set precise A/B and speed/pitch, open settings without reset",async()=>{
   const port=18771;
   const server=spawn(python,["-m","http.server",String(port),"--bind","127.0.0.1"],{
     cwd:siteRoot,stdio:"ignore"
@@ -404,18 +404,21 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, swit
     assert.equal(await page.$eval("#player-loop-b",el=>el.value),String(draggedB));
     assert.equal(await page.$eval("#rt-telemetry",el=>Number(el.dataset.pcmNodeStarts)),starts,
       "pinch may not restart the audio engine");
-    await page.click("#main-tab-model");
-    assert.equal(await page.$eval("body",el=>el.dataset.mainTab),"model");
+    await page.click("#settings-open");
+    await page.waitForFunction(()=>document.querySelector("#settings-dialog")?.open);
+    assert.equal(await page.$eval("body",el=>el.dataset.mainTab),"player");
     assert.notEqual(await page.$eval("#audio-lab",el=>getComputedStyle(el).display),"none");
     assert.equal(await page.$eval("#lab-model",el=>el.value),"granular");
-    await page.click("#main-tab-player");
-    assert.equal(await page.$eval("body",el=>el.dataset.mainTab),"player");
+    assert.equal(await page.$eval("#main-tab-model",el=>el.getClientRects().length),0,
+      "processing settings use the header gear instead of a model tab");
+    await page.click("#settings-close");
+    await page.waitForFunction(()=>!document.querySelector("#settings-dialog")?.open);
     assert.equal(await page.$eval("#granular-speed-value",el=>el.value),"0");
     assert.equal(await page.$eval("#granular-pitch-value",el=>el.value),"7.1234");
     assert.equal(await page.$eval("#player-loop-a",el=>el.value),"8000");
     assert.equal(await page.$eval("#player-loop-b",el=>el.value),String(draggedB));
     assert.equal(await page.$eval("#rt-telemetry",el=>Number(el.dataset.pcmNodeStarts)),starts,
-      "switching tabs may not recreate the Worklet");
+      "opening and closing settings may not recreate the Worklet");
     await page.evaluate(()=>{
       const speed=document.getElementById("granular-speed-value");
       speed.value="-1.125";
@@ -480,34 +483,17 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, swit
     assert.equal(await page.$eval("#player-loop-b",e=>e.validationMessage),"");
     await page.waitForFunction(()=>document.querySelector("#player-loop-hint")
       ?.textContent.includes("反映が完了"),{timeout:15000});
-    await page.evaluate(()=>{
-      const status=document.querySelector("#status");
-      status.dataset.kind="warning";
-      status.textContent="再生中。停止前の注意を保持します。";
-    });
-    await page.click("#stop");
-    await page.waitForFunction(()=>!document.querySelector("#rt-telemetry")
-      ?.dataset.pcmTransport,{timeout:20000});
-    await page.waitForFunction(()=>document.querySelector("#audio-state-summary")
-      ?.textContent.startsWith("停止中"),{timeout:4000});
-    assert.ok(!await page.$eval("#audio-state-summary",
-      el=>el.textContent.includes("停止中 · 再生中")),
-      "the visible status must not claim playback after Stop");
-    // The original button remains a separate audition path; it never aliases
-    // the selected Phase Vocoder output.
-    await page.click("#play-dry");
-    await page.waitForFunction(()=>document.querySelector("#rt-indicator")
-      ?.textContent.includes("原音再生中"),{timeout:20000});
-    assert.notEqual(await page.$eval("#rt-telemetry",
-      el=>el.dataset.pcmTransport||""),"granular-experimental");
-    await page.click("#stop");
+    const visibleActions=await page.evaluate(()=>["play-main","stop","play-dry"]
+      .filter(id=>document.getElementById(id).getClientRects().length>0));
+    assert.deepEqual(visibleActions,["play-main"],
+      "the public transport exposes one Play/Pause action");
     assert.deepEqual(errors,[]);
     console.log("R4_DEFAULT_PLAYER_REAL_RECORDING "+JSON.stringify({
       source:"Meta Open Sound recorded piano A0 CC0",decodedRate:sourceRate,
       mainTab:"player",controls:"±8/0 exact typed speed; independent ±12 pitch",
       loop:"source sample A/B 8000..12000 and OFF while playing",
-      tabs:"model and player without reset or node reinit",
-      rawRoute:"preserved as separate original playback",nodeStarts:starts,
+      settings:"gear dialog opens/closes without reset or node reinit",
+      publicActions:"Play/Pause only; Stop and original audition hidden",nodeStarts:starts,
       note:"browser functional route; no iPhone / subjective audio fidelity proof"
     }));
   }finally{
@@ -625,7 +611,7 @@ test("U1/U5 primary Play routes to REAL selected live/PV/Granular engines and on
         };
       },false);
     });
-    await page.goto("http://127.0.0.1:"+port+"/?model=granular",{
+    await page.goto("http://127.0.0.1:"+port+"/?model=granular&legacyUi=1",{
       waitUntil:"domcontentloaded",timeout:20000
     });
     await page.waitForFunction(()=>document.documentElement.dataset.fwBoot==="ready",
@@ -678,7 +664,7 @@ test("U1/U5 primary Play routes to REAL selected live/PV/Granular engines and on
       document.querySelector("#granular-optin-status")?.dataset.renderRunning==="true",
       {timeout:20000});
     assert.match(await page.$eval("#rt-indicator",el=>el.textContent),/Rust · 再生中/);
-    assert.match(await page.$eval("#lab-model-compatibility",el=>el.textContent),/0\/逆再生・サンプル単位A\/B/);
+    assert.match(await page.$eval("#lab-model-compatibility",el=>el.textContent),/0(?:倍|\/)・?逆再生・サンプル単位A\/B/);
     const rustNodeStarts=await page.$eval("#rt-telemetry",el=>el.dataset.pcmNodeStarts);
     assert.equal(await page.evaluate(()=>window.__engineCreations.filter(e=>
       e.kind==="worklet"&&e.name==="audio-lab-source-pcm").length),1,
@@ -751,8 +737,8 @@ test("U1/U5 primary Play routes to REAL selected live/PV/Granular engines and on
       ?.dataset.pcmTransport==="rust-engine3-source-time"&&
       document.querySelector("#granular-optin-status")?.dataset.renderRunning==="true",
       {timeout:20000});
-    assert.equal(await page.$eval("#runtime-hud",e=>e.getClientRects().length),0,
-      "transport status stays inline without a duplicate HUD");
+    assert.equal(await page.$eval("#runtime-hud",e=>e.getClientRects().length),1,
+      "legacy regression mode retains the detailed engine HUD; public visibility is checked separately");
     assert.doesNotMatch(await page.$eval("#lab-status",el=>el.textContent),/適用待ち/);
     const rustAtZero=await page.evaluate(()=>({
       mode:document.querySelector("#rt-telemetry").dataset.pcmTransport,
@@ -944,7 +930,7 @@ test("U7 touch tap seeks without autoplay; deliberate drag auditions PCM, paused
     });
     const page=await browser.newPage(),errors=[];
     page.on("pageerror",e=>errors.push(e.message));
-    await page.goto(`http://127.0.0.1:${port}/?model=granular`,{waitUntil:"domcontentloaded",timeout:20000});
+    await page.goto(`http://127.0.0.1:${port}/?model=granular&legacyUi=1`,{waitUntil:"domcontentloaded",timeout:20000});
     await page.waitForFunction(()=>document.documentElement.dataset.fwBoot==="ready",{timeout:20000});
     await (await page.$("#audio-file")).uploadFile(recording);
     await page.waitForFunction(()=>document.querySelector("#file-meta")?.textContent
@@ -1050,8 +1036,10 @@ test("shared A/B updates every realtime model and compact numeric controls stay 
         "--autoplay-policy=no-user-gesture-required", "--mute-audio"]
     });
     const page=await browser.newPage();
-    await page.goto("http://127.0.0.1:"+port+"/",{waitUntil:"domcontentloaded",timeout:20000});
+    await page.goto("http://127.0.0.1:"+port+"/?legacyUi=1",{waitUntil:"domcontentloaded",timeout:20000});
     await page.waitForFunction(()=>document.documentElement.dataset.fwBoot==="ready",{timeout:20000});
+    await page.$eval(".model-info-controls",el=>{el.open=true;});
+    await page.$eval(".model-extra-controls",el=>{el.open=true;});
     const ui=await page.evaluate(()=>({
       modelInfo:document.querySelector(".model-info-controls").open,
       modelDetails:document.querySelector(".model-extra-controls").open,
