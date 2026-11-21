@@ -99,13 +99,13 @@ try:
       assert not page.locator(".workspace-right").is_visible()
       assert page.locator("#settings-open").is_visible()
       assert page.locator("#lab-render").count()==0
-      # The compatibility-only details shell stays collapsed by default while
-      # the Audio Time model controls remain available in this test route.
+      # The model tab is dedicated to model selection. Neither a second
+      # waveform/player nor inherited Frequency Warp UI may appear there.
       page.locator("#main-tab-model").click()
       assert page.locator("#audio-lab").is_visible()
       assert not page.locator("#main-player-panel").is_visible()
       assert not page.locator(".quick-panel").is_visible()
-      assert page.locator(".model-legacy-fold").is_visible()
+      assert not page.locator(".model-legacy-fold").is_visible()
       assert page.locator("#settings-open").is_visible()
       assert page.locator("#model-transport-host #play-main").is_visible()
       assert page.locator("#granular-speed-value").input_value()=="1.5"
@@ -130,7 +130,7 @@ try:
       page.locator("#play-main").click()
       page.wait_for_function("""() => document.querySelector('#rt-indicator')
         ?.textContent.includes('モデル再生中')""",timeout=25000)
-      assert page.locator("#audio-state-summary").is_visible()
+      assert page.locator("#rt-indicator").is_visible()
       assert page.locator("#lab-short-value").input_value()=="2048"
       assert page.locator("#lab-long-value").input_value()=="1024"
       # Model information remains expanded, without a redundant toggle click.
@@ -149,7 +149,7 @@ try:
       page.locator("#play-dry").click()
       page.wait_for_function("""() => document.querySelector('#rt-indicator')
         ?.textContent.includes('原音再生中')""",timeout=15000)
-      assert "原音再生中" in page.locator("#audio-state-summary").inner_text()
+      assert "原音再生中" in page.locator("#rt-indicator").inner_text()
       page.locator("#stop").click()
       assert not failures,failures
       print("PASS native chooser, dedicated Audio Time model/player UI, WSOLA preview + windows, original transport; mobile emulation:",mobile)
