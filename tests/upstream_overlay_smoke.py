@@ -99,12 +99,12 @@ try:
       assert not page.locator(".workspace-right").is_visible()
       assert page.locator("#settings-open").is_visible()
       assert page.locator("#lab-render").count()==0
-      # The model tab is dedicated to model selection. Neither a second
-      # waveform/player nor inherited Frequency Warp UI may appear there.
+      # The compatibility-only details shell stays collapsed by default while
+      # the Audio Time model controls remain available in this test route.
       page.locator("#main-tab-model").click()
       assert page.locator("#audio-lab").is_visible()
       assert not page.locator("#main-player-panel").is_visible()
-      assert page.locator(".quick-panel").is_visible()
+      assert not page.locator(".quick-panel").is_visible()
       assert page.locator(".model-legacy-fold").is_visible()
       assert page.locator("#settings-open").is_visible()
       assert page.locator("#model-transport-host #play-main").is_visible()
