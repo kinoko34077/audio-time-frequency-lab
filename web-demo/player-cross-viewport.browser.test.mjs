@@ -145,10 +145,14 @@ test("real recorded waveform UX across mobile, Android-size, tablet and desktop 
             waveOverview:box(".wave-editor .wave-wrap"),head:box(".wave-center-head"),
             zoom:box(".wave-zoom-actions"),sourcePicker:box(".source-picker"),
             sourceButton:box(".source-picker-button"),
+            sourcePickerBorderWidth:parseFloat(getComputedStyle(
+              document.querySelector("#drop")).borderTopWidth),
             settings:box("#settings-open"),speedSlider:box("#granular-speed"),
             pitchSlider:box("#granular-pitch"),
             sliderEndsAligned:Math.abs(box("#granular-speed").right-
               box("#granular-pitch").right)<=1,
+            sliderStartsAligned:Math.abs(box("#granular-speed").left-
+              box("#granular-pitch").left)<=1,
             plusMark:(()=>{
               const icon=document.querySelector(".source-picker-button>svg");
               const stroke=icon?.querySelector("path");
@@ -162,6 +166,8 @@ test("real recorded waveform UX across mobile, Android-size, tablet and desktop 
             pitch:box("#granular-pitch-value"),
             tune:box("#granular-optin-controls"),
             loop:box("#player-loop-controls"),
+            loopOrder:[...document.querySelectorAll(".player-loop-toolbar>*")]
+              .map(element=>element.id),
             footer:box(".below-workspace footer"),
             studio:{scrollHeight:studio.scrollHeight,clientHeight:studio.clientHeight},
             stopVisible:document.querySelector("#stop").getClientRects().length>0,
@@ -183,13 +189,21 @@ test("real recorded waveform UX across mobile, Android-size, tablet and desktop 
             JSON.stringify({wave:geometry.wave,zoom:geometry.zoom}));
         assert.ok(geometry.sourcePicker.left<geometry.settings.left,
           "the plus file picker belongs at the left of the settings gear");
+        assert.ok(geometry.sourcePickerBorderWidth<=0.5,
+          "the compact source control has no oversized enclosing frame: "+
+            geometry.sourcePickerBorderWidth);
         assert.equal(geometry.plusMark,true,"file selection has a visible plus affordance");
         assert.equal(geometry.sourceButton.width,profile.width<600?40:42,
           "the plus affordance stays compact at the header edge");
         assert.equal(geometry.stopVisible,false,"the separate Stop button is removed");
         assert.equal(geometry.dryVisible,false,"the original-audio button is removed");
+        assert.deepEqual(geometry.loopOrder,["player-marker-toggle","player-loop-a-now",
+          "player-loop-toggle","player-loop-b-now"],
+          "A/B controls follow the reference order below speed and pitch");
         assert.equal(geometry.sliderEndsAligned,true,
           "speed and pitch rails share one right edge regardless of their units");
+        assert.equal(geometry.sliderStartsAligned,true,
+          "speed and pitch rails share one left edge below their labels");
         assert.ok(geometry.wave.bottom<=geometry.play.top,
           "waveform must not cover playback controls on "+profile.name+": "+
             JSON.stringify({wave:geometry.wave,play:geometry.play}));
@@ -208,6 +222,8 @@ test("real recorded waveform UX across mobile, Android-size, tablet and desktop 
             "compact phone must reveal the main Play button without scrolling: "+
             JSON.stringify(geometry.play));
         if(profile.name==="iphone-pwa-393x853"){
+          assert.equal(geometry.width,393,"PWA viewport width matches the supplied phone ratio");
+          assert.equal(geometry.height,853,"PWA viewport height matches the supplied phone ratio");
           assert.ok(geometry.loop.top>=geometry.tune.bottom,
             "A/B actions must remain below speed and pitch controls: "+
               JSON.stringify({loop:geometry.loop,tune:geometry.tune}));

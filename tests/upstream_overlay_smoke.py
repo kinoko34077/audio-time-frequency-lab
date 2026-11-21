@@ -7,6 +7,7 @@ from playwright.sync_api import sync_playwright
 
 URL=os.environ.get("LAB_TEST_ORIGIN","http://127.0.0.1:8123/")
 fd,path=tempfile.mkstemp(suffix=".wav"); os.close(fd)
+expected_name=os.path.basename(path)
 try:
   with wave.open(path,"wb") as w:
     w.setnchannels(1);w.setsampwidth(2);w.setframerate(16000)
@@ -45,10 +46,10 @@ try:
       # engine telemetry stays mounted but is no longer permanently visible.
       try:
         page.wait_for_function("""() => {
-          const name=document.querySelector('#audio-file')?.files?.[0]?.name;
+          const name=__EXPECTED_FILE_NAME__;
           return Boolean(name&&document.querySelector('#file-meta')?.textContent.includes(name)&&
             !document.querySelector('#play-main')?.disabled);
-        }""",timeout=20000)
+        }""".replace("__EXPECTED_FILE_NAME__",json.dumps(expected_name)),timeout=20000)
       except Exception as error:
         try:
           state=page.evaluate("""() => {

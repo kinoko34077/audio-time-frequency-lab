@@ -927,15 +927,15 @@ body.model-lab[data-main-tab="player"] #main-player-panel>.transport #wave-hint{
   font-size:10px
 }
 body.model-lab[data-main-tab="player"] #drop{
-  min-height:49px;padding:8px 12px;gap:4px 10px;
-  background:transparent;border-style:solid;border-color:#335960;
+  min-height:42px;padding:0;gap:0 9px;flex-wrap:nowrap;
+  background:transparent;border:0;border-radius:0;
 }
 body.model-lab[data-main-tab="player"] #drop span{font-size:20px}
 body.model-lab[data-main-tab="player"] #drop small{
   flex-basis:auto;padding:0;margin-left:auto;font-size:10px
 }
 body.model-lab[data-main-tab="player"]:has(#play-main:not(:disabled)) #drop{
-  min-height:36px;padding:5px 9px;border-color:#315159
+  min-height:42px;padding:0;border:0;background:transparent
 }
 body.model-lab[data-main-tab="player"]:has(#play-main:not(:disabled)) #drop span,
 body.model-lab[data-main-tab="player"]:has(#play-main:not(:disabled)) #drop small{display:none}
@@ -1440,8 +1440,8 @@ body.model-lab[data-main-tab="player"] #player-loop-controls{
     display:flex;flex:1 1 auto;flex-direction:column;min-height:0
   }
   body.model-lab[data-main-tab="player"] #main-player-panel>.wave-editor .wave-detail-wrap{
-    /* Fill the editor's allocated space with the detailed waveform. The
-       viewport-specific minimum still lets short phones yield space below. */
+    /* Let the detailed waveform absorb reclaimed PWA space; do not leave an
+       empty band before transport when the phone viewport is tall. */
     --mobile-wave-available:max(150px,
       calc(100dvh - 486px - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px)));
     flex:1 1 auto;height:auto!important;
@@ -1541,7 +1541,7 @@ body.model-lab:not([data-legacy-tools="1"]) #main-player-panel #play-main{
   .wave-detail-wrap>.wave-zoom-actions{top:4px;right:4px}
 }
 body.model-lab:not([data-legacy-tools="1"]) .player-tune-control{
-  grid-template-columns:88px minmax(0,1fr) var(--player-tune-value-width,52px);
+  grid-template-columns:80px minmax(0,1fr) var(--player-tune-value-width,52px);
   column-gap:6px
 }
 body.model-lab:not([data-legacy-tools="1"]) .player-tune-control>.inline-number{

@@ -7,6 +7,7 @@ import math,os,struct,tempfile,wave
 from playwright.sync_api import sync_playwright
 url=os.environ.get('LAB_TEST_ORIGIN','http://127.0.0.1:8123/')
 fd,path=tempfile.mkstemp(suffix='.wav');os.close(fd)
+expected_name=os.path.basename(path)
 try:
     rate=48000
     a=bytearray(rate*4)
@@ -69,10 +70,10 @@ try:
         page.locator('html[data-fw-boot=ready]').wait_for(timeout=15000)
         page.locator('#audio-file').set_input_files(path)
         page.wait_for_function("""() => {
-          const name=document.querySelector('#audio-file')?.files?.[0]?.name;
+          const name=__EXPECTED_FILE_NAME__;
           return Boolean(name&&document.querySelector('#file-meta')?.textContent.includes(name)&&
             !document.querySelector('#play-main')?.disabled);
-        }""",timeout=25000)
+        }""".replace('__EXPECTED_FILE_NAME__',json.dumps(expected_name)),timeout=25000)
         # The player owns the only editable speed/pitch controls. Select
         # models in their dedicated tab, without duplicate field proxies.
         assert page.locator("#lab-speed,#lab-pitch").count()==0
