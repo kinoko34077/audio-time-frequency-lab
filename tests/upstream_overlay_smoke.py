@@ -42,8 +42,9 @@ try:
       with page.expect_file_chooser(timeout=8000) as chooser:
         page.locator("#audio-file").click()
       chooser.value.set_files(path)
-      # U6: readiness is visible in the one-line player status. Full
-      # engine telemetry stays mounted but is no longer permanently visible.
+      # The compatibility route keeps its inherited engine telemetry visible.
+      # The public route's compact status and hidden default HUD are verified
+      # separately by player-visual.browser.test.mjs.
       try:
         page.wait_for_function("""() => {
           const name=__EXPECTED_FILE_NAME__;
@@ -96,16 +97,16 @@ try:
       assert page.locator("h1").inner_text()=="Audio Time–Frequency Lab"
       assert not page.locator(".quick-panel").is_visible()
       assert not page.locator(".workspace-right").is_visible()
-      assert not page.locator("#settings-open").is_visible()
+      assert page.locator("#settings-open").is_visible()
       assert page.locator("#lab-render").count()==0
       # The model tab is dedicated to model selection. Neither a second
       # waveform/player nor inherited Frequency Warp UI may appear there.
       page.locator("#main-tab-model").click()
       assert page.locator("#audio-lab").is_visible()
       assert not page.locator("#main-player-panel").is_visible()
-      assert not page.locator(".quick-panel").is_visible()
-      assert not page.locator(".model-legacy-fold").is_visible()
-      assert not page.locator("#settings-open").is_visible()
+      assert page.locator(".quick-panel").is_visible()
+      assert page.locator(".model-legacy-fold").is_visible()
+      assert page.locator("#settings-open").is_visible()
       assert page.locator("#model-transport-host #play-main").is_visible()
       assert page.locator("#granular-speed-value").input_value()=="1.5"
       assert page.locator("#granular-pitch-value").input_value()=="5"
