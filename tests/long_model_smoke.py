@@ -3,7 +3,7 @@ must start near the seek position WITHOUT rendering/copying the entire file.
 Headless Chromium performance is hardware dependent; this checks functional
 first-chunk output and ability to switch settings during playback.
 """
-import math,os,struct,tempfile,wave
+import json,math,os,struct,tempfile,wave
 from playwright.sync_api import sync_playwright
 url=os.environ.get('LAB_TEST_ORIGIN','http://127.0.0.1:8123/')
 fd,path=tempfile.mkstemp(suffix='.wav');os.close(fd)
