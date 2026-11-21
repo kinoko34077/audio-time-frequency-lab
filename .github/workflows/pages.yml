@@ -109,6 +109,10 @@ jobs:
         if: always()
         run: |
           node --test web-demo/player-visual.browser.test.mjs
+      - name: Coalesce waveform paints during progressive PCM loading
+        if: always()
+        run: |
+          node --test web-demo/player-wave-overview-refresh.browser.test.mjs
       - name: Cross-viewport Chrome gesture and UX audit (320px to desktop incl Android-size)
         if: always()
         run: |

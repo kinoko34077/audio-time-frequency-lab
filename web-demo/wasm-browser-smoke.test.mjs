@@ -68,7 +68,7 @@ test("Chrome real-time Rust AudioWorklet streams, changes controls, seeks at wav
     let okay=false;
     for(let i=0;i<36;i++){
       try{
-        const resp=await page.goto("http://127.0.0.1:8765/index.html");
+        const resp=await page.goto("http://127.0.0.1:8765/index.html?legacyUi=1");
         if(resp?.ok()){okay=true;break;}
       }catch{}
       await new Promise(r=>setTimeout(r,250));
@@ -666,7 +666,7 @@ test("Chrome real-time Rust AudioWorklet streams, changes controls, seeks at wav
     const resetPage=await browser.newPage();
     const resetErrors=[];
     resetPage.on("pageerror",e=>resetErrors.push(e.message));
-    await resetPage.goto("http://127.0.0.1:8765/index.html");
+    await resetPage.goto("http://127.0.0.1:8765/index.html?legacyUi=1");
     await resetPage.waitForFunction(()=>document.documentElement.dataset.fwBoot==="ready",{timeout:15000});
     await (await resetPage.$("#audio-file")).uploadFile(wavPath);
     await resetPage.waitForFunction(()=>!document.querySelector("#play-dry").disabled,{timeout:20000});
@@ -686,7 +686,7 @@ test("Chrome real-time Rust AudioWorklet streams, changes controls, seeks at wav
     const bridgePage=await browser.newPage();
     const bridgeErrors=[];
     bridgePage.on("pageerror",e=>bridgeErrors.push(e.message));
-    await bridgePage.goto("http://127.0.0.1:8765/index.html");
+    await bridgePage.goto("http://127.0.0.1:8765/index.html?legacyUi=1");
     await bridgePage.waitForFunction(()=>document.documentElement.dataset.fwBoot==="ready",
       {timeout:15000});
     await (await bridgePage.$("#audio-file")).uploadFile(wavPath);
@@ -1208,7 +1208,7 @@ test("Chrome real-time Rust AudioWorklet streams, changes controls, seeks at wav
     // The first file selection on a NEW page must recover on its own.
     const coldPage=await browser.newPage();
     await installTestAudioSilenceGuardForPage(coldPage);
-    await coldPage.goto("http://127.0.0.1:8765/index.html");
+    await coldPage.goto("http://127.0.0.1:8765/index.html?legacyUi=1");
     await coldPage.evaluate(()=>{
       OfflineAudioContext.prototype.decodeAudioData=function(){
         return new Promise(()=>{});

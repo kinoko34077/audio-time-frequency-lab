@@ -3,10 +3,11 @@ must start near the seek position WITHOUT rendering/copying the entire file.
 Headless Chromium performance is hardware dependent; this checks functional
 first-chunk output and ability to switch settings during playback.
 """
-import math,os,struct,tempfile,wave
+import json,math,os,struct,tempfile,wave
 from playwright.sync_api import sync_playwright
 url=os.environ.get('LAB_TEST_ORIGIN','http://127.0.0.1:8123/')
 fd,path=tempfile.mkstemp(suffix='.wav');os.close(fd)
+expected_name=os.path.basename(path)
 try:
     rate=48000
     a=bytearray(rate*4)
@@ -64,11 +65,15 @@ try:
         })()""")
         failures=[]
         page.on('pageerror',lambda err: failures.append(str(err)))
-        page.goto(url,wait_until='domcontentloaded')
+        legacy_url=url+('&' if '?' in url else '?')+'legacyUi=1'
+        page.goto(legacy_url,wait_until='domcontentloaded')
         page.locator('html[data-fw-boot=ready]').wait_for(timeout=15000)
         page.locator('#audio-file').set_input_files(path)
-        page.wait_for_function("""() => document.querySelector('#audio-state-summary')
-          ?.textContent.includes('読み込み完了。再生できます。')""",timeout=25000)
+        page.wait_for_function("""() => {
+          const name=__EXPECTED_FILE_NAME__;
+          return Boolean(name&&document.querySelector('#file-meta')?.textContent.includes(name)&&
+            !document.querySelector('#play-main')?.disabled);
+        }""".replace('__EXPECTED_FILE_NAME__',json.dumps(expected_name)),timeout=25000)
         # The player owns the only editable speed/pitch controls. Select
         # models in their dedicated tab, without duplicate field proxies.
         assert page.locator("#lab-speed,#lab-pitch").count()==0

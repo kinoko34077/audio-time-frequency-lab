@@ -9,6 +9,15 @@
   const $=id=>document.querySelector(id);
   const dialog=$("#settings-dialog");
   const opener=$("#settings-open");
+  if(document.body.dataset.legacyTools!=="1"){
+    $("#model-settings-host").appendChild($("#audio-lab"));
+    for(const id of ["stop","play-dry","play-wet"]){
+      const control=$("#"+id);
+      control.hidden=true;
+      control.setAttribute("aria-hidden","true");
+      control.tabIndex=-1;
+    }
+  }
   const show=()=>{
     if(dialog.open)return;
     try{if(typeof dialog.showModal!=="function")throw Error("no dialog API");dialog.showModal();}
@@ -96,12 +105,13 @@
       const warning=status.dataset.kind==="warning";
       const pending=modelStatus.textContent.includes("適用待ち");
       const actual=(indicator.textContent||"停止中").trim();
-      const visible=error||warning||pending;
+      const expanded=hud.classList.contains("is-expanded");
+      const visible=error||warning||pending||expanded;
       const waitingForFile=$("#play-main")?.disabled===true&&!error;
       summary.hidden=waitingForFile;
       summary.classList.toggle("sr-only",!visible);
       statusRow.dataset.visible=String(visible);
-      detail.hidden=waitingForFile||!(error||warning);
+      detail.hidden=waitingForFile||(!(error||warning)&&!expanded);
       if(waitingForFile)return;
       // Requested/legacy diagnostic warnings may outlive Play/Pause/Stop.
       // Render the REAL transport state first, not a stale "playing" verb
@@ -140,6 +150,7 @@
       const open=hud.classList.toggle("is-expanded");
       detail.setAttribute("aria-expanded",String(open));
       detail.textContent=open?"閉じる":"詳細";
+      displayState();
     });
     displayState();
   }

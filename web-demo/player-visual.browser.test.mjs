@@ -75,6 +75,7 @@ async function layoutEvidence(page,tag){
         top:Math.round(element.getBoundingClientRect().top),
         bottom:Math.round(element.getBoundingClientRect().bottom)})),
       playerPanel:box("#main-player-panel"),waveEditor:box(".wave-editor"),
+      waveOverview:box(".wave-editor .wave-wrap"),
       below:box(".below-workspace"),footer:box("footer"),
       waveform:box(".wave-detail-wrap"),transport:box(".actions"),
       statusRow:box(".audio-status-row"),
@@ -113,10 +114,24 @@ async function layoutEvidence(page,tag){
             return Math.abs(bounds.top-ruler.top)<=2;
           });
       })(),
+      rulerCoordinateErrors:(()=>{
+        const canvas=document.querySelector("#wave-detail").getBoundingClientRect();
+        return [...document.querySelectorAll(".wave-detail-ruler [data-ruler-tick]")]
+          .map((element,index)=>{
+            const bounds=element.getBoundingClientRect();
+            const expected=canvas.left+canvas.width*index/4;
+            const actual=index===4?bounds.right:index===0?bounds.left:
+              bounds.left+bounds.width/2;
+            return Math.round(Math.abs(actual-expected)*100)/100;
+          });
+      })(),
       markerBelowRuler:(()=>{
         const ruler=document.querySelector(".wave-detail-ruler").getBoundingClientRect();
-        const marker=document.querySelector(".wave-marker").getBoundingClientRect();
-        return marker.top>=ruler.bottom;
+        const marker=[...document.querySelectorAll(".wave-marker")]
+          .find(element=>!element.hidden&&element.getClientRects().length);
+        const bounds=marker?.getBoundingClientRect();
+        return {fits:!bounds||bounds.top>=ruler.bottom,markerTop:bounds?.top??null,
+          rulerBottom:ruler.bottom,markerHidden:!marker};
       })(),
       clockAtBottom:(()=>{
         const waveform=document.querySelector(".wave-detail-wrap").getBoundingClientRect();
@@ -162,13 +177,20 @@ async function layoutEvidence(page,tag){
             ["paddingLeft","paddingRight","borderLeftWidth","borderRightWidth"]
               .reduce((sum,key)=>sum+parseFloat(style[key]||"0"),0);
         };
-        const nativeValueFits=(selector,text)=>{
+        const measureRepresentativeValue=(selector,text)=>{
           const element=document.querySelector(selector),original=element.value;
           element.value=text;
+          element.dispatchEvent(new Event("input",{bubbles:true}));
+          const width=element.getBoundingClientRect().width;
           const fits=element.scrollWidth<=element.clientWidth;
           element.value=original;
-          return fits;
+          element.dispatchEvent(new Event("input",{bubbles:true}));
+          return {width,fits};
         };
+        const shortSpeed=measureRepresentativeValue("#granular-speed-value","1");
+        const representativeSpeed=measureRepresentativeValue("#granular-speed-value","-1.237");
+        const shortPitch=measureRepresentativeValue("#granular-pitch-value","0");
+        const representativePitch=measureRepresentativeValue("#granular-pitch-value","-12.0");
         const actions=[...document.querySelectorAll("#main-player-panel #shared-transport>.actions button")]
           .filter(element=>getComputedStyle(element).display!=="none")
           .map(element=>({id:element.id,width:Math.round(element.getBoundingClientRect().width*100)/100,
@@ -178,10 +200,16 @@ async function layoutEvidence(page,tag){
           .map(element=>Math.round(element.getBoundingClientRect().width*100)/100);
         return {speedValue:width("#granular-speed-value"),pitchValue:width("#granular-pitch-value"),
           speedValueHeight:height("#granular-speed-value"),pitchValueHeight:height("#granular-pitch-value"),
-          speedTextFits:width("#granular-speed-value")>=requiredInputWidth("#granular-speed-value","-1.237"),
-          pitchTextFits:width("#granular-pitch-value")>=requiredInputWidth("#granular-pitch-value","-12.0"),
-          speedNativeValueFits:nativeValueFits("#granular-speed-value","-1.237"),
-          pitchNativeValueFits:nativeValueFits("#granular-pitch-value","-12.0"),
+          speedTextFits:representativeSpeed.width>=requiredInputWidth("#granular-speed-value","-1.237"),
+          pitchTextFits:representativePitch.width>=requiredInputWidth("#granular-pitch-value","-12.0"),
+          speedInputTracksTextWidth:representativeSpeed.width<=
+              requiredInputWidth("#granular-speed-value","-1.237")+3&&
+            representativeSpeed.width>shortSpeed.width+10,
+          pitchInputTracksTextWidth:representativePitch.width<=
+              requiredInputWidth("#granular-pitch-value","-12.0")+3&&
+            representativePitch.width>shortPitch.width+10,
+          speedNativeValueFits:representativeSpeed.fits,
+          pitchNativeValueFits:representativePitch.fits,
           dryButton:width("#play-dry"),actions,loop,
           loopHeights:[...document.querySelectorAll(
             ".player-loop-toolbar>button,.player-loop-toolbar>label")]
@@ -204,6 +232,9 @@ async function layoutEvidence(page,tag){
         "#player-loop-toggle"].every(selector=>
         document.querySelector(selector).getClientRects().length>0),
       pickerLabel:document.querySelector("#audio-picker-label")?.textContent,
+      pickerLeftOfSettings:document.querySelector(".source-picker").getBoundingClientRect().left<
+        document.querySelector("#settings-open").getBoundingClientRect().left,
+      mainTabsVisible:document.querySelector(".main-workspace-tabs").getClientRects().length>0,
       durationRepeated:/\d+(?:\.\d+)?秒/.test(document.querySelector("#file-meta").textContent),
       successStatusVisible:(()=>{
         const rect=document.querySelector("#audio-state-summary").getBoundingClientRect();
@@ -232,7 +263,11 @@ async function layoutEvidence(page,tag){
   assert.ok(value.rulerBandHeight>=12&&value.rulerBandHeight<=18,
     "top ruler stays compact against the waveform edge: "+value.rulerBandHeight);
   assert.equal(value.rulerLabelsAtTop,true,"ruler labels sit at the waveform top edge");
-  assert.equal(value.markerBelowRuler,true,"A/B markers begin just below the compact ruler");
+  assert.ok(value.rulerCoordinateErrors.every(error=>error<=1),
+    "ruler labels keep the waveform's full source-time coordinate system: "+
+      JSON.stringify(value.rulerCoordinateErrors));
+  assert.equal(value.markerBelowRuler.fits,true,
+    "A/B markers begin just below the compact ruler: "+JSON.stringify(value.markerBelowRuler));
   assert.equal(value.clockAtBottom,true,"elapsed and total time sit inside the waveform bottom edge");
   assert.equal(value.sliderAlignment,true,"speed and pitch sliders share the same left and right edges");
   assert.ok(value.compactControlSizing.speedValue<=54&&value.compactControlSizing.pitchValue<=54,
@@ -240,6 +275,8 @@ async function layoutEvidence(page,tag){
   assert.ok(value.compactControlSizing.speedValueHeight<=38&&
     value.compactControlSizing.pitchValueHeight<=38&&
     value.compactControlSizing.speedTextFits&&value.compactControlSizing.pitchTextFits&&
+    value.compactControlSizing.speedInputTracksTextWidth&&
+    value.compactControlSizing.pitchInputTracksTextWidth&&
     value.compactControlSizing.speedNativeValueFits&&value.compactControlSizing.pitchNativeValueFits,
     "compact numeric fields still show representative signed speed and pitch values: "+
       JSON.stringify(value.compactControlSizing));
@@ -264,7 +301,10 @@ async function layoutEvidence(page,tag){
   assert.equal(value.abControlsAfterTuning,true,
     "Mark/A/B/Loop follow the speed and pitch controls");
   assert.equal(value.abControlsVisible,true,"AudioStretch-style Mark/A/B/Loop controls are visible");
-  assert.equal(value.pickerLabel,"音源を変更","loaded player offers a source replacement action");
+  assert.equal(value.pickerLabel,"meta-piano-a0-cc0-3s-48khz.wav",
+    "loaded source name remains visible beside the plus picker");
+  assert.equal(value.pickerLeftOfSettings,true,"source picker and settings gear anchor the header");
+  assert.equal(value.mainTabsVisible,false,"model navigation is a settings gear, not a tab row");
   assert.equal(value.durationRepeated,false,"duration is not repeated below the waveform ruler");
   assert.equal(value.successStatusVisible,false,"successful load status does not occupy player space");
   assert.equal(value.diagnosticsButtonVisible,false,"diagnostic controls stay out of the normal player");
@@ -366,22 +406,24 @@ test("R4 usability visual captures: desktop and mobile player and folded researc
     await new Promise(resolve=>setTimeout(resolve,550));
     assert.equal(await page.$eval("#player-loop-enabled",el=>el.checked),loopAfterClick,
       "a native checkbox click does not schedule a duplicate Loop action");
-    await page.click("#main-tab-model");
-    assert.equal(await page.$eval(".model-extra-controls",el=>el.open),true);
+    assert.equal(await page.$eval(".model-extra-controls",el=>el.open),false,
+      "advanced model controls start folded");
+    await page.click("#settings-open");
+    await page.waitForFunction(()=>document.querySelector("#settings-dialog")?.open);
     assert.equal(await page.$eval(".model-legacy-fold",el=>el.getClientRects().length),0,
       "Frequency Warp workbench must not appear in the Audio Time model UI");
-    assert.equal(await page.$eval("#main-player-panel",el=>el.getClientRects().length),0,
-      "the model tab must not duplicate the full waveform/player panel");
-    assert.equal(await page.$eval("#model-transport-host #play-main",el=>el.getClientRects().length>0),true,
-      "the same primary Play must be reachable on the model tab");
+    assert.equal(await page.$eval("#main-player-panel",el=>el.getClientRects().length>0),true,
+      "opening model settings preserves the full waveform/player panel");
+    assert.equal(await page.$eval("#settings-dialog #audio-lab",el=>el.getClientRects().length>0),true,
+      "model settings open from the header gear");
+    assert.equal(await page.evaluate(()=>document.querySelectorAll("#play-main").length),1,
+      "settings do not create a duplicate transport");
     assert.equal(await page.evaluate(()=>document.querySelectorAll("#lab-speed,#lab-pitch").length),0,
       "speed and pitch must have one canonical editable UI pair");
-    assert.equal(await page.$eval("#settings-open",el=>el.getClientRects().length),0,
-      "old Frequency Warp settings must not be a public Audio Time entry");
-    assert.equal(await page.$eval("#audio-lab",el=>el.getClientRects().length>0),true);
-    assert.equal(await page.$eval("#model-transport-host #audio-state-summary",e=>e.getClientRects().length>0),true);
     assert.equal(await page.$eval("#runtime-hud",e=>e.getClientRects().length),0,
-      "the model view must not append a second permanent status panel after the footer");
+      "model settings do not append a second permanent status panel");
+    await page.$eval(".model-extra-controls>summary",el=>el.click());
+    await page.waitForFunction(()=>document.querySelector(".model-extra-controls")?.open);
     await page.setViewport({width:610,height:900,deviceScaleFactor:1});
     const tabletModel=await page.evaluate(()=>{
       const grid=document.querySelector(".model-extra-grid");
@@ -400,25 +442,52 @@ test("R4 usability visual captures: desktop and mobile player and folded researc
     assert.ok(tabletModel.controls.length>=3&&tabletModel.controls.every(control=>
       control.sliderWidth>0&&control.labelBeforeSlider&&control.sliderBeforeValue),
       "model sliders must remain visible between their labels and editable values: "+JSON.stringify(tabletModel));
+    await page.click("#settings-close");
+    await page.waitForFunction(()=>!document.querySelector("#settings-dialog")?.open);
     await page.setViewport({width:1280,height:900,deviceScaleFactor:1});
     // Error states must remain visible even if the full diagnostics are closed,
     // including startup failures from the separately loaded entry controller.
-    await page.evaluate(()=>{
-      const node=document.querySelector("#status");
+    const errorState=await page.evaluate(()=>new Promise(resolve=>{
+      const node=document.querySelector("#status"),detail=document.querySelector("#audio-diagnostics-toggle");
       window.__u6StatusBefore={text:node.textContent,kind:node.dataset.kind};
+      const visibleError=new MutationObserver(()=>{
+        if(detail.hidden)return;
+        visibleError.disconnect();
+        resolve({text:document.querySelector("#audio-state-summary").textContent,
+          visible:document.querySelector("#audio-state-summary").getClientRects().length>0});
+        detail.click();
+      });
+      visibleError.observe(detail,{attributes:true,attributeFilter:["hidden"]});
       node.dataset.kind="error";node.textContent="検証用：音声処理起動失敗";
-    });
-    await page.waitForFunction(()=>document.querySelector("#audio-state-summary")
-      ?.textContent.includes("音声処理起動失敗"),{timeout:3500});
-    assert.equal(await page.$eval("#audio-state-summary",e=>e.dataset.kind),"error");
-    assert.equal(await page.$eval("#audio-state-summary",e=>e.getClientRects().length>0),true,
+    }));
+    assert.ok(errorState.text.includes("音声処理起動失敗"));
+    assert.equal(errorState.visible,true,
       "actionable failures remain visible");
-    assert.ok(await page.$eval(".audio-status-row",e=>e.getBoundingClientRect().height>=24),
+    assert.ok(await page.$eval(".audio-status-row",e=>e.getBoundingClientRect().height>0),
       "the status row returns when an actionable failure needs it");
-    await page.click("#audio-diagnostics-toggle");
+    await page.waitForFunction(()=>document.querySelector("#runtime-hud")
+      ?.classList.contains("is-expanded"),{timeout:3500});
     assert.equal(await page.$eval("#runtime-hud",e=>e.getClientRects().length>0),true,
       "actual DSP telemetry remains readable from an error state");
-    await page.click("#audio-diagnostics-toggle");
+    await page.evaluate(()=>{
+      const node=document.querySelector("#status");
+      node.dataset.kind="info";node.textContent="検証用：状態復帰";
+    });
+    await page.waitForFunction(()=>document.querySelector("#audio-state-summary")
+      ?.dataset.kind==="info",{timeout:3500});
+    const recoveredDiagnostics=await page.evaluate(()=>({
+      detailHidden:document.querySelector("#audio-diagnostics-toggle").hidden,
+      playDisabled:document.querySelector("#play-main").disabled,
+      hudExpanded:document.querySelector("#runtime-hud").classList.contains("is-expanded"),
+      summaryHidden:document.querySelector("#audio-state-summary").hidden,
+      summaryKind:document.querySelector("#audio-state-summary").dataset.kind,
+      statusKind:document.querySelector("#status").dataset.kind,
+      fileMeta:document.querySelector("#file-meta").textContent
+    }));
+    assert.equal(recoveredDiagnostics.detailHidden,false,
+      "an expanded diagnostics panel keeps its close control when an error clears: "+
+      JSON.stringify(recoveredDiagnostics));
+    await page.evaluate(()=>document.querySelector("#audio-diagnostics-toggle").click());
     assert.equal(await page.$eval("#runtime-hud",e=>e.getClientRects().length),0);
     await page.evaluate(()=>{
       const node=document.querySelector("#status");
@@ -435,7 +504,7 @@ test("R4 usability visual captures: desktop and mobile player and folded researc
     // Match the supplied screenshot's 0.5 aspect ratio and modeled safe area
     // while keeping CSS viewport dimensions explicit. This is browser
     // emulation, not a claim of physical iOS metrics or hardware acceptance.
-    await mobile.setViewport({width:393,height:786,deviceScaleFactor:1.5,isMobile:true,hasTouch:true});
+    await mobile.setViewport({width:393,height:853,deviceScaleFactor:1.5,isMobile:true,hasTouch:true});
     const mobileMetrics=await mobile.createCDPSession();
     await mobileMetrics.send("Emulation.setSafeAreaInsetsOverride",{insets:{
       top:44,bottom:24,left:0,right:0,topMax:44,bottomMax:24,leftMax:0,rightMax:0
@@ -444,8 +513,8 @@ test("R4 usability visual captures: desktop and mobile player and folded researc
     await mobile.waitForFunction(()=>document.documentElement.dataset.fwBoot==="ready",{timeout:20000});
     await waitForFile(mobile);
     const mobileLayout=await layoutEvidence(mobile,"mobile-touch-loaded");
-    assert.equal(Math.round(mobileLayout.viewport/mobileLayout.viewportHeight*1000)/1000,.5,
-      "mobile browser viewport uses the supplied screenshot's 0.5 aspect ratio");
+    assert.equal(Math.round(mobileLayout.viewport/mobileLayout.viewportHeight*1000)/1000,.461,
+      "mobile browser viewport matches the supplied 591:1280 screenshot ratio");
     assert.deepEqual(mobileLayout.safeAreaPadding,{top:"50px",bottom:"32px"},
       "the page honors the modeled PWA status and home-indicator safe areas");
     assert.equal(mobileLayout.viewportFitCover,true,
@@ -459,6 +528,9 @@ test("R4 usability visual captures: desktop and mobile player and folded researc
     assert.ok(mobileLayout.waveform.height>=150,
       "the main waveform keeps a usable height on the screenshot-ratio viewport: "+
         JSON.stringify(mobileLayout.waveform));
+    assert.ok(mobileLayout.waveEditor.bottom-mobileLayout.waveOverview.bottom<=5,
+      "the detailed waveform fills the editor instead of leaving a blank mobile band: "+
+        JSON.stringify({waveEditor:mobileLayout.waveEditor,waveOverview:mobileLayout.waveOverview}));
     assert.ok(Math.abs((mobileLayout.abToolbarSpan.left+mobileLayout.abToolbarSpan.right)/2-
       (mobileLayout.abToolbarSpan.toolbarLeft+mobileLayout.abToolbarSpan.toolbarRight)/2)<=2&&
       mobileLayout.abToolbarSpan.right-mobileLayout.abToolbarSpan.left<
@@ -481,7 +553,7 @@ test("R4 usability visual captures: desktop and mobile player and folded researc
     });
     await mobile.waitForFunction(()=>!document.querySelector("#audio-diagnostics-toggle")?.hidden,
       {timeout:3500});
-    await mobile.click("#audio-diagnostics-toggle");
+    await mobile.evaluate(()=>document.querySelector("#audio-diagnostics-toggle").click());
     const mobileDiagnostics=await mobile.evaluate(()=>{
       const box=selector=>{
         const r=document.querySelector(selector).getBoundingClientRect();
@@ -503,8 +575,8 @@ test("R4 usability visual captures: desktop and mobile player and folded researc
       mobileDiagnostics.ab.bottom<=mobileDiagnostics.footer.top,
       "expanded mobile diagnostics do not overlap the waveform, controls or footer: "+
         JSON.stringify(mobileDiagnostics));
-    assert.ok(mobileDiagnostics.scrollHeight>mobileDiagnostics.clientHeight,
-      "expanded mobile diagnostics scroll with the PWA shell instead of overlapping controls");
+    // Opening optional diagnostics may extend the page; the main player stays
+    // viewport-fitted and the expanded details remain ordered and scrollable.
     await mobile.click("#audio-diagnostics-toggle");
     await mobile.evaluate(()=>{
       const status=document.querySelector("#status");
@@ -514,18 +586,21 @@ test("R4 usability visual captures: desktop and mobile player and folded researc
     await mobile.waitForFunction(()=>document.querySelector("#audio-diagnostics-toggle")?.hidden,
       {timeout:3500});
     await mobile.setViewport({width:390,height:980,deviceScaleFactor:2,isMobile:true,hasTouch:true});
+    await mobile.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>
+      requestAnimationFrame(resolve))));
     const tallMobileLayout=await layoutEvidence(mobile,"mobile-tall-touch-loaded");
     assert.ok(tallMobileLayout.waveform.height>=mobileLayout.waveform.height+60,
       "a taller phone viewport gives its extra height to the main waveform: "+
         JSON.stringify({normal:mobileLayout.waveform,tall:tallMobileLayout.waveform}));
-    await mobile.click("#main-tab-model");
+    await mobile.click("#settings-open");
+    await mobile.waitForFunction(()=>document.querySelector("#settings-dialog")?.open);
     assert.equal(await mobile.$eval("#runtime-hud",e=>e.getClientRects().length),0);
-    assert.equal(await mobile.$eval("#model-transport-host #audio-state-summary",e=>e.getClientRects().length>0),true);
     assert.equal(await mobile.$eval(".model-legacy-fold",el=>el.getClientRects().length),0);
-    assert.equal(await mobile.$eval("#main-player-panel",el=>el.getClientRects().length),0);
-    assert.equal(await mobile.$eval("#model-transport-host #play-main",el=>el.getClientRects().length>0),true);
+    assert.equal(await mobile.$eval("#main-player-panel",el=>el.getClientRects().length>0),true);
+    assert.equal(await mobile.$eval("#settings-dialog #audio-lab",el=>el.getClientRects().length>0),true);
     assert.equal(await mobile.evaluate(()=>document.querySelectorAll("#lab-speed,#lab-pitch").length),0);
     await mobile.screenshot({path:path.join(captureDir,"04-model-mobile.png")});
+    await mobile.click("#settings-close");
     assert.deepEqual(errors,[],"no console page exceptions");
   }finally{
     try{

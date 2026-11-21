@@ -217,11 +217,8 @@ test("a moving detail viewport redirects the next waveform read to the current p
     created.setPosition(32);
     editor.refresh(true);
     const pendingRightEdge=created.waveSegments.filter(segment=>segment.x===319).at(-1);
-    assert.ok(pendingRightEdge,"the moving viewport must paint its new right edge");
-    assert.ok(Math.abs((pendingRightEdge.y1+pendingRightEdge.y2)/2-60)<1&&
-      Math.abs(pendingRightEdge.y2-pendingRightEdge.y1)<=1.5,
-      "an unread detailed edge must stay empty instead of falling back to coarse overview peaks: "+
-        JSON.stringify(pendingRightEdge));
+    assert.equal(pendingRightEdge,undefined,
+      "an unread detailed edge must stay blank, without a false centerline while PCM is pending");
     releaseFirst();
     await waitForReadQuiet(source,reads);
     const newCenter=32*48_000;
@@ -239,6 +236,99 @@ test("a moving detail viewport redirects the next waveform read to the current p
         JSON.stringify(rightEdge));
   }finally{
     releaseFirst();editor?.setSource(null,48_000);
+    await waitForReadQuiet(source,reads);
+    if(original)Object.defineProperty(globalThis,"devicePixelRatio",original);
+    else delete globalThis.devicePixelRatio;
+  }
+});
+
+test("an aborted obsolete detail read restarts the latest paused viewport",async()=>{
+  const reads=[];let activeReads=0,rejectFirst;
+  const firstRead=new Promise((_,reject)=>{rejectFirst=reject;});
+  const source={sourceFrames:48_000*120,maxReadFrames:262_144,
+    overviewPeaks:Array.from({length:96},()=>[-.1,.1]),
+    async read(startFrame,frameCount){
+      reads.push({startFrame,frameCount});activeReads++;
+      try{
+        if(reads.length===1)await firstRead;
+        return {startFrame,channels:[new Float32Array(frameCount).fill(.25)]};
+      }finally{activeReads--;}
+    }};
+  Object.defineProperty(source,"activeReads",{get:()=>activeReads});
+  const original=Object.getOwnPropertyDescriptor(globalThis,"devicePixelRatio");
+  Object.defineProperty(globalThis,"devicePixelRatio",{configurable:true,value:1});
+  let editor;
+  try{
+    const created=makeEditor(source,30);
+    editor=created.editor;
+    await new Promise(resolve=>setTimeout(resolve,0));
+    assert.equal(reads.length,1,"the original viewport read should be pending");
+    created.setPosition(70);
+    editor.refresh(true);
+    const error=new Error("playback decode preempted the stale waveform read");
+    error.name="AbortError";
+    rejectFirst(error);
+    await waitForReadQuiet(source,reads);
+    assert.ok(reads.length>=2,
+      "the newest paused viewport must be read after the obsolete request aborts");
+    assert.ok(Math.abs(reads[1].startFrame-70*48_000)<=2*48_000,
+      "the restarted read should follow the latest seek instead of repeating the old range: "+
+        JSON.stringify(reads.slice(0,3)));
+  }finally{
+    if(rejectFirst){
+      const error=new Error("test cleanup");error.name="AbortError";
+      rejectFirst(error);rejectFirst=null;
+    }
+    editor?.setSource(null,48_000);
+    await waitForReadQuiet(source,reads);
+    if(original)Object.defineProperty(globalThis,"devicePixelRatio",original);
+    else delete globalThis.devicePixelRatio;
+  }
+});
+
+test("source-edge viewports keep one peak resolution and leave out-of-source time blank",async()=>{
+  const sampleRate=48_000,sourceFrames=sampleRate*20,reads=[];
+  let activeReads=0;
+  const source={sourceFrames,maxReadFrames:32_768,overviewPeaks:[],
+    async read(startFrame,frameCount){
+      activeReads++;
+      try{
+        reads.push({startFrame,frameCount});
+        return {startFrame,channels:[new Float32Array(frameCount).fill(.25)]};
+      }finally{activeReads--;}
+    }};
+  Object.defineProperty(source,"activeReads",{get:()=>activeReads});
+  const original=Object.getOwnPropertyDescriptor(globalThis,"devicePixelRatio");
+  Object.defineProperty(globalThis,"devicePixelRatio",{configurable:true,value:1});
+  let editor,created;
+  try{
+    created=makeEditor(source,.5);
+    editor=created.editor;
+    await waitForReadQuiet(source,reads);
+    const firstReads=reads.slice();
+    created.setPosition(6.5);
+    editor.refresh(true);
+    await waitForReadQuiet(source,reads);
+    const repeatedSourceFrames=reads.slice(firstReads.length).reduce((total,next)=>
+      total+firstReads.reduce((overlap,prior)=>overlap+
+        Math.max(0,Math.min(next.startFrame+next.frameCount,
+          prior.startFrame+prior.frameCount)-Math.max(next.startFrame,prior.startFrame)),0),0);
+    assert.equal(repeatedSourceFrames,0,
+      "moving the viewport through the source-start edge must reuse absolute peak buckets; "+
+        "re-read PCM frames: "+repeatedSourceFrames);
+
+    created.setPosition(.5);
+    editor.refresh(true);
+    await waitForReadQuiet(source,reads);
+    const outsideStartX=(created.editor.spanFrames/2-.5*sampleRate)/
+      created.editor.spanFrames*320;
+    const renderedOutside=created.waveSegments.filter(segment=>
+      segment.x<Math.floor(outsideStartX));
+    assert.equal(renderedOutside.length,0,
+      "pixels before source frame zero must stay blank: "+
+        JSON.stringify(renderedOutside.slice(0,3)));
+  }finally{
+    editor?.setSource(null,sampleRate);
     await waitForReadQuiet(source,reads);
     if(original)Object.defineProperty(globalThis,"devicePixelRatio",original);
     else delete globalThis.devicePixelRatio;

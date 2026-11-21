@@ -12,11 +12,16 @@
 <body class="model-lab" data-main-tab="player">
 <main class="studio">
   <header class="header">
-    <div class="brand"><span class="logo" aria-hidden="true">∿</span><div>
-      <h1>Audio Time–Frequency Lab</h1><p>音源を開いて、速度・音程・区間を直接操作</p>
-    </div></div>
-    <button id="settings-open" type="button" class="gear" aria-label="設定を開く" aria-haspopup="dialog" aria-controls="settings-dialog">
-      <span aria-hidden="true">⚙</span><span>設定</span>
+    <h1 class="sr-only">Audio Time–Frequency Lab</h1>
+    <div id="drop" class="source-picker" aria-label="音源">
+      <label class="source-picker-button" for="audio-file" aria-label="音源を選ぶ">
+        <input id="audio-file" type="file" accept="audio/*,.wav,.mp3,.m4a,.ogg,.flac" aria-label="音声ファイルを選ぶ">
+        <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+      </label>
+      <strong id="audio-picker-label" aria-live="polite">音源を選ぶ</strong>
+    </div>
+    <button id="settings-open" type="button" class="gear" aria-label="処理設定を開く" title="処理設定" aria-haspopup="dialog" aria-controls="settings-dialog">
+      <span aria-hidden="true">⚙</span>
     </button>
   </header>
 
@@ -39,12 +44,12 @@
         </select>
       </label>
     </div>
-    <details class="model-info-controls" open><summary>モデルの説明・現在の対応範囲</summary>
+    <details class="model-info-controls"><summary>モデル情報</summary>
       <p id="lab-model-description" class="lab-note model-summary" aria-live="polite">選択した処理モデルの説明を表示します。</p>
       <p id="lab-model-compatibility" class="lab-note" role="status">処理モデルの対応範囲を表示します。</p>
     </details>
-    <details class="model-extra-controls" open>
-      <summary>処理モデルの詳細設定・解析</summary>
+    <details class="model-extra-controls">
+      <summary>詳細設定</summary>
       <div class="lab-grid model-extra-grid">
       <div class="lab-field lab-inline-control">
         <label for="lab-short">短窓</label>
@@ -88,20 +93,14 @@
     <div class="workspace-left">
       <section id="main-player-panel" class="panel player" aria-labelledby="player-title">
         <h2 id="player-title" class="sr-only">再生</h2>
-        <label id="drop" class="drop" for="audio-file" role="button" tabindex="0" aria-label="音源を選ぶ">
-          <span aria-hidden="true">♫</span><strong id="audio-picker-label">音源を選ぶ</strong>
-          <input id="audio-file" type="file" accept="audio/*,.wav,.mp3,.m4a,.ogg,.flac" aria-label="音声ファイルを選ぶ">
-        </label>
-        <p id="file-meta" class="meta" hidden></p>
+        <p id="file-meta" class="sr-only" hidden></p>
         <section class="wave-editor" aria-label="拡大波形の操作">
-          <div class="wave-editor-toolbar">
+          <div class="wave-detail-wrap">
             <div class="wave-zoom-actions" aria-label="波形表示倍率">
               <button type="button" id="wave-zoom-out" aria-label="波形を縮小">−</button>
               <output id="wave-zoom-label" aria-live="off">—</output>
               <button type="button" id="wave-zoom-in" aria-label="波形を拡大">＋</button>
             </div>
-          </div>
-          <div class="wave-detail-wrap">
             <canvas id="wave-detail" tabindex="0" role="slider" aria-label="中央の再生ヘッドに対して波形を左右へ動かす。ピンチまたは＋−でズーム。A/Bマーカーをドラッグして区間指定" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0"></canvas>
             <div class="wave-detail-ruler" aria-hidden="true" hidden>
               <span data-ruler-tick="0"></span><span data-ruler-tick="1"></span>
@@ -154,11 +153,11 @@
           <div class="player-loop-toolbar">
             <button type="button" id="player-marker-toggle" title="タップで目印を追加・削除、長押しで全て削除">Mark</button>
             <button type="button" id="player-loop-a-now" title="タップでAを設定、ダブルタップで区間移動、長押しで先頭へ">A</button>
-            <button type="button" id="player-loop-b-now" title="タップでBを設定、ダブルタップで区間移動、長押しで末尾へ">B</button>
             <label id="player-loop-toggle" class="player-loop-toggle" title="タップで切替、ダブルタップで目印間、長押しで全体">
               <input id="player-loop-enabled" type="checkbox" checked aria-label="ループ">
               <span>Loop</span>
             </label>
+            <button type="button" id="player-loop-b-now" title="タップでBを設定、ダブルタップで区間移動、長押しで末尾へ">B</button>
           </div>
           <div id="player-loop-fields" hidden aria-hidden="true">
             <input id="player-loop-a" type="hidden" value="0">
@@ -364,7 +363,8 @@
 </aside>
 
 <dialog id="settings-dialog" aria-labelledby="settings-title">
-  <div class="settings-head"><div><p class="eyebrow">PREFERENCES</p><h2 id="settings-title">設定</h2><p>変更内容は再生中にも反映されます。</p></div><button id="settings-close" type="button" aria-label="設定を閉じる">×</button></div>
+  <div class="settings-head"><div><h2 id="settings-title">処理設定</h2></div><button id="settings-close" type="button" aria-label="設定を閉じる">×</button></div>
+  <div id="model-settings-host"></div>
   <div class="settings-body">
     <fieldset><legend>音声処理方式</legend>
       <label id="engine-manual-label" for="engine">エンジン（手動）</label><select id="engine">

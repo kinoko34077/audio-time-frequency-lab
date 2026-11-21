@@ -73,7 +73,7 @@ const state={
   ctx:null,decoded:null,dry:null,source:null,loadingSource:null,overviewPeaks:null,
   offline:null,offlineWorker:null,
   module:null,workletLoaded:false,player:null,position:0,seek:0,
-  qualityIndex:0,settingsRevision:0,name:"audio",fileMeta:"音声未選択",processing:false,
+  qualityIndex:0,settingsRevision:0,name:"audio",fileName:"",fileMeta:"音声未選択",processing:false,
   precise:Object.create(null),
   effective:{low:20,high:16000},raf:0,lastStats:null,mathCore:null,wasmPromise:null,rebuildTimer:null,overviewResizeTimer:null,sine:null,loadToken:0,transportEpoch:0
 };
@@ -179,11 +179,37 @@ function refreshGranular(){
   p.value=String(granular.pitch);
   if(document.activeElement!==st)st.value=formatPlaybackSpeed(granular.speed,{editing:true});
   if(document.activeElement!==pt)pt.value=String(granular.pitch);
+  fitInlineNumber(st);fitInlineNumber(pt);
   $("#granular-speed-output").textContent=formatPlaybackSpeed(granular.speed)+"×";
   $("#granular-pitch-output").textContent=granular.pitch.toFixed(1)+" 半音";
   $("#granular-range").value=String(granular.railMax);
   $("#granular-rail-note").textContent=Math.abs(granular.speed)>granular.railMax?
     "指定速度はレール外です。直接入力した数値は保持されています。":"";
+}
+const inlineNumberMeasureContext=document.createElement("canvas").getContext("2d");
+function fitInlineNumber(input){
+  const text=input.value||input.placeholder||"0";
+  const style=getComputedStyle(input);
+  let width=Math.max(2.2,Math.min(12,Array.from(text).length+.45))+"ch";
+  if(inlineNumberMeasureContext){
+    inlineNumberMeasureContext.font=style.font;
+    const textWidth=inlineNumberMeasureContext.measureText(text).width;
+    const borderAndPadding=style.boxSizing==="border-box"?
+      ["paddingLeft","paddingRight","borderLeftWidth","borderRightWidth"]
+        .reduce((sum,key)=>sum+(Number.parseFloat(style[key])||0),0):0;
+    // Keep CSS length units such as `12ch` in CSS. parseFloat() would read
+    // that as 12px and clamp a longer value to a width that clips its text.
+    // Leave min/max-width to the browser and add a small glyph safety margin.
+    const measuredWidth=textWidth+borderAndPadding+2;
+    width=measuredWidth+"px";
+  }
+  input.style.width=width;
+  const grid=input.closest("#granular-optin-controls")?.querySelector(".player-tune-grid");
+  if(grid){
+    const widths=[...grid.querySelectorAll(".player-tune-control>.inline-number")]
+      .map(control=>control.getBoundingClientRect().width);
+    grid.style.setProperty("--player-tune-value-width",Math.max(52,...widths)+"px");
+  }
 }
 // All waveform-scrub commands share one queue: an old seek must NEVER apply
 // after the gesture's newest speed or after its kinetic release.
@@ -313,7 +339,7 @@ if(PLAYER_GRANULAR_AVAILABLE){
   for(const k of ["speed","pitch"]){
     const slider=$("#granular-"+k),input=$("#granular-"+k+"-value");
     slider.addEventListener("input",()=>editGranular(k,slider.value));
-    input.addEventListener("input",()=>input.setCustomValidity(""));
+    input.addEventListener("input",()=>{input.setCustomValidity("");fitInlineNumber(input);});
     input.addEventListener("change",()=>editGranular(k,input.value));
   }
   $("#granular-range").addEventListener("change",e=>{
@@ -1011,7 +1037,11 @@ async function sampleSourceOverview(source){
     }
     peaks[bin]=peak;
     if(bin%4===3||bin===bins-1){
-      if(isCurrent()){drawAudio();detailWaveEditor?.refresh(true);}
+      if(isCurrent()){
+        drawAudio();
+        detailWaveEditor?.refreshOverview(
+          Math.floor(bin*frames/bins),Math.floor((bin+1)*frames/bins),bin);
+      }
       await new Promise(resolve=>setTimeout(resolve,0));
     }
   }
@@ -1254,6 +1284,7 @@ detailWaveEditor=createPlayerWaveEditor({
   zoomIn:$("#wave-zoom-in"),zoomOut:$("#wave-zoom-out"),
   zoomLabel:$("#wave-zoom-label"),
   rulerTicks:[...document.querySelectorAll(".wave-detail-ruler [data-ruler-tick]")],
+  continuousRefresh:true,
   getPosition:()=>displayPlayPosition(),
   getMarkers:()=>loopMarkers,
   onScrubMotion:waveformScrubMotion,
@@ -2404,7 +2435,7 @@ async function load(file){
       "再生位置を優先して段階読込します。続けますか?"))return;
     $("#file-meta").hidden=false;
     $("#file-meta").textContent=file.name+" · 読み込み中"+(previousReady?"（現在の音声は保持）":"");
-    $("#audio-picker-label").textContent=previousReady?"音源を変更":"読み込み中";
+    $("#audio-picker-label").textContent="読み込み中…";
     $("#drop").setAttribute("aria-label",previousReady?"音源を変更":"音源を選ぶ");
     message("音声を開いています…"+(previousReady?" 現在の音声はそのまま使えます。":""));
     candidate=await createProgressiveAudioSource(file);
@@ -2433,11 +2464,13 @@ async function load(file){
     refreshAB();
     labRefresh();state.lastStats=null;
     state.name=file.name.replace(/\.[^.]+$/,"");
+    state.fileName=file.name;
     mediaStatus(false);
     state.fileMeta=file.name+" · "+state.source.sampleRate+"Hz · "+
       state.source.channelCount+"ch";
     $("#file-meta").textContent=state.fileMeta;
-    $("#audio-picker-label").textContent="音源を変更";
+    $("#audio-picker-label").textContent=file.name;
+    $("#drop").title=file.name;
     $("#drop").setAttribute("aria-label","音源を変更");
     labels("high");drawCurve();drawAudio();refreshStatusSeek();
     controls.main.disabled=false;controls.dry.disabled=false;controls.wet.disabled=false;
@@ -2453,7 +2486,8 @@ async function load(file){
     if(token!==state.loadToken)return;
     $("#file-meta").hidden=false;
     $("#file-meta").textContent=previousReady?state.fileMeta:"読み込み失敗（ファイルを選び直せます）";
-    $("#audio-picker-label").textContent=previousReady?"音源を変更":"音源を選び直す";
+    $("#audio-picker-label").textContent=previousReady?state.fileName:"音源を選ぶ";
+    $("#drop").title=previousReady?state.fileName:"音源を選ぶ";
     $("#drop").setAttribute("aria-label",previousReady?"音源を変更":"音源を選び直す");
     message("音声を開けませんでした: "+error.message+
       (previousReady?"。以前の音声は保持しています。":""),"error");
@@ -2800,7 +2834,7 @@ function labRefresh(){
   const cap=primaryModelCapability(lab.mode,granular.speed,
     {individual:lab.individual});
   $("#lab-model-compatibility").textContent=cap.signed?
-    "このモデルは0/逆再生・サンプル単位A/B・スクラブ対応。再生/モデルの両タブが同じ設定値です。":
+    "0倍・逆再生・サンプル単位A/B・スクラブ対応。":
     (cap.sampleAB?
       "Workerは正方向0.5〜2倍。A/Bは元音源サンプル座標で安全な区間境界から反映し、即時スクラブは未対応です。":
       (cap.reason||"Worker研究モデルは正方向0.5〜2倍のみ対応。0倍・逆方向・±2倍超と即時スクラブは未対応です."));
