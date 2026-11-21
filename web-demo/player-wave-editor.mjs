@@ -41,12 +41,14 @@ function peakHierarchy(channels){
 export function createPlayerWaveEditor({
   canvas,wrap,overviewSelection,markerA,markerB,zoomIn,zoomOut,zoomLabel,
   rulerTicks=[],getMarkers=()=>[],getPosition,onPosition,onStart,onAB,onScrubState,
-  onScrubMotion=()=>{},onHoverFrame=()=>false,onHoverEnd=()=>{}
+  onScrubMotion=()=>{},onHoverFrame=()=>false,onHoverEnd=()=>{},
+  continuousRefresh=false
 }){
   let channels=null,source=null,detailBuckets=new Map(),detailBlockFrames=0;
   let detailPending=null,desiredDetailRange=null;
   let detailFailedKey=null,detailRetriedKey=null;
   let detailRetryTimer=null,detailRevision=0;
+  let contentRevision=0,renderedContentRevision=-1,scheduledRefresh=0;
   let rate=48000,levels=null,frames=0,spanFrames=rate*8;
   let lastFrame=NaN,lastSpan=NaN,lastWidth=0,lastHeight=0;
   const pointers=new Map();
@@ -55,6 +57,14 @@ export function createPlayerWaveEditor({
   // shifting playhead on each event would multiply tiny mouse movements.
   let hover=null;
   const center=()=>clamp(Math.round(getPosition()*rate),0,Math.max(0,frames-1));
+  function scheduleRefresh(){
+    if(continuousRefresh)return;
+    if(typeof requestAnimationFrame!=="function"){refresh();return;}
+    if(scheduledRefresh)return;
+    scheduledRefresh=requestAnimationFrame(()=>{
+      scheduledRefresh=0;refresh();
+    });
+  }
   function setSource(nextChannels,nextRate){
     if(hover){hover=null;onHoverEnd(false);}
     source=nextChannels&&typeof nextChannels.read==='function'?
@@ -65,6 +75,10 @@ export function createPlayerWaveEditor({
     detailBuckets.clear();detailBlockFrames=0;desiredDetailRange=null;
     detailPending=null;
     detailFailedKey=null;detailRetriedKey=null;detailRevision++;
+    contentRevision++;
+    if(scheduledRefresh&&typeof cancelAnimationFrame==="function"){
+      cancelAnimationFrame(scheduledRefresh);scheduledRefresh=0;
+    }
     rate=nextRate||48000;
     frames=source?.sourceFrames||channels?.[0]?.length||0;
     if(rulerTicks[0]?.parentElement)rulerTicks[0].parentElement.hidden=!frames;
@@ -148,6 +162,7 @@ export function createPlayerWaveEditor({
       Math.ceil(to/blockFrames)*blockFrames);
     if(blockFrames!==detailBlockFrames){
       detailBuckets.clear();detailBlockFrames=blockFrames;
+      contentRevision++;
       detailFailedKey=null;detailRetriedKey=null;
     }
     if(summaryEnd-summaryStart>readFrames*DETAIL_MAX_READS){
@@ -224,7 +239,12 @@ export function createPlayerWaveEditor({
           throw Error('progressive waveform source returned an invalid PCM range');
         const chunkEnd=chunkStart+count;
         const afterChunkBucket=Math.ceil(chunkEnd/blockFrames);
+        const visibleFirstBucket=Math.floor(Math.max(0,center()-spanFrames/2)/blockFrames);
+        const visibleAfterLastBucket=Math.ceil(Math.min(frames,
+          center()+spanFrames/2)/blockFrames);
+        let visiblePeaksChanged=false;
         for(let index=firstReadBucket;index<afterChunkBucket;index++){
+          if(detailBuckets.has(index))continue;
           const bucketStart=index*blockFrames;
           const offset=bucketStart-chunkStart;
           const length=Math.min(blockFrames,frames-bucketStart);
@@ -237,6 +257,8 @@ export function createPlayerWaveEditor({
             }
           }
           detailBuckets.set(index,low===1&&high===-1?[0,0]:[low,high]);
+          if(index>=visibleFirstBucket&&index<visibleAfterLastBucket)
+            visiblePeaksChanged=true;
         }
         chunkIndex++;
         const maxCachedBuckets=Math.min(8192,
@@ -246,13 +268,17 @@ export function createPlayerWaveEditor({
           const keep=new Set([...detailBuckets.keys()].sort((a,b)=>
             Math.abs(a-currentCenter)-Math.abs(b-currentCenter))
             .slice(0,maxCachedBuckets));
-          for(const cached of detailBuckets.keys())
-            if(!keep.has(cached))detailBuckets.delete(cached);
+          for(const cached of detailBuckets.keys()){
+            if(keep.has(cached))continue;
+            detailBuckets.delete(cached);
+            if(cached>=visibleFirstBucket&&cached<visibleAfterLastBucket)
+              visiblePeaksChanged=true;
+          }
         }
         // Retain completed absolute source buckets so a moving viewport only
         // needs the newly exposed edge, not a full rescan on every pan.
         if(chunkIndex%4===0)await new Promise(resolve=>setTimeout(resolve,0));
-        refresh(true);
+        if(visiblePeaksChanged){contentRevision++;scheduleRefresh();}
       }
     })().catch(error=>{
       if(source!==reader||revision!==detailRevision)return;
@@ -273,7 +299,15 @@ export function createPlayerWaveEditor({
       }
     }).finally(()=>{
       if(detailPending===requestToken){
-        detailPending=null;refresh(true);
+        detailPending=null;
+        const target=desiredDetailRange;
+        // A zoom can invalidate the pending block resolution or cancel it
+        // while switching to the overview. Restart only when that obsolete
+        // read settles; ordinary completion and failed-key retry handling
+        // must not recurse into another request here.
+        if(source===reader&&target&&
+           (revision!==detailRevision||detailBlockFrames!==blockFrames))
+          requestDetail(target.start,target.end);
       }
     });
   }
@@ -298,6 +332,7 @@ export function createPlayerWaveEditor({
     // A subpixel source movement does not alter the visible waveform; still
     // update marker positions, because A/B may have changed.
     const changed=force||w!==lastWidth||h!==lastHeight||spanFrames!==lastSpan||
+      contentRevision!==renderedContentRevision||
       Math.abs(c-lastFrame)>spanFrames/Math.max(1,w)*.35;
     if(changed){
       lastFrame=c;lastSpan=spanFrames;lastWidth=w;lastHeight=h;
@@ -372,6 +407,7 @@ export function createPlayerWaveEditor({
           context.lineTo(x,27*scale);context.stroke();
         }
       }
+      renderedContentRevision=contentRevision;
     }
     const {a,b}=onAB();
     const xA=boundsToX(a,c,w),xB=boundsToX(b,c,w);
@@ -386,6 +422,17 @@ export function createPlayerWaveEditor({
     canvas.setAttribute("aria-valuemax",String(Math.max(0,frames-1)));
     canvas.setAttribute("aria-valuenow",String(c));
     canvas.setAttribute("aria-valuetext",timestamp(c/rate));
+  }
+  function refreshOverview(){
+    // Overview bins only feed the fallback renderer at very wide zoom. While
+    // the detailed waveform has its own PCM buckets, repainting it for every
+    // four overview bins needlessly clears the live canvas dozens of times
+    // during source analysis and can look like edge flicker during playback.
+    if(source&&detailBlockFrames>0)return;
+    // The app's shared display RAF observes this revision, including while
+    // paused. Let it paint instead of starting another canvas render path.
+    contentRevision++;
+    scheduleRefresh();
   }
   function pos(e){
     const r=canvas.getBoundingClientRect();
@@ -556,6 +603,6 @@ export function createPlayerWaveEditor({
   });
   zoomIn.addEventListener("click",()=>zoom(.5));
   zoomOut.addEventListener("click",()=>zoom(2));
-  return {setSource,refresh,get spanFrames(){return spanFrames;},
+  return {setSource,refresh,refreshOverview,get spanFrames(){return spanFrames;},
     get isScrubbing(){return active;}};
 }

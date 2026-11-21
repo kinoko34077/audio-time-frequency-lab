@@ -105,7 +105,8 @@ test("real recorded waveform UX across mobile, Android-size, tablet and desktop 
           const studio=document.querySelector(".studio");
           return {width:innerWidth,height:innerHeight,
             scrollWidth:document.documentElement.scrollWidth,
-            wave:box(".wave-detail-wrap"),head:box(".wave-center-head"),
+            wave:box(".wave-detail-wrap"),waveEditor:box(".wave-editor"),
+            waveOverview:box(".wave-editor .wave-wrap"),head:box(".wave-center-head"),
             zoom:box(".wave-zoom-actions"),sourcePicker:box(".source-picker"),
             sourceButton:box(".source-picker-button"),
             settings:box("#settings-open"),speedSlider:box("#granular-speed"),
@@ -135,6 +136,9 @@ test("real recorded waveform UX across mobile, Android-size, tablet and desktop 
           "no full-page sideways scroll on "+profile.name);
         assert.ok(geometry.wave.width>=260&&geometry.wave.height>=150,
           "waveform must be operable on "+profile.name);
+        assert.ok(Math.abs(geometry.waveEditor.bottom-geometry.waveOverview.bottom)<=5,
+          "wave editor must not leave an empty band after the overview on "+profile.name+": "+
+            JSON.stringify({waveEditor:geometry.waveEditor,waveOverview:geometry.waveOverview}));
         assert.ok(geometry.zoom.left>=geometry.wave.left&&
           geometry.zoom.right<=geometry.wave.right&&
           geometry.zoom.top>=geometry.wave.top&&

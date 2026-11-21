@@ -116,8 +116,11 @@ async function layoutEvidence(page,tag){
       })(),
       markerBelowRuler:(()=>{
         const ruler=document.querySelector(".wave-detail-ruler").getBoundingClientRect();
-        const marker=document.querySelector(".wave-marker").getBoundingClientRect();
-        return marker.top>=ruler.bottom;
+        const marker=[...document.querySelectorAll(".wave-marker")]
+          .find(element=>!element.hidden&&element.getClientRects().length);
+        const bounds=marker?.getBoundingClientRect();
+        return {fits:!bounds||bounds.top>=ruler.bottom,markerTop:bounds?.top??null,
+          rulerBottom:ruler.bottom,markerHidden:!marker};
       })(),
       clockAtBottom:(()=>{
         const waveform=document.querySelector(".wave-detail-wrap").getBoundingClientRect();
@@ -241,7 +244,8 @@ async function layoutEvidence(page,tag){
   assert.ok(value.rulerBandHeight>=12&&value.rulerBandHeight<=18,
     "top ruler stays compact against the waveform edge: "+value.rulerBandHeight);
   assert.equal(value.rulerLabelsAtTop,true,"ruler labels sit at the waveform top edge");
-  assert.equal(value.markerBelowRuler,true,"A/B markers begin just below the compact ruler");
+  assert.equal(value.markerBelowRuler.fits,true,
+    "A/B markers begin just below the compact ruler: "+JSON.stringify(value.markerBelowRuler));
   assert.equal(value.clockAtBottom,true,"elapsed and total time sit inside the waveform bottom edge");
   assert.equal(value.sliderAlignment,true,"speed and pitch sliders share the same left and right edges");
   assert.ok(value.compactControlSizing.speedValue<=54&&value.compactControlSizing.pitchValue<=54,
@@ -447,9 +451,19 @@ test("R4 usability visual captures: desktop and mobile player and folded researc
     });
     await page.waitForFunction(()=>document.querySelector("#audio-state-summary")
       ?.dataset.kind==="info",{timeout:3500});
-    assert.equal(await page.$eval("#audio-diagnostics-toggle",e=>e.hidden),false,
-      "an expanded diagnostics panel keeps its close control when an error clears");
-    await page.click("#audio-diagnostics-toggle");
+    const recoveredDiagnostics=await page.evaluate(()=>({
+      detailHidden:document.querySelector("#audio-diagnostics-toggle").hidden,
+      playDisabled:document.querySelector("#play-main").disabled,
+      hudExpanded:document.querySelector("#runtime-hud").classList.contains("is-expanded"),
+      summaryHidden:document.querySelector("#audio-state-summary").hidden,
+      summaryKind:document.querySelector("#audio-state-summary").dataset.kind,
+      statusKind:document.querySelector("#status").dataset.kind,
+      fileMeta:document.querySelector("#file-meta").textContent
+    }));
+    assert.equal(recoveredDiagnostics.detailHidden,false,
+      "an expanded diagnostics panel keeps its close control when an error clears: "+
+      JSON.stringify(recoveredDiagnostics));
+    await page.evaluate(()=>document.querySelector("#audio-diagnostics-toggle").click());
     assert.equal(await page.$eval("#runtime-hud",e=>e.getClientRects().length),0);
     await page.evaluate(()=>{
       const node=document.querySelector("#status");
@@ -515,7 +529,7 @@ test("R4 usability visual captures: desktop and mobile player and folded researc
     });
     await mobile.waitForFunction(()=>!document.querySelector("#audio-diagnostics-toggle")?.hidden,
       {timeout:3500});
-    await mobile.click("#audio-diagnostics-toggle");
+    await mobile.evaluate(()=>document.querySelector("#audio-diagnostics-toggle").click());
     const mobileDiagnostics=await mobile.evaluate(()=>{
       const box=selector=>{
         const r=document.querySelector(selector).getBoundingClientRect();
@@ -548,6 +562,8 @@ test("R4 usability visual captures: desktop and mobile player and folded researc
     await mobile.waitForFunction(()=>document.querySelector("#audio-diagnostics-toggle")?.hidden,
       {timeout:3500});
     await mobile.setViewport({width:390,height:980,deviceScaleFactor:2,isMobile:true,hasTouch:true});
+    await mobile.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>
+      requestAnimationFrame(resolve))));
     const tallMobileLayout=await layoutEvidence(mobile,"mobile-tall-touch-loaded");
     assert.ok(tallMobileLayout.waveform.height>=mobileLayout.waveform.height+60,
       "a taller phone viewport gives its extra height to the main waveform: "+

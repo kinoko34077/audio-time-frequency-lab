@@ -197,11 +197,10 @@ function fitInlineNumber(input){
     const borderAndPadding=style.boxSizing==="border-box"?
       ["paddingLeft","paddingRight","borderLeftWidth","borderRightWidth"]
         .reduce((sum,key)=>sum+(Number.parseFloat(style[key])||0),0):0;
-    const minWidth=Number.parseFloat(style.minWidth);
-    const maxWidth=Number.parseFloat(style.maxWidth);
-    let measuredWidth=textWidth+borderAndPadding;
-    if(Number.isFinite(minWidth))measuredWidth=Math.max(minWidth,measuredWidth);
-    if(Number.isFinite(maxWidth))measuredWidth=Math.min(maxWidth,measuredWidth);
+    // Keep CSS length units such as `12ch` in CSS. parseFloat() would read
+    // that as 12px and clamp a longer value to a width that clips its text.
+    // Leave min/max-width to the browser and add a small glyph safety margin.
+    const measuredWidth=textWidth+borderAndPadding+2;
     width=measuredWidth+"px";
   }
   input.style.width=width;
@@ -1038,7 +1037,7 @@ async function sampleSourceOverview(source){
     }
     peaks[bin]=peak;
     if(bin%4===3||bin===bins-1){
-      if(isCurrent()){drawAudio();detailWaveEditor?.refresh(true);}
+      if(isCurrent()){drawAudio();detailWaveEditor?.refreshOverview();}
       await new Promise(resolve=>setTimeout(resolve,0));
     }
   }
@@ -1281,6 +1280,7 @@ detailWaveEditor=createPlayerWaveEditor({
   zoomIn:$("#wave-zoom-in"),zoomOut:$("#wave-zoom-out"),
   zoomLabel:$("#wave-zoom-label"),
   rulerTicks:[...document.querySelectorAll(".wave-detail-ruler [data-ruler-tick]")],
+  continuousRefresh:true,
   getPosition:()=>displayPlayPosition(),
   getMarkers:()=>loopMarkers,
   onScrubMotion:waveformScrubMotion,
