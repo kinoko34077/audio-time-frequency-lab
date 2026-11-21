@@ -11,6 +11,7 @@ const imageDir=path.resolve(process.env.AUDIO_LAB_REVIEW_DIR||"ui-review-screens
 const siteRoot=path.resolve(process.env.AUDIO_LAB_TEST_SITE||"_site");
 const profiles=[
   {name:"compact-320",width:320,height:568,touch:true},
+  {name:"iphone-pwa-393x787",width:393,height:787,touch:true,dpr:1.5},
   {name:"android-360",width:360,height:800,touch:true},
   {name:"mobile-390",width:390,height:844,touch:true},
   {name:"android-412",width:412,height:915,touch:true},
@@ -38,7 +39,7 @@ test("real recorded waveform UX across mobile, Android-size, tablet and desktop 
       const page=await browser.newPage(),errors=[];
       page.on("pageerror",error=>errors.push(error.message));
       await page.setViewport({width:profile.width,height:profile.height,
-        deviceScaleFactor:profile.touch?2:1,isMobile:profile.touch,
+        deviceScaleFactor:profile.dpr??(profile.touch?2:1),isMobile:profile.touch,
         hasTouch:profile.touch});
       try{
         await page.goto("http://127.0.0.1:"+port+"/",{
@@ -57,11 +58,17 @@ test("real recorded waveform UX across mobile, Android-size, tablet and desktop 
             return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,
               width:r.width,height:r.height};
           };
+          const studio=document.querySelector(".studio");
           return {width:innerWidth,height:innerHeight,
             scrollWidth:document.documentElement.scrollWidth,
             wave:box(".wave-detail-wrap"),head:box(".wave-center-head"),
             play:box("#play-main"),speed:box("#granular-speed-value"),
-            pitch:box("#granular-pitch-value"),tabs:box(".main-workspace-tabs")};
+            pitch:box("#granular-pitch-value"),
+            tune:box("#granular-optin-controls"),
+            loop:box("#player-loop-controls"),
+            footer:box(".below-workspace footer"),
+            studio:{scrollHeight:studio.scrollHeight,clientHeight:studio.clientHeight},
+            tabs:box(".main-workspace-tabs")};
         });
         console.log("VIEWPORT_GEOMETRY "+profile.name+" "+JSON.stringify(geometry));
         assert.ok(geometry.scrollWidth<=geometry.width+2,
@@ -77,6 +84,18 @@ test("real recorded waveform UX across mobile, Android-size, tablet and desktop 
           assert.ok(geometry.play.bottom<=geometry.height-4,
             "compact phone must reveal the main Play button without scrolling: "+
             JSON.stringify(geometry.play));
+        if(profile.name==="iphone-pwa-393x787"){
+          assert.ok(geometry.loop.top>=geometry.tune.bottom,
+            "A/B actions must remain below speed and pitch controls: "+
+              JSON.stringify({loop:geometry.loop,tune:geometry.tune}));
+          assert.ok(geometry.footer.bottom<=geometry.height-4,
+            "the PWA footer must fit inside the short phone viewport: "+
+              JSON.stringify({footer:geometry.footer,height:geometry.height,
+                wave:geometry.wave}));
+          assert.ok(geometry.studio.scrollHeight<=geometry.studio.clientHeight+1,
+            "the short phone player must not hide its footer in internal vertical overflow: "+
+              JSON.stringify(geometry.studio));
+        }
         assert.ok(geometry.wave.top<geometry.play.top&&
           geometry.play.top<geometry.speed.top&&
           geometry.speed.top<geometry.pitch.bottom,

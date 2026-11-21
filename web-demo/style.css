@@ -1391,10 +1391,13 @@ body.model-lab[data-main-tab="player"] #player-loop-controls{
     display:flex;flex:1 1 auto;flex-direction:column;min-height:auto
   }
   body.model-lab[data-main-tab="player"] #main-player-panel>.wave-editor .wave-detail-wrap{
-    /* Reserve the mobile chrome and footer before growing the waveform.
-       The 260px content floor wins on short windows, which scroll. */
-    flex:1 1 auto;height:auto!important;min-height:260px;
-    max-height:calc(100dvh - 572px - env(safe-area-inset-bottom,0px))
+    /* Grow into the free viewport, but let the waveform yield space on short
+       phones so the transport, tuning, loop actions and footer stay visible. */
+    --mobile-wave-available:max(150px,
+      calc(100dvh - 572px - env(safe-area-inset-bottom,0px)));
+    flex:1 1 auto;height:auto!important;
+    min-height:min(260px,var(--mobile-wave-available));
+    max-height:var(--mobile-wave-available)
   }
   body.model-lab[data-main-tab="player"] #player-loop-controls{width:100%;align-self:stretch}
   body.model-lab[data-main-tab="player"] .player-loop-toolbar{
