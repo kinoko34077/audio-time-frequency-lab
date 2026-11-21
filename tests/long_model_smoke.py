@@ -68,8 +68,11 @@ try:
         page.goto(legacy_url,wait_until='domcontentloaded')
         page.locator('html[data-fw-boot=ready]').wait_for(timeout=15000)
         page.locator('#audio-file').set_input_files(path)
-        page.wait_for_function("""() => document.querySelector('#audio-state-summary')
-          ?.textContent.includes('読み込み完了。再生できます。')""",timeout=25000)
+        page.wait_for_function("""() => {
+          const name=document.querySelector('#audio-file')?.files?.[0]?.name;
+          return Boolean(name&&document.querySelector('#file-meta')?.textContent.includes(name)&&
+            !document.querySelector('#play-main')?.disabled);
+        }""",timeout=25000)
         # The player owns the only editable speed/pitch controls. Select
         # models in their dedicated tab, without duplicate field proxies.
         assert page.locator("#lab-speed,#lab-pitch").count()==0

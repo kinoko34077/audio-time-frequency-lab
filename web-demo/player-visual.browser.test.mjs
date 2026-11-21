@@ -114,6 +114,17 @@ async function layoutEvidence(page,tag){
             return Math.abs(bounds.top-ruler.top)<=2;
           });
       })(),
+      rulerCoordinateErrors:(()=>{
+        const canvas=document.querySelector("#wave-detail").getBoundingClientRect();
+        return [...document.querySelectorAll(".wave-detail-ruler [data-ruler-tick]")]
+          .map((element,index)=>{
+            const bounds=element.getBoundingClientRect();
+            const expected=canvas.left+canvas.width*index/4;
+            const actual=index===4?bounds.right:index===0?bounds.left:
+              bounds.left+bounds.width/2;
+            return Math.round(Math.abs(actual-expected)*100)/100;
+          });
+      })(),
       markerBelowRuler:(()=>{
         const ruler=document.querySelector(".wave-detail-ruler").getBoundingClientRect();
         const marker=[...document.querySelectorAll(".wave-marker")]
@@ -176,7 +187,9 @@ async function layoutEvidence(page,tag){
           element.dispatchEvent(new Event("input",{bubbles:true}));
           return {width,fits};
         };
+        const shortSpeed=measureRepresentativeValue("#granular-speed-value","1");
         const representativeSpeed=measureRepresentativeValue("#granular-speed-value","-1.237");
+        const shortPitch=measureRepresentativeValue("#granular-pitch-value","0");
         const representativePitch=measureRepresentativeValue("#granular-pitch-value","-12.0");
         const actions=[...document.querySelectorAll("#main-player-panel #shared-transport>.actions button")]
           .filter(element=>getComputedStyle(element).display!=="none")
@@ -189,6 +202,12 @@ async function layoutEvidence(page,tag){
           speedValueHeight:height("#granular-speed-value"),pitchValueHeight:height("#granular-pitch-value"),
           speedTextFits:representativeSpeed.width>=requiredInputWidth("#granular-speed-value","-1.237"),
           pitchTextFits:representativePitch.width>=requiredInputWidth("#granular-pitch-value","-12.0"),
+          speedInputTracksTextWidth:representativeSpeed.width<=
+              requiredInputWidth("#granular-speed-value","-1.237")+3&&
+            representativeSpeed.width>shortSpeed.width+10,
+          pitchInputTracksTextWidth:representativePitch.width<=
+              requiredInputWidth("#granular-pitch-value","-12.0")+3&&
+            representativePitch.width>shortPitch.width+10,
           speedNativeValueFits:representativeSpeed.fits,
           pitchNativeValueFits:representativePitch.fits,
           dryButton:width("#play-dry"),actions,loop,
@@ -244,6 +263,9 @@ async function layoutEvidence(page,tag){
   assert.ok(value.rulerBandHeight>=12&&value.rulerBandHeight<=18,
     "top ruler stays compact against the waveform edge: "+value.rulerBandHeight);
   assert.equal(value.rulerLabelsAtTop,true,"ruler labels sit at the waveform top edge");
+  assert.ok(value.rulerCoordinateErrors.every(error=>error<=1),
+    "ruler labels keep the waveform's full source-time coordinate system: "+
+      JSON.stringify(value.rulerCoordinateErrors));
   assert.equal(value.markerBelowRuler.fits,true,
     "A/B markers begin just below the compact ruler: "+JSON.stringify(value.markerBelowRuler));
   assert.equal(value.clockAtBottom,true,"elapsed and total time sit inside the waveform bottom edge");
@@ -253,6 +275,8 @@ async function layoutEvidence(page,tag){
   assert.ok(value.compactControlSizing.speedValueHeight<=38&&
     value.compactControlSizing.pitchValueHeight<=38&&
     value.compactControlSizing.speedTextFits&&value.compactControlSizing.pitchTextFits&&
+    value.compactControlSizing.speedInputTracksTextWidth&&
+    value.compactControlSizing.pitchInputTracksTextWidth&&
     value.compactControlSizing.speedNativeValueFits&&value.compactControlSizing.pitchNativeValueFits,
     "compact numeric fields still show representative signed speed and pitch values: "+
       JSON.stringify(value.compactControlSizing));

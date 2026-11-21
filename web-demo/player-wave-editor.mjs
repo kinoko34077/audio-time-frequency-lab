@@ -49,6 +49,10 @@ export function createPlayerWaveEditor({
   let detailFailedKey=null,detailRetriedKey=null;
   let detailRetryTimer=null,detailRevision=0;
   let contentRevision=0,renderedContentRevision=-1,scheduledRefresh=0;
+  let signalCanvas=null,signalShiftCanvas=null,signalFrame=NaN;
+  let signalWidth=0,signalHeight=0,signalSpan=NaN;
+  let signalNeedsFullPaint=true;
+  const signalDirtyRanges=new Map();
   let rate=48000,levels=null,frames=0,spanFrames=rate*8;
   let lastFrame=NaN,lastSpan=NaN,lastWidth=0,lastHeight=0;
   const pointers=new Map();
@@ -57,6 +61,10 @@ export function createPlayerWaveEditor({
   // shifting playhead on each event would multiply tiny mouse movements.
   let hover=null;
   const center=()=>clamp(Math.round(getPosition()*rate),0,Math.max(0,frames-1));
+  function markSignalDirty(key,start,end){
+    if(Number.isFinite(start)&&Number.isFinite(end)&&end>start)
+      signalDirtyRanges.set(key,[start,end]);
+  }
   function scheduleRefresh(){
     if(continuousRefresh)return;
     if(typeof requestAnimationFrame!=="function"){refresh();return;}
@@ -76,6 +84,7 @@ export function createPlayerWaveEditor({
     detailPending=null;
     detailFailedKey=null;detailRetriedKey=null;detailRevision++;
     contentRevision++;
+    signalNeedsFullPaint=true;signalDirtyRanges.clear();signalFrame=NaN;
     if(scheduledRefresh&&typeof cancelAnimationFrame==="function"){
       cancelAnimationFrame(scheduledRefresh);scheduledRefresh=0;
     }
@@ -91,7 +100,7 @@ export function createPlayerWaveEditor({
     return w*(.5+(frame-c)/spanFrames);
   }
   function sampledPeak(from,to,level){
-    if(to<=from)return [0,0];
+    if(to<=from)return null;
     let low=1,high=-1;
     if(source){
       if(detailBlockFrames>0){
@@ -107,18 +116,21 @@ export function createPlayerWaveEditor({
         // While the detailed range is pending, never paint coarse overview
         // peaks into the zoomed waveform. A short blank edge is more honest
         // than the recurring low-resolution "seaweed" tail.
-        return [0,0];
+        return null;
       }
       if(source.overviewPeaks?.length){
         const peaks=source.overviewPeaks;
         const begin=clamp(Math.floor(from*peaks.length/frames),0,peaks.length-1);
         const end=clamp(Math.floor((to-1)*peaks.length/frames),begin,peaks.length-1);
+        let hasPeak=false;
         for(let i=begin;i<=end;i++){
           const peak=peaks[i];if(!peak)continue;
+          hasPeak=true;
           low=Math.min(low,peak[0]);high=Math.max(high,peak[1]);
         }
-      }
-    }else if(!channels)return [0,0];
+        if(!hasPeak)return null;
+      }else return null;
+    }else if(!channels)return null;
     else if(level){
       // Coarse hierarchy bins deliberately include partial border samples:
       // their visual envelope is conservative, and no raw whole-song scan is
@@ -163,6 +175,7 @@ export function createPlayerWaveEditor({
     if(blockFrames!==detailBlockFrames){
       detailBuckets.clear();detailBlockFrames=blockFrames;
       contentRevision++;
+      signalNeedsFullPaint=true;signalDirtyRanges.clear();
       detailFailedKey=null;detailRetriedKey=null;
     }
     if(summaryEnd-summaryStart>readFrames*DETAIL_MAX_READS){
@@ -171,6 +184,7 @@ export function createPlayerWaveEditor({
       desiredDetailRange=null;
       if(detailPending)detailRevision++;
       detailBuckets.clear();detailBlockFrames=0;
+      signalNeedsFullPaint=true;signalDirtyRanges.clear();
       detailFailedKey=null;detailRetriedKey=null;
       return;
     }
@@ -258,8 +272,10 @@ export function createPlayerWaveEditor({
             }
           }
           detailBuckets.set(index,low===1&&high===-1?[0,0]:[low,high]);
-          if(index>=visibleFirstBucket&&index<visibleAfterLastBucket)
+          if(index>=visibleFirstBucket&&index<visibleAfterLastBucket){
             visiblePeaksChanged=true;
+            markSignalDirty("detail:"+index,bucketStart,bucketStart+length);
+          }
         }
         chunkIndex++;
         const maxCachedBuckets=Math.min(8192,
@@ -272,8 +288,12 @@ export function createPlayerWaveEditor({
           for(const cached of detailBuckets.keys()){
             if(keep.has(cached))continue;
             detailBuckets.delete(cached);
-            if(cached>=visibleFirstBucket&&cached<visibleAfterLastBucket)
+            if(cached>=visibleFirstBucket&&cached<visibleAfterLastBucket){
               visiblePeaksChanged=true;
+              const bucketStart=cached*blockFrames;
+              markSignalDirty("detail:"+cached,bucketStart,
+                Math.min(frames,bucketStart+blockFrames));
+            }
           }
         }
         // Retain completed absolute source buckets so a moving viewport only
@@ -327,6 +347,99 @@ export function createPlayerWaveEditor({
     if(Math.abs(relocated-c)>=.5)onPosition(relocated/rate,{start:false});
     lastFrame=NaN;refresh(true);
   }
+  function ensureSignalCanvases(width,height){
+    if(typeof document==="undefined")return null;
+    if(!signalCanvas){
+      signalCanvas=document.createElement("canvas");
+      signalCanvas.id="wave-detail-buffer";
+      signalShiftCanvas=document.createElement("canvas");
+      signalShiftCanvas.id="wave-detail-shift-buffer";
+    }
+    for(const buffer of [signalCanvas,signalShiftCanvas]){
+      if(buffer.width!==width)buffer.width=width;
+      if(buffer.height!==height)buffer.height=height;
+    }
+    return {signal:signalCanvas.getContext("2d"),
+      shift:signalShiftCanvas.getContext("2d")};
+  }
+  function drawSignal(context,width,height,c,ratio,clipStart=0,clipEnd=width){
+    const fromX=clamp(Math.floor(clipStart),0,width);
+    const toX=clamp(Math.ceil(clipEnd),fromX,width);
+    if(toX<=fromX)return;
+    context.save();
+    context.beginPath();context.rect(fromX,0,toX-fromX,height);context.clip();
+    context.clearRect(fromX,0,toX-fromX,height);
+    const start=c-spanFrames/2,samplesPerPixel=spanFrames/width;
+    const level=levels&&samplesPerPixel>=256?
+      levels.slice().reverse().find(x=>x.block<=samplesPerPixel*1.6)||levels[0]:null;
+    context.strokeStyle="#75d9c5";context.lineWidth=Math.max(1,ratio);
+    context.beginPath();
+    for(let x=fromX;x<toX;x++){
+      const pixelStart=start+x*samplesPerPixel;
+      const pixelEnd=start+(x+1)*samplesPerPixel;
+      // Time outside the source has no signal. Keeping this region transparent
+      // lets the destination paint a stable background at either file edge.
+      if(pixelEnd<=0||pixelStart>=frames)continue;
+      const from=clamp(Math.floor(pixelStart),0,frames-1);
+      const to=clamp(Math.ceil(pixelEnd),from+1,frames);
+      const peak=sampledPeak(from,to,level);
+      if(!peak||(peak[0]===0&&peak[1]===0))continue;
+      const [lo,hi]=peak;
+      const y1=height/2-hi*height*.40,y2=height/2-lo*height*.40;
+      context.moveTo(x,Math.min(y1,y2));
+      context.lineTo(x,Math.max(y1+ratio,y2+ratio));
+    }
+    context.stroke();context.restore();
+  }
+  function updateSignalBuffer(buffers,c,width,height,ratio,baseChanged,positionChanged){
+    if(!buffers)return false;
+    const {signal,shift}=buffers;
+    if(baseChanged||signalWidth!==width||signalHeight!==height||
+       signalSpan!==spanFrames||!Number.isFinite(signalFrame)){
+      signal.clearRect(0,0,width,height);
+      drawSignal(signal,width,height,c,ratio);
+      signalFrame=c;signalWidth=width;signalHeight=height;
+      signalSpan=spanFrames;signalNeedsFullPaint=false;signalDirtyRanges.clear();
+      return true;
+    }
+    if(positionChanged){
+      // Reuse the PCM raster while the playhead advances. Move whole backing
+      // pixels to avoid repeated full-width path generation and resampling blur,
+      // then compute only the newly exposed strip from the same sampled PCM.
+      const shiftX=Math.round((signalFrame-c)*width/spanFrames);
+      if(Math.abs(shiftX)>=width/2){
+        signal.clearRect(0,0,width,height);
+        drawSignal(signal,width,height,c,ratio);
+        signalFrame=c;signalDirtyRanges.clear();
+      }else if(shiftX){
+        shift.clearRect(0,0,width,height);
+        shift.drawImage(signalCanvas,shiftX,0);
+        signal.clearRect(0,0,width,height);
+        signal.drawImage(signalShiftCanvas,0,0);
+        signalFrame-=shiftX*spanFrames/width;
+        if(shiftX>0)drawSignal(signal,width,height,signalFrame,ratio,0,shiftX+1);
+        else drawSignal(signal,width,height,signalFrame,ratio,width+shiftX-1,width);
+      }
+    }
+    const dirty=[];
+    for(const [key,[start,end]] of signalDirtyRanges){
+      const left=boundsToX(start,signalFrame,width);
+      const right=boundsToX(end,signalFrame,width);
+      if(right<=0||left>=width)continue;
+      dirty.push([Math.max(0,Math.floor(left)-1),
+        Math.min(width,Math.ceil(right)+1)]);
+      signalDirtyRanges.delete(key);
+    }
+    dirty.sort((a,b)=>a[0]-b[0]);
+    for(let index=0;index<dirty.length;){
+      let [left,right]=dirty[index++];
+      while(index<dirty.length&&dirty[index][0]<=right){
+        right=Math.max(right,dirty[index++][1]);
+      }
+      drawSignal(signal,width,height,signalFrame,ratio,left,right);
+    }
+    return true;
+  }
   function refresh(force=false){
     if(!frames||!canvas.isConnected||!canvas.clientWidth)return;
     const c=center(),w=canvas.clientWidth,h=canvas.clientHeight;
@@ -334,9 +447,12 @@ export function createPlayerWaveEditor({
     // throttle added an avoidable 30Hz stair-step to a 60Hz playhead.
     // A subpixel source movement does not alter the visible waveform; still
     // update marker positions, because A/B may have changed.
-    const changed=force||w!==lastWidth||h!==lastHeight||spanFrames!==lastSpan||
-      contentRevision!==renderedContentRevision||
-      Math.abs(c-lastFrame)>spanFrames/Math.max(1,w)*.35;
+    const positionChanged=Math.abs(c-lastFrame)>
+      spanFrames/Math.max(1,w)*.35;
+    const dimensionsChanged=w!==lastWidth||h!==lastHeight;
+    const spanChanged=spanFrames!==lastSpan;
+    const contentChanged=contentRevision!==renderedContentRevision;
+    const changed=force||dimensionsChanged||spanChanged||contentChanged||positionChanged;
     if(changed){
       lastFrame=c;lastSpan=spanFrames;lastWidth=w;lastHeight=h;
       const ratio=Math.min(devicePixelRatio||1,2);
@@ -349,11 +465,16 @@ export function createPlayerWaveEditor({
       if(canvas.height!==pixelHeight)canvas.height=pixelHeight;
       const context=canvas.getContext("2d"),width=canvas.width,height=canvas.height;
       const xScale=width/w,scale=height/h;
-      context.clearRect(0,0,width,height);
-      context.fillStyle="#0a1e27";context.fillRect(0,0,width,height);
       const start=c-spanFrames/2;
       const visibleStart=Math.max(0,start),visibleEnd=Math.min(frames,start+spanFrames);
       if(visibleEnd>visibleStart)requestDetail(visibleStart,visibleEnd);
+      const buffers=ensureSignalCanvases(width,height);
+      if(contentChanged&&!signalNeedsFullPaint&&!signalDirtyRanges.size)
+        signalNeedsFullPaint=true;
+      const signalUpdated=updateSignalBuffer(buffers,c,width,height,ratio,
+        force||dimensionsChanged||spanChanged||signalNeedsFullPaint,positionChanged);
+      context.clearRect(0,0,width,height);
+      context.fillStyle="#0a1e27";context.fillRect(0,0,width,height);
       const {a,b,enabled}=onAB();
       const xa=clamp(boundsToX(a,c,width),0,width);
       const xb=clamp(boundsToX(b,c,width),0,width);
@@ -361,26 +482,8 @@ export function createPlayerWaveEditor({
       context.fillRect(xa,0,Math.max(0,xb-xa),height);
       context.strokeStyle="#33595f";context.lineWidth=ratio;
       context.beginPath();context.moveTo(0,height/2);context.lineTo(width,height/2);context.stroke();
-      const samplesPerPixel=spanFrames/width;
-      const level=levels&&samplesPerPixel>=256?
-        levels.slice().reverse().find(x=>x.block<=samplesPerPixel*1.6)||levels[0]:null;
-      context.strokeStyle="#75d9c5";context.lineWidth=Math.max(1,ratio);
-      context.beginPath();
-      for(let x=0;x<width;x++){
-        const pixelStart=start+x*samplesPerPixel;
-        const pixelEnd=start+(x+1)*samplesPerPixel;
-        // A viewport may extend beyond either source edge. Leave those pixels
-        // empty instead of repeating the first/last PCM bucket into silence.
-        if(pixelEnd<=0||pixelStart>=frames)continue;
-        const from=clamp(Math.floor(pixelStart),0,frames-1);
-        const to=clamp(Math.ceil(pixelEnd),from+1,frames);
-        const [lo,hi]=sampledPeak(from,to,level);
-        const amp=Math.max(1,Math.abs(hi-lo)*height*.38);
-        const y1=height/2-hi*height*.40,y2=height/2-lo*height*.40;
-        context.moveTo(x,Math.min(y1,y2));
-        context.lineTo(x,Math.max(y1+1,y2+1));
-      }
-      context.stroke();
+      if(signalUpdated)context.drawImage(signalCanvas,0,0);
+      else drawSignal(context,width,height,c,ratio);
       for(const [frame,color] of [[a,"#69e2c2"],[b,"#ffd38a"]]){
         const x=boundsToX(frame,c,width);
         if(x<0||x>width)continue;
@@ -426,7 +529,7 @@ export function createPlayerWaveEditor({
     canvas.setAttribute("aria-valuenow",String(c));
     canvas.setAttribute("aria-valuetext",timestamp(c/rate));
   }
-  function refreshOverview(){
+  function refreshOverview(startFrame=null,endFrame=null,bin=null){
     // Overview bins only feed the fallback renderer at very wide zoom. While
     // the detailed waveform has its own PCM buckets, repainting it for every
     // four overview bins needlessly clears the live canvas dozens of times
@@ -434,6 +537,9 @@ export function createPlayerWaveEditor({
     if(source&&detailBlockFrames>0)return;
     // The app's shared display RAF observes this revision, including while
     // paused. Let it paint instead of starting another canvas render path.
+    if(Number.isFinite(startFrame)&&Number.isFinite(endFrame)&&endFrame>startFrame)
+      markSignalDirty("overview:"+(bin??startFrame),startFrame,endFrame);
+    else signalNeedsFullPaint=true;
     contentRevision++;
     scheduleRefresh();
   }

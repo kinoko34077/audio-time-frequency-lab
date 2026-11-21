@@ -217,11 +217,8 @@ test("a moving detail viewport redirects the next waveform read to the current p
     created.setPosition(32);
     editor.refresh(true);
     const pendingRightEdge=created.waveSegments.filter(segment=>segment.x===319).at(-1);
-    assert.ok(pendingRightEdge,"the moving viewport must paint its new right edge");
-    assert.ok(Math.abs((pendingRightEdge.y1+pendingRightEdge.y2)/2-60)<1&&
-      Math.abs(pendingRightEdge.y2-pendingRightEdge.y1)<=1.5,
-      "an unread detailed edge must stay empty instead of falling back to coarse overview peaks: "+
-        JSON.stringify(pendingRightEdge));
+    assert.equal(pendingRightEdge,undefined,
+      "an unread detailed edge must stay blank, without a false centerline while PCM is pending");
     releaseFirst();
     await waitForReadQuiet(source,reads);
     const newCenter=32*48_000;

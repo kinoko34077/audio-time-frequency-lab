@@ -44,8 +44,11 @@ try:
       # U6: readiness is visible in the one-line player status. Full
       # engine telemetry stays mounted but is no longer permanently visible.
       try:
-        page.wait_for_function("""() => document.querySelector('#audio-state-summary')
-          ?.textContent.includes('読み込み完了。再生できます。')""",timeout=20000)
+        page.wait_for_function("""() => {
+          const name=document.querySelector('#audio-file')?.files?.[0]?.name;
+          return Boolean(name&&document.querySelector('#file-meta')?.textContent.includes(name)&&
+            !document.querySelector('#play-main')?.disabled);
+        }""",timeout=20000)
       except Exception as error:
         try:
           state=page.evaluate("""() => {

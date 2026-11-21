@@ -1037,7 +1037,11 @@ async function sampleSourceOverview(source){
     }
     peaks[bin]=peak;
     if(bin%4===3||bin===bins-1){
-      if(isCurrent()){drawAudio();detailWaveEditor?.refreshOverview();}
+      if(isCurrent()){
+        drawAudio();
+        detailWaveEditor?.refreshOverview(
+          Math.floor(bin*frames/bins),Math.floor((bin+1)*frames/bins),bin);
+      }
       await new Promise(resolve=>setTimeout(resolve,0));
     }
   }
