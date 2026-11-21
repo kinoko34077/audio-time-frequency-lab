@@ -1375,22 +1375,26 @@ body.model-lab[data-main-tab="player"] #player-loop-controls{
   body.model-lab[data-main-tab="player"] .studio{
     display:flex;flex-direction:column;height:100vh;height:100dvh;
     min-height:100vh;min-height:100dvh;
+    overflow-y:auto;overscroll-behavior-y:contain;
     margin:0 auto;padding:calc(6px + env(safe-area-inset-top,0px)) 7px
       calc(8px + env(safe-area-inset-bottom,0px))
   }
   body.model-lab[data-main-tab="player"] .main-workspace-tabs{flex:0 0 auto}
   body.model-lab[data-main-tab="player"] .workspace-grid{
-    display:flex!important;flex:1 1 auto;flex-direction:column;min-height:0;width:100%;margin:0 auto
+    display:flex!important;flex:1 1 auto;flex-direction:column;min-height:auto;width:100%;margin:0 auto
   }
   body.model-lab[data-main-tab="player"] .workspace-left{
-    display:flex;flex:1 1 auto;flex-direction:column;min-height:0
+    display:flex;flex:1 1 auto;flex-direction:column;min-height:auto
   }
-  body.model-lab[data-main-tab="player"] #main-player-panel{flex:1 1 auto;min-height:0}
+  body.model-lab[data-main-tab="player"] #main-player-panel{flex:1 1 auto;min-height:auto}
   body.model-lab[data-main-tab="player"] #main-player-panel>.wave-editor{
-    display:flex;flex:1 1 auto;flex-direction:column;min-height:0
+    display:flex;flex:1 1 auto;flex-direction:column;min-height:auto
   }
   body.model-lab[data-main-tab="player"] #main-player-panel>.wave-editor .wave-detail-wrap{
-    flex:1 1 auto;height:auto!important;min-height:260px
+    /* Reserve the mobile chrome and footer before growing the waveform.
+       The 260px content floor wins on short windows, which scroll. */
+    flex:1 1 auto;height:auto!important;min-height:260px;
+    max-height:calc(100dvh - 572px - env(safe-area-inset-bottom,0px))
   }
   body.model-lab[data-main-tab="player"] #player-loop-controls{width:100%;align-self:stretch}
   body.model-lab[data-main-tab="player"] .player-loop-toolbar{

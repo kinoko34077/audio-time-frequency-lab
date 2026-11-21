@@ -11,7 +11,8 @@ import {cleanupTestProcesses} from "./test-process-cleanup.mjs";
 // and narrow touch viewport. Captures are review evidence, NOT a substitute
 // for physical iPhone Safari or subjective audio-quality checks.
 const recording=path.resolve("web-demo/test-fixtures/meta-piano-a0-cc0-3s-48khz.wav");
-const captureDir=path.resolve("ui-review-screenshots");
+const captureDir=path.resolve(process.env.AUDIO_LAB_REVIEW_DIR||"ui-review-screenshots");
+const siteRoot=path.resolve(process.env.AUDIO_LAB_TEST_SITE||"_site");
 
 async function waitForFile(page){
   await (await page.$("#audio-file")).uploadFile(recording);
@@ -190,7 +191,7 @@ test("R4 usability visual captures: desktop and mobile player and folded researc
   const python=process.env.PYTHON_EXECUTABLE||
     (process.platform==="win32"?"python":"python3");
   const server=spawn(python,["-m","http.server",String(port),"--bind","127.0.0.1"],{
-    cwd:path.resolve("_site"),stdio:"ignore",windowsHide:true
+    cwd:siteRoot,stdio:"ignore",windowsHide:true
   });
   let browser;
   try{
@@ -347,6 +348,9 @@ test("R4 usability visual captures: desktop and mobile player and folded researc
     assert.ok(mobileLayout.footer.bottom>=mobileLayout.viewportHeight-40,
       "mobile footer reaches the bottom of the usable viewport: "+
         JSON.stringify({footer:mobileLayout.footer,height:mobileLayout.viewportHeight}));
+    assert.ok(mobileLayout.footer.bottom<=mobileLayout.viewportHeight-8,
+      "mobile footer remains visible above the bottom safe-area padding: "+
+        JSON.stringify({footer:mobileLayout.footer,height:mobileLayout.viewportHeight}));
     assert.ok(mobileLayout.waveform.height>=260,
       "recovered vertical space is used by the main waveform: "+
         JSON.stringify(mobileLayout.waveform));
@@ -362,6 +366,46 @@ test("R4 usability visual captures: desktop and mobile player and folded researc
     assert.ok(firstViewportPitch.pitchBottom<=firstViewportPitch.viewportHeight,
       "pitch editing must be reachable before first vertical scroll at 390x844");
     await mobile.screenshot({path:path.join(captureDir,"03-player-mobile.png"),fullPage:true});
+    await mobile.evaluate(()=>{
+      const status=document.querySelector("#status");
+      window.__mobileStatusBefore={text:status.textContent,kind:status.dataset.kind};
+      status.dataset.kind="error";
+      status.textContent="検証用：モバイル診断表示";
+    });
+    await mobile.waitForFunction(()=>!document.querySelector("#audio-diagnostics-toggle")?.hidden,
+      {timeout:3500});
+    await mobile.click("#audio-diagnostics-toggle");
+    const mobileDiagnostics=await mobile.evaluate(()=>{
+      const box=selector=>{
+        const r=document.querySelector(selector).getBoundingClientRect();
+        return {top:r.top,bottom:r.bottom};
+      };
+      const studio=document.querySelector(".studio");
+      return {wave:box(".wave-detail-wrap"),actions:box("#main-player-panel .actions"),
+        status:box(".audio-status-row"),tuning:box("#granular-optin-controls"),
+        ab:box("#player-loop-controls"),footer:box("footer"),
+        diagnosticsVisible:document.querySelector("#runtime-hud").getClientRects().length>0,
+        scrollHeight:studio.scrollHeight,clientHeight:studio.clientHeight};
+    });
+    console.log("MOBILE_DIAGNOSTICS_LAYOUT "+JSON.stringify(mobileDiagnostics));
+    assert.equal(mobileDiagnostics.diagnosticsVisible,true,
+      "an actionable mobile error can open DSP details");
+    assert.ok(mobileDiagnostics.wave.bottom<=mobileDiagnostics.actions.top&&
+      mobileDiagnostics.actions.bottom<=mobileDiagnostics.status.top&&
+      mobileDiagnostics.status.bottom<=mobileDiagnostics.tuning.top&&
+      mobileDiagnostics.ab.bottom<=mobileDiagnostics.footer.top,
+      "expanded mobile diagnostics do not overlap the waveform, controls or footer: "+
+        JSON.stringify(mobileDiagnostics));
+    assert.ok(mobileDiagnostics.scrollHeight>mobileDiagnostics.clientHeight,
+      "expanded mobile diagnostics scroll with the PWA shell instead of overlapping controls");
+    await mobile.click("#audio-diagnostics-toggle");
+    await mobile.evaluate(()=>{
+      const status=document.querySelector("#status");
+      status.dataset.kind=window.__mobileStatusBefore.kind;
+      status.textContent=window.__mobileStatusBefore.text;
+    });
+    await mobile.waitForFunction(()=>document.querySelector("#audio-diagnostics-toggle")?.hidden,
+      {timeout:3500});
     await mobile.setViewport({width:390,height:980,deviceScaleFactor:2,isMobile:true,hasTouch:true});
     const tallMobileLayout=await layoutEvidence(mobile,"mobile-tall-touch-loaded");
     assert.ok(tallMobileLayout.waveform.height>=mobileLayout.waveform.height+60,
