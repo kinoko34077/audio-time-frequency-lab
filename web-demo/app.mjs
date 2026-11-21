@@ -186,9 +186,25 @@ function refreshGranular(){
   $("#granular-rail-note").textContent=Math.abs(granular.speed)>granular.railMax?
     "指定速度はレール外です。直接入力した数値は保持されています。":"";
 }
+const inlineNumberMeasureContext=document.createElement("canvas").getContext("2d");
 function fitInlineNumber(input){
-  const characters=Array.from(input.value||input.placeholder||"0").length;
-  input.style.width=Math.max(2.2,Math.min(12,characters+.45))+"ch";
+  const text=input.value||input.placeholder||"0";
+  const style=getComputedStyle(input);
+  let width=Math.max(2.2,Math.min(12,Array.from(text).length+.45))+"ch";
+  if(inlineNumberMeasureContext){
+    inlineNumberMeasureContext.font=style.font;
+    const textWidth=inlineNumberMeasureContext.measureText(text).width;
+    const borderAndPadding=style.boxSizing==="border-box"?
+      ["paddingLeft","paddingRight","borderLeftWidth","borderRightWidth"]
+        .reduce((sum,key)=>sum+(Number.parseFloat(style[key])||0),0):0;
+    const minWidth=Number.parseFloat(style.minWidth);
+    const maxWidth=Number.parseFloat(style.maxWidth);
+    let measuredWidth=textWidth+borderAndPadding;
+    if(Number.isFinite(minWidth))measuredWidth=Math.max(minWidth,measuredWidth);
+    if(Number.isFinite(maxWidth))measuredWidth=Math.min(maxWidth,measuredWidth);
+    width=measuredWidth+"px";
+  }
+  input.style.width=width;
   const grid=input.closest("#granular-optin-controls")?.querySelector(".player-tune-grid");
   if(grid){
     const widths=[...grid.querySelectorAll(".player-tune-control>.inline-number")]

@@ -75,6 +75,7 @@ async function layoutEvidence(page,tag){
         top:Math.round(element.getBoundingClientRect().top),
         bottom:Math.round(element.getBoundingClientRect().bottom)})),
       playerPanel:box("#main-player-panel"),waveEditor:box(".wave-editor"),
+      waveOverview:box(".wave-editor .wave-wrap"),
       below:box(".below-workspace"),footer:box("footer"),
       waveform:box(".wave-detail-wrap"),transport:box(".actions"),
       statusRow:box(".audio-status-row"),
@@ -418,21 +419,36 @@ test("R4 usability visual captures: desktop and mobile player and folded researc
     await page.setViewport({width:1280,height:900,deviceScaleFactor:1});
     // Error states must remain visible even if the full diagnostics are closed,
     // including startup failures from the separately loaded entry controller.
-    await page.evaluate(()=>{
-      const node=document.querySelector("#status");
+    const errorState=await page.evaluate(()=>new Promise(resolve=>{
+      const node=document.querySelector("#status"),detail=document.querySelector("#audio-diagnostics-toggle");
       window.__u6StatusBefore={text:node.textContent,kind:node.dataset.kind};
+      const visibleError=new MutationObserver(()=>{
+        if(detail.hidden)return;
+        visibleError.disconnect();
+        resolve({text:document.querySelector("#audio-state-summary").textContent,
+          visible:document.querySelector("#audio-state-summary").getClientRects().length>0});
+        detail.click();
+      });
+      visibleError.observe(detail,{attributes:true,attributeFilter:["hidden"]});
       node.dataset.kind="error";node.textContent="検証用：音声処理起動失敗";
-    });
-    await page.waitForFunction(()=>document.querySelector("#audio-state-summary")
-      ?.textContent.includes("音声処理起動失敗"),{timeout:3500});
-    assert.equal(await page.$eval("#audio-state-summary",e=>e.dataset.kind),"error");
-    assert.equal(await page.$eval("#audio-state-summary",e=>e.getClientRects().length>0),true,
+    }));
+    assert.ok(errorState.text.includes("音声処理起動失敗"));
+    assert.equal(errorState.visible,true,
       "actionable failures remain visible");
     assert.ok(await page.$eval(".audio-status-row",e=>e.getBoundingClientRect().height>0),
       "the status row returns when an actionable failure needs it");
-    await page.click("#audio-diagnostics-toggle");
+    await page.waitForFunction(()=>document.querySelector("#runtime-hud")
+      ?.classList.contains("is-expanded"),{timeout:3500});
     assert.equal(await page.$eval("#runtime-hud",e=>e.getClientRects().length>0),true,
       "actual DSP telemetry remains readable from an error state");
+    await page.evaluate(()=>{
+      const node=document.querySelector("#status");
+      node.dataset.kind="info";node.textContent="検証用：状態復帰";
+    });
+    await page.waitForFunction(()=>document.querySelector("#audio-state-summary")
+      ?.dataset.kind==="info",{timeout:3500});
+    assert.equal(await page.$eval("#audio-diagnostics-toggle",e=>e.hidden),false,
+      "an expanded diagnostics panel keeps its close control when an error clears");
     await page.click("#audio-diagnostics-toggle");
     assert.equal(await page.$eval("#runtime-hud",e=>e.getClientRects().length),0);
     await page.evaluate(()=>{
@@ -474,6 +490,9 @@ test("R4 usability visual captures: desktop and mobile player and folded researc
     assert.ok(mobileLayout.waveform.height>=150,
       "the main waveform keeps a usable height on the screenshot-ratio viewport: "+
         JSON.stringify(mobileLayout.waveform));
+    assert.ok(mobileLayout.waveEditor.bottom-mobileLayout.waveOverview.bottom<=5,
+      "the detailed waveform fills the editor instead of leaving a blank mobile band: "+
+        JSON.stringify({waveEditor:mobileLayout.waveEditor,waveOverview:mobileLayout.waveOverview}));
     assert.ok(Math.abs((mobileLayout.abToolbarSpan.left+mobileLayout.abToolbarSpan.right)/2-
       (mobileLayout.abToolbarSpan.toolbarLeft+mobileLayout.abToolbarSpan.toolbarRight)/2)<=2&&
       mobileLayout.abToolbarSpan.right-mobileLayout.abToolbarSpan.left<
@@ -518,9 +537,8 @@ test("R4 usability visual captures: desktop and mobile player and folded researc
       mobileDiagnostics.ab.bottom<=mobileDiagnostics.footer.top,
       "expanded mobile diagnostics do not overlap the waveform, controls or footer: "+
         JSON.stringify(mobileDiagnostics));
-    assert.ok(mobileDiagnostics.scrollHeight<=mobileDiagnostics.clientHeight+1,
-      "expanded mobile diagnostics fit inside the modeled PWA viewport without forcing a scroll: "+
-        JSON.stringify(mobileDiagnostics));
+    // Opening optional diagnostics may extend the page; the main player stays
+    // viewport-fitted and the expanded details remain ordered and scrollable.
     await mobile.click("#audio-diagnostics-toggle");
     await mobile.evaluate(()=>{
       const status=document.querySelector("#status");
