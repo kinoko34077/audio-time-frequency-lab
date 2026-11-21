@@ -3,6 +3,7 @@ import {fullBandPartialOptions} from "./lab-contract.mjs";
 import {createModelStream} from "./lab-stream.mjs";
 import {createSourcePCMBridge} from "./source-pcm-bridge.mjs";
 import {createProgressiveAudioSource} from "./progressive-audio-source.mjs";
+import {advanceOverviewBuildToken,overviewBinCount,overviewNeedsResample,readOverviewPeak} from "./waveform-range-peaks.mjs";
 import {returnToPlaySpeed,scrubSpeed,releaseScrubSpeed} from "./scrub-kinetics.mjs";
 import {createPlayerWaveEditor} from "./player-wave-editor.mjs";
 import {toggleSourceMarker,nearestMarkerLoop,shiftLoopToFrame} from "./player-ab-markers.mjs";
@@ -74,7 +75,7 @@ const state={
   module:null,workletLoaded:false,player:null,position:0,seek:0,
   qualityIndex:0,settingsRevision:0,name:"audio",fileMeta:"音声未選択",processing:false,
   precise:Object.create(null),
-  effective:{low:20,high:16000},raf:0,lastStats:null,mathCore:null,wasmPromise:null,rebuildTimer:null,sine:null,loadToken:0,transportEpoch:0
+  effective:{low:20,high:16000},raf:0,lastStats:null,mathCore:null,wasmPromise:null,rebuildTimer:null,overviewResizeTimer:null,sine:null,loadToken:0,transportEpoch:0
 };
 const lab={mode:initialModel,speed:1,semitones:0,fftSize:2048,shortFftSize:512,longFftSize:2048,referenceWindows:8,periodCycles:8,individual:false,processed:null,worker:null,job:0};
 function setPlayerProcessingStatus(phase,{transport,model=lab.mode,
@@ -980,36 +981,41 @@ function drawAudio(){
   }
   ctx.stroke();
 }
-async function sampleSourceOverview(source,token){
-  const bins=96,peaks=Array.from({length:bins},()=>null);
+async function sampleSourceOverview(source){
+  const bins=overviewBinCount($("#wave").width);
+  if(source.overviewBinCount===bins&&source.overviewPeaks?.length===bins&&
+     source.overviewPeaks.every(peak=>Array.isArray(peak)&&peak.length===2))return;
+  const buildToken=advanceOverviewBuildToken(source);
+  source.overviewBinCount=bins;
+  source.overviewBuildComplete=false;
+  const isCurrent=()=>state.source===source&&
+    source.overviewBuildToken===buildToken;
+  const peaks=Array.from({length:bins},()=>null);
   source.overviewPeaks=peaks;
   if(state.source===source)state.overviewPeaks=peaks;
-  const frames=source.sourceFrames,windowFrames=source.windowFrames;
   for(let bin=0;bin<bins;bin++){
-    if(state.source!==source||token!==state.loadToken)return;
-    const target=Math.min(frames-1,
-      Math.floor((bin+.5)*frames/bins));
-    const start=Math.floor(target/windowFrames)*windowFrames;
-    const count=Math.min(windowFrames,frames-start);
-    let result=null;
-    for(let attempt=0;attempt<4&&!result;attempt++){
-      if(state.source!==source||token!==state.loadToken)return;
-      try{result=await source.read(start,count,{priority:"waveform"});}
+    if(!isCurrent())return;
+    let peak=null;
+    for(let attempt=0;attempt<4&&!peak;attempt++){
+      if(!isCurrent())return;
+      try{peak=await readOverviewPeak(source,bin,bins,{
+        shouldContinue:isCurrent
+      });}
       catch{
         if(attempt<3)await new Promise(resolve=>setTimeout(resolve,120));
       }
     }
-    if(!result)continue;
-    let low=1,high=-1;
-    for(const channel of result.channels)for(const sample of channel){
-      if(sample<low)low=sample;if(sample>high)high=sample;
+    if(peak===null){
+      if(!isCurrent())return;
+      continue;
     }
-    peaks[bin]=[low===1&&high===-1?0:low,high===-1&&low===1?0:high];
+    peaks[bin]=peak;
     if(bin%4===3||bin===bins-1){
-      if(state.source===source){drawAudio();detailWaveEditor?.refresh(true);}
+      if(isCurrent()){drawAudio();detailWaveEditor?.refresh(true);}
       await new Promise(resolve=>setTimeout(resolve,0));
     }
   }
+  if(isCurrent())source.overviewBuildComplete=true;
 }
 let activeWavePointer=null;
 function playPosition(){
@@ -2359,8 +2365,23 @@ controls.main.addEventListener("click",()=>void toggleMainPlayer());
 controls.dry.addEventListener("click",()=>play("dry"));
 controls.wet.addEventListener("click",()=>play("wet"));
 controls.stop.addEventListener("click",()=>stop());
-window.addEventListener("resize",()=>{drawCurve();drawAudio();detailWaveEditor?.refresh(true);});
+window.addEventListener("resize",()=>{
+  drawCurve();drawAudio();detailWaveEditor?.refresh(true);
+  const source=state.source;
+  if(source&&overviewNeedsResample(source,$("#wave").width)){
+    if(source.overviewBinCount!==null)advanceOverviewBuildToken(source);
+    source.overviewBinCount=null;
+  }
+  const shouldResample=Boolean(source)&&source.overviewBinCount===null;
+  if(state.overviewResizeTimer){clearTimeout(state.overviewResizeTimer);state.overviewResizeTimer=null;}
+  if(!shouldResample)return;
+  state.overviewResizeTimer=setTimeout(()=>{
+    state.overviewResizeTimer=null;
+    if(state.source)void sampleSourceOverview(state.source);
+  },180);
+});
 window.addEventListener("pagehide",event=>{
+  if(state.overviewResizeTimer){clearTimeout(state.overviewResizeTimer);state.overviewResizeTimer=null;}
   if(event.persisted){
     ++state.loadToken;
     state.loadingSource?.dispose();state.loadingSource=null;
@@ -2425,7 +2446,7 @@ async function load(file){
     $("#progress").value=0;
     indicator("停止中 · 音声選択済み");
     message("読み込み完了。再生できます。");
-    void sampleSourceOverview(state.source,token);
+    void sampleSourceOverview(state.source);
   }catch(error){
     candidate?.dispose();
     if(state.loadingSource===candidate)state.loadingSource=null;

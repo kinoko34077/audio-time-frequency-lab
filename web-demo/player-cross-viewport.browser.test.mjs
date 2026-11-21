@@ -23,7 +23,8 @@ const profiles=[
 test("real recorded waveform UX across mobile, Android-size, tablet and desktop windows",async()=>{
   mkdirSync(imageDir,{recursive:true});
   const port=18792;
-  const server=spawn("python3",["-m","http.server",String(port),"--bind","127.0.0.1"],{
+  const python=process.env.PYTHON_EXECUTABLE||"python3";
+  const server=spawn(python,["-m","http.server",String(port),"--bind","127.0.0.1"],{
     cwd:siteRoot,stdio:"ignore"
   });
   let browser;

@@ -4,7 +4,18 @@ import {createPlayerWaveEditor} from "./player-wave-editor.mjs";
 
 function makeEditor(source,position=.5){
   const noop=()=>{};
-  const context=new Proxy({}, {get:(target,key)=>target[key]??noop,
+  let currentPosition=position;
+  const waveSegments=[];let lastPoint=null;
+  const context=new Proxy({}, {get:(target,key)=>{
+    if(key==="clearRect")return ()=>{waveSegments.length=0;lastPoint=null;};
+    if(key==="moveTo")return (x,y)=>{lastPoint={x,y};};
+    if(key==="lineTo")return (x,y)=>{
+      if(target.strokeStyle==="#75d9c5"&&lastPoint)
+        waveSegments.push({x:lastPoint.x,y1:lastPoint.y,y2:y});
+      lastPoint=null;
+    };
+    return target[key]??noop;
+  },
     set:(target,key,value)=>(target[key]=value,true)});
   const listeners=new Map();
   const canvas={isConnected:true,clientWidth:320,clientHeight:120,width:0,height:0,
@@ -23,11 +34,12 @@ function makeEditor(source,position=.5){
   const overviewSelection={style:{}};
   const editor=createPlayerWaveEditor({canvas,wrap,overviewSelection,
     markerA:node(),markerB:node(),zoomIn,zoomOut,zoomLabel:node(),
-    visibleStart:node(),visibleEnd:node(),getPosition:()=>position,
+    visibleStart:node(),visibleEnd:node(),getPosition:()=>currentPosition,
     onPosition:noop,onStart:noop,onAB:()=>({a:0,b:source.sourceFrames,enabled:false}),
     onScrubState:noop});
   editor.setSource(source,48000);
-  return {editor,zoomIn,zoomOut};
+  return {editor,zoomIn,zoomOut,waveSegments,
+    setPosition(value){currentPosition=value;}};
 }
 
 async function waitForReadQuiet(source,reads,{quietMs=400,timeoutMs=10_000}={}){
@@ -119,9 +131,9 @@ test("wide waveform views use the fixed-size overview instead of reading the ful
   Object.defineProperty(source,"activeReads",{get:()=>activeReads});
   const original=Object.getOwnPropertyDescriptor(globalThis,"devicePixelRatio");
   Object.defineProperty(globalThis,"devicePixelRatio",{configurable:true,value:1});
-  let editor,zoomOut;
+  let editor,zoomOut,waveSegments;
   try{
-    ({editor,zoomOut}=makeEditor(source,sourceFrames/(2*48_000)));
+    ({editor,zoomOut,waveSegments}=makeEditor(source,sourceFrames/(2*48_000)));
     await waitForReadQuiet(source,reads);
     const narrowViewReads=reads.length;
     assert.ok(narrowViewReads>0,"the initial detailed viewport should read PCM");
@@ -133,6 +145,11 @@ test("wide waveform views use the fixed-size overview instead of reading the ful
     await waitForReadQuiet(source,reads);
     assert.equal(reads.length,widerViewReads,
       "zooming out beyond the detailed range must render from the bounded overview");
+    const overviewRightEdge=waveSegments.filter(segment=>segment.x===319).at(-1);
+    assert.ok(overviewRightEdge&&
+      Math.abs(overviewRightEdge.y2-overviewRightEdge.y1)>8,
+      "wide zoom must keep drawing the overview peaks after detail reads are disabled: "+
+        JSON.stringify(overviewRightEdge));
   }finally{
     editor?.setSource(null,48000);
     await waitForReadQuiet(source,reads);
@@ -170,6 +187,58 @@ test("rapid zoom changes never overlap stale detail PCM reads",async()=>{
       "the latest detail viewport must resume after the canceled PCM chunk settles");
   }finally{
     editor?.setSource(null,48000);
+    await waitForReadQuiet(source,reads);
+    if(original)Object.defineProperty(globalThis,"devicePixelRatio",original);
+    else delete globalThis.devicePixelRatio;
+  }
+});
+
+test("a moving detail viewport redirects the next waveform read to the current playhead",async()=>{
+  const reads=[];let activeReads=0,releaseFirst;
+  const firstRead=new Promise(resolve=>{releaseFirst=resolve;});
+  const source={sourceFrames:48_000*120,maxReadFrames:262_144,
+    overviewPeaks:Array.from({length:96},()=>[-.1,.1]),
+    async read(startFrame,frameCount){
+      reads.push({startFrame,frameCount});activeReads++;
+      try{
+        if(reads.length===1)await firstRead;
+        return {startFrame,channels:[new Float32Array(frameCount).fill(.25)]};
+      }finally{activeReads--;}
+    }};
+  Object.defineProperty(source,"activeReads",{get:()=>activeReads});
+  const original=Object.getOwnPropertyDescriptor(globalThis,"devicePixelRatio");
+  Object.defineProperty(globalThis,"devicePixelRatio",{configurable:true,value:1});
+  let editor;
+  try{
+    const created=makeEditor(source,30);
+    editor=created.editor;
+    await new Promise(resolve=>setTimeout(resolve,0));
+    assert.equal(reads.length,1,"the first detail tile should be pending");
+    created.setPosition(32);
+    editor.refresh(true);
+    const pendingRightEdge=created.waveSegments.filter(segment=>segment.x===319).at(-1);
+    assert.ok(pendingRightEdge,"the moving viewport must paint its new right edge");
+    assert.ok(Math.abs((pendingRightEdge.y1+pendingRightEdge.y2)/2-60)<1&&
+      Math.abs(pendingRightEdge.y2-pendingRightEdge.y1)<=1.5,
+      "an unread detailed edge must stay empty instead of falling back to coarse overview peaks: "+
+        JSON.stringify(pendingRightEdge));
+    releaseFirst();
+    await waitForReadQuiet(source,reads);
+    const newCenter=32*48_000;
+    assert.ok(Math.abs(reads[1].startFrame-newCenter)<=2*48_000,
+      "after the in-flight bounded read, detail decoding must follow the newest viewport instead of finishing the stale one: "+
+        JSON.stringify(reads.slice(0,3)));
+    const newRightEdge=36*48_000;
+    assert.ok(reads.some(read=>read.startFrame+read.frameCount>=newRightEdge),
+      "the newest viewport's right edge must receive detailed PCM peaks: "+
+        JSON.stringify(reads.slice(-3)));
+    const rightEdge=created.waveSegments.filter(segment=>segment.x===319).at(-1);
+    assert.ok(rightEdge,"the rightmost detailed waveform pixel must be painted");
+    assert.ok((rightEdge.y1+rightEdge.y2)/2<52,
+      "the right edge must use its detailed positive PCM instead of the centered coarse overview: "+
+        JSON.stringify(rightEdge));
+  }finally{
+    releaseFirst();editor?.setSource(null,48_000);
     await waitForReadQuiet(source,reads);
     if(original)Object.defineProperty(globalThis,"devicePixelRatio",original);
     else delete globalThis.devicePixelRatio;
