@@ -38,6 +38,23 @@ async function edgePixels(page,edge){
   },edge);
 }
 
+async function waitForSourcePixels(page,edge){
+  await page.waitForFunction(edge=>{
+    const canvas=document.querySelector("#wave-detail");
+    if(!canvas?.width||!canvas.height)return false;
+    const {data}=canvas.getContext("2d").getImageData(0,0,canvas.width,canvas.height);
+    const half=Math.floor(canvas.width/2),height=canvas.height;
+    const from=edge==="start"?half+2:half-82;
+    const to=edge==="start"?half+82:half-2;
+    for(let x=Math.max(0,from);x<Math.min(canvas.width,to);x++)
+      for(let y=0;y<height;y++){
+        const i=(y*canvas.width+x)*4,r=data[i],g=data[i+1],b=data[i+2];
+        if(g>150&&g>r*1.25&&b>r*1.1)return true;
+      }
+    return false;
+  },{timeout:15000},edge);
+}
+
 test("PCM and overview progress are coalesced to a single waveform paint per frame",{
   timeout:45000
 },async()=>{
@@ -193,6 +210,10 @@ test("PCM and overview progress are coalesced to a single waveform paint per fra
         lastEvent:window.__waveClearEvents.at(-1)||null};
     });
     await page.click("#play-main");
+    await page.waitForFunction(()=>{
+      const button=document.querySelector("#play-main");
+      return button&&!button.disabled&&button.textContent.includes("再開");
+    },{timeout:10000});
     assert.ok(result.clearCount>=8,
       "the waveform moved and was rendered during playback: "+JSON.stringify(result));
     assert.ok(result.maxClearsPerAnimationFrame<=1,
@@ -220,6 +241,7 @@ test("PCM and overview progress are coalesced to a single waveform paint per fra
       const max=Number(canvas?.getAttribute("aria-valuemax"));
       return value>max*.9&&value<max;
     },{timeout:5000});
+    await waitForSourcePixels(page,"end");
     const endEdge=await edgePixels(page,"end");
     assert.equal(endEdge.outside,0,"source-end margin stays empty when zoomed in");
     assert.ok(endEdge.source>0,"recorded PCM remains visible before source end: "+

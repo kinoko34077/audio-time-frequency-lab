@@ -38,6 +38,23 @@ async function waveformEdgePixels(page,edge){
   },edge);
 }
 
+async function waitForWaveformSourcePixels(page,edge){
+  await page.waitForFunction(edge=>{
+    const canvas=document.querySelector("#wave-detail");
+    if(!canvas?.width||!canvas.height)return false;
+    const {data}=canvas.getContext("2d").getImageData(0,0,canvas.width,canvas.height);
+    const half=Math.floor(canvas.width/2),height=canvas.height;
+    const from=edge==="start"?half+2:half-82;
+    const to=edge==="start"?half+82:half-2;
+    for(let x=Math.max(0,from);x<Math.min(canvas.width,to);x++)
+      for(let y=0;y<height;y++){
+        const i=(y*canvas.width+x)*4,r=data[i],g=data[i+1],b=data[i+2];
+        if(g>150&&g>r*1.25&&b>r*1.1)return true;
+      }
+    return false;
+  },{timeout:15000},edge);
+}
+
 // This is a reproducible viewport/gesture assessment of the same Web app.
 // It does not claim hardware, codec, Safari or Android browser-engine parity.
 test("real recorded waveform UX across mobile, Android-size, tablet and desktop windows",{
@@ -103,6 +120,12 @@ test("real recorded waveform UX across mobile, Android-size, tablet and desktop 
           assert.ok(startEdge.source>0,"recorded PCM is drawn after source time zero");
           await page.focus("#wave-detail");
           await page.keyboard.press("End");
+          await page.waitForFunction(()=>{
+            const canvas=document.querySelector("#wave-detail");
+            return Number(canvas?.getAttribute("aria-valuenow"))>=
+              Number(canvas?.getAttribute("aria-valuemax"))-1;
+          },{timeout:5000});
+          await waitForWaveformSourcePixels(page,"end");
           const endEdge=await waveformEdgePixels(page,"end");
           assert.equal(endEdge.outside,0,
             "source-end blank time stays empty in the real canvas: "+JSON.stringify(endEdge));
