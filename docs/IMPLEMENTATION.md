@@ -8,7 +8,7 @@ python3 -m http.server 8000
 node --test tests/*.test.mjs
 ```
 
-Import any browser-supported WAV/MP3/etc. File size <=75 MiB and duration <=600 seconds. The file is decoded with WebAudio and never uploaded. Processing is performed offline in a local Module Worker; results preview and export as PCM 16-bit WAV. No external dependencies or paid APIs. GitHub Pages is NOT deployed as part of this branch.
+The published Audio Lab player reads local files progressively. It has no 75 MiB file-size or 600-second duration cap; files above 75 MB show one continue/cancel prompt. Mediabunny is bundled locally under MPL-2.0 to demux supported formats, and the browser's `AudioDecoder` support is checked before the current source is replaced. Playback, seek, scrub and A/B reads request bounded PCM ranges and preempt background waveform reads; the compressed file stays on the device and is not uploaded. Format support depends on the browser's available decoder. The full-file WAV export remains on hold. The existing GitHub Pages deployment serves this player.
 
 ## Models actually present
 - Phase Vocoder: STFT analysis and bin-phase accumulation with overlap-add. Frequency smearing/metallic artifacts can occur at transients.

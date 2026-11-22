@@ -1,16 +1,18 @@
 # Web Audio Preview — real-time playback via shared Rust DSP
 
-GitHub Pages: https://kinoko34077.github.io/frequency-warp-vst/
+GitHub Pages: https://kinoko34077.github.io/audio-time-frequency-lab/
 
 ## Real-time behavior (Issue #14)
 
 **Play original** starts decoded audio through an independent browser
 AudioBufferSourceNode, so unavailable/invalid Rust DSP settings do not block
 listening. **Play real-time warp** streams through a shared Rust/WASM
-**AudioWorklet** in 128-sample quanta; the source is decoded once, never
-whole-file re-rendered merely to begin preview. The browser limits each
-preview to 600 seconds and input files to 75 MB. The actual spectral
-transformation lives in the Rust shared core (core/src/stream.rs), also
+**AudioWorklet** in 128-sample quanta; source audio is demuxed and decoded
+into bounded PCM windows as needed, rather than decoded all at once to begin
+preview. The Audio Lab player reads
+source PCM progressively and has no file-size or duration hard cap; files
+above 75 MB receive one continue/cancel prompt. Decoder support varies by
+browser. The actual spectral transformation lives in the Rust shared core (core/src/stream.rs), also
 compiled for native use through the persistent warp_stream_* C ABI for VST3.
 
 L/H, Curvature, Invert, Fold L/H/Blend and outside Pass/Kill update the
@@ -47,8 +49,10 @@ never waits for this render. Audio stays entirely on the device.
 - Input outside [L,H] Pass/Kill operates via spectral reconstruction of
   complementary FFT bins. Negative destination frequency Reflect/Kill/Fade
   remains a separate unimplemented requirement.
-- Page decodes up to 600 seconds, max input 75 MB, mono/stereo; heavy browser
-  memory usage is possible. Do not imply full-length rendering is instantaneous.
+- The Audio Lab player keeps the compressed source local and reads bounded
+  PCM windows, so source duration does not determine resident PCM size. Decoder
+  support and processing capacity still depend on the browser and device.
+  Whole-file WAV export remains a separate held feature.
 
 ## Build / verification
 
@@ -170,7 +174,9 @@ UNVERIFIED pending physical testing.
 
 
 ## 2026-10-13 expanded audition and controls (Issue #22)
-- Browser playback can preview up to **600 seconds**, including click/touch waveform seeking; source file cap remains 75MB. Decoding/memory cost grows with duration; this is NOT independently certified for every iPhone generation.
+- Browser playback uses click/touch waveform seeking and progressive local PCM
+  reads without a 600-second or 75 MB hard cap. A one-time confirmation appears
+  above 75 MB. Physical iPhone behavior is NOT independently certified.
 - Mobile: compact square 20Hz–2kHz frequency plot with an equal-scale *inner plot*, and 3-harmonic miniature panel always visible alongside the graph. Expanded formulas no longer hide the plot; Settings selects detailed count 3/5/7/12/16/24/32.
 - Rust engine 2 now **warps first**, then time-domain Ring Mod generates two sidebands. Engine 3 now applies Warp -> pitch-ratio -> signed-Hz shift to tracked in-band partials. Therefore Invert/Curvature influence both effects. Unlike the old samplewise Ring-only mode, current Ring pipeline inherits FFT latency and higher CPU cost.
 - A shared Rust post-effect Bit Crusher quantizes sample amplitudes (2–16 bits) and reduces sample update rate by sample hold (1–32 samples), independently toggled and adjustable during playback. WAV export uses the same settings and Rust Stream.
