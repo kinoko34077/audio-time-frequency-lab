@@ -62,6 +62,46 @@ export function createPlayerWaveEditor({
   // Anchor the unpressed hover to the waveform on pointer entry. Reusing a
   // shifting playhead on each event would multiply tiny mouse movements.
   let hover=null;
+  function applyPinchMidpoint(g,mid){
+    const midpointDelta=mid-g.lastMid;
+    g.framePosition=clamp(g.framePosition-
+      midpointDelta*spanFrames/Math.max(1,canvas.clientWidth),0,frames-1);
+    const nextFrame=Math.round(g.framePosition);
+    if(nextFrame!==g.lastFrame){
+      const now=performance.now();
+      g.velocity=scrubSpeed(g.lastFrame,nextFrame,now-g.lastMoveTime,rate);
+      g.lastFrame=nextFrame;g.lastMoveTime=now;
+      g.lastMovedAt=now;g.moved=true;
+      clearTimeout(g.idleTimer);
+      g.idleTimer=setTimeout(()=>{
+        if(active&&gesture===g){
+          g.velocity=0;onScrubMotion(0,"hold",g.lastFrame);
+        }
+      },90);
+      onScrubMotion(g.velocity,"move",nextFrame);
+      onPosition(nextFrame/rate,{start:false,scrub:true});
+    }
+    g.lastMid=mid;
+  }
+  function flushPinchMidpoint(g){
+    if(g?.midpointFrame){
+      if(typeof cancelAnimationFrame==="function")cancelAnimationFrame(g.midpointFrame);
+      else clearTimeout(g.midpointFrame);
+      g.midpointFrame=0;
+    }
+    if(g&&Number.isFinite(g.pendingMid)){
+      const mid=g.pendingMid;g.pendingMid=NaN;
+      applyPinchMidpoint(g,mid);
+    }
+  }
+  function finishScrub(gesture,reason){
+    clearTimeout(gesture?.idleTimer);
+    if(!active)return;
+    if(reason==="release"&&(gesture?.moved||gesture?.fromPinch)){
+      const elapsed=performance.now()-(gesture.lastMovedAt??-Infinity);
+      onScrubMotion(releaseScrubSpeed(gesture.velocity??0,elapsed),"release");
+    }else onScrubMotion(0,"cancel");
+  }
   const center=()=>clamp(Math.round(getPosition()*rate),0,Math.max(0,frames-1));
   function markSignalDirty(key,start,end){
     if(Number.isFinite(start)&&Number.isFinite(end)&&end>start)
@@ -639,19 +679,11 @@ export function createPlayerWaveEditor({
     return clamp(e.clientX-r.left,0,r.width);
   }
   function endGesture(id,reason="release"){
-    if(gesture?.type==="pan"&&gesture.id===id){
-      clearTimeout(gesture.idleTimer);
-      if(active){
-        if(reason==="release"&&gesture.moved){
-          const elapsed=performance.now()-(gesture.lastMovedAt??-Infinity);
-          onScrubMotion(releaseScrubSpeed(gesture.velocity??0,elapsed),"release");
-        }else{
-          // No movement means no record throw. Do not schedule a 480ms
-          // inertia tail after a simple tap or an interrupted gesture.
-          onScrubMotion(0,"cancel");
-        }
-      }
-    }
+    const ending=gesture;
+    if(ending?.type==="pinch")flushPinchMidpoint(ending);
+    const lastPinchRelease=ending?.type==="pinch"&&pointers.size===1;
+    if(ending?.type==="pan"&&ending.id===id)finishScrub(ending,reason);
+    else if(lastPinchRelease)finishScrub(ending,reason);
     pointers.delete(id);
     try{if(canvas.hasPointerCapture(id))canvas.releasePointerCapture(id);}catch{}
     if(pointers.size===0){gesture=null;wrap.removeAttribute("data-interaction");
@@ -661,7 +693,12 @@ export function createPlayerWaveEditor({
       // A remaining finger after pinch is not a new tap on the waveform.
       // It may begin a deliberate pan, but lifting without movement must
       // never accidentally seek to that finger's horizontal position.
-      gesture={type:"pan",id:firstId,x:p.x,frame:center(),moved:false,suppressTap:true};
+      const frame=center();
+      gesture={type:"pan",id:firstId,x:p.x,frame,moved:false,lastSeekFrame:frame,
+        lastMoveTime:performance.now(),
+        lastMovedAt:ending?.lastMovedAt??-Infinity,
+        velocity:ending?.velocity??0,idleTimer:null,
+        suppressTap:true,fromPinch:ending?.type==="pinch"||ending?.fromPinch};
       wrap.dataset.interaction="pan";
     }
     refresh(true);
@@ -688,13 +725,18 @@ export function createPlayerWaveEditor({
     pointers.set(e.pointerId,{x});
     try{canvas.setPointerCapture(e.pointerId);}catch{}
     if(pointers.size===2){
-      if(active){
-        clearTimeout(gesture?.idleTimer);
-        onScrubMotion(0,"cancel");onScrubState(false);active=false;
-      }
       const pts=[...pointers.values()],mid=(pts[0].x+pts[1].x)/2;
+      const frame=center();
+      if(!active){active=true;onScrubState(true);}
+      clearTimeout(gesture?.idleTimer);
+      // Keep the shared source clock held as the gesture changes from one
+      // finger to two. A stationary midpoint changes zoom only; moving the
+      // midpoint below is the only action that moves the source sample.
+      onScrubMotion(0,"hold",frame);
       gesture={type:"pinch",distance:Math.max(1,Math.abs(pts[0].x-pts[1].x)),
-        span:spanFrames,center:center(),mid,anchor:center()+(mid/canvas.clientWidth-.5)*spanFrames};
+        span:spanFrames,center:frame,mid,lastMid:mid,lastFrame:frame,framePosition:frame,
+        lastMoveTime:performance.now(),lastMovedAt:-Infinity,velocity:0,
+        moved:false,idleTimer:null,midpointFrame:0,pendingMid:NaN};
       wrap.dataset.interaction="pinch";e.preventDefault();return;
     }
     const c=center(),w=canvas.clientWidth,{a,b}=onAB();
@@ -721,9 +763,13 @@ export function createPlayerWaveEditor({
       const pts=[...pointers.values()],mid=(pts[0].x+pts[1].x)/2;
       const length=Math.max(1,Math.abs(pts[0].x-pts[1].x));
       spanFrames=clamp(gesture.span*gesture.distance/length,2,Math.max(2,frames));
-      const newCenter=clamp(gesture.anchor-(mid/canvas.clientWidth-.5)*spanFrames,0,frames-1);
-      if(Math.abs(newCenter-center())>=.5)
-        onPosition(newCenter/rate,{start:false});
+      gesture.pendingMid=mid;
+      if(!gesture.midpointFrame){
+        const g=gesture;
+        const callback=()=>{g.midpointFrame=0;flushPinchMidpoint(g);};
+        gesture.midpointFrame=typeof requestAnimationFrame==="function"?
+          requestAnimationFrame(callback):setTimeout(callback,0);
+      }
       lastFrame=NaN;refresh(true);e.preventDefault();return;
     }
     if(gesture.id!==e.pointerId)return;

@@ -1568,3 +1568,50 @@ body.model-lab:not([data-legacy-tools="1"]) .player-tune-control .inline-number 
     grid-column:auto
   }
 }
+
+/* AudioStretch-inspired transport proportions: narrow skip controls around a
+   clear, icon-only play/pause target. */
+body.model-lab:not([data-legacy-tools="1"]) #main-player-panel #shared-transport>.actions{
+  display:grid;grid-template-columns:1fr 1.5fr 1fr;align-items:center;
+  gap:clamp(16px,7vw,34px);width:min(100%,360px);margin:8px auto 4px
+}
+body.model-lab:not([data-legacy-tools="1"]) #main-player-panel #shared-transport>.actions button{
+  display:grid;place-items:center;min-width:0;min-height:64px;height:64px;
+  padding:0;border-radius:12px
+}
+body.model-lab:not([data-legacy-tools="1"]) #main-player-panel #shared-transport>.actions #play-main{
+  width:76px;min-width:76px;height:64px;min-height:64px;justify-self:center;
+  color:#e9f8f2;background:transparent;border-color:transparent
+}
+body.model-lab:not([data-legacy-tools="1"]) #main-player-panel #play-main svg{
+  display:block;width:34px;height:34px;fill:currentColor
+}
+body.model-lab:not([data-legacy-tools="1"]) #main-player-panel #seek-backward,
+body.model-lab:not([data-legacy-tools="1"]) #main-player-panel #seek-forward{
+  width:48px;height:52px;min-height:52px;justify-self:center;
+  color:#d8e8e2;background:transparent;border-color:transparent
+}
+body.model-lab:not([data-legacy-tools="1"]) #main-player-panel .transport-skip svg{
+  width:24px;height:24px;fill:currentColor
+}
+body.model-lab:not([data-legacy-tools="1"]) #main-player-panel .transport-skip:disabled,
+body.model-lab:not([data-legacy-tools="1"]) #main-player-panel #play-main:disabled{opacity:.4}
+.player-loop-toolbar .player-loop-toggle[aria-pressed="true"],
+.player-loop-toolbar #player-marker-toggle[aria-pressed="true"]{
+  color:#062b24;background:#62d7b7;border-color:#62d7b7
+}
+.player-loop-toolbar .player-loop-toggle[aria-pressed="false"]{
+  color:#a9c4bd;background:#102a30;border-color:#3b6662
+}
+.player-loop-toolbar #player-marker-toggle[aria-pressed="false"]{
+  color:#e4f5ef;background:#102a30;border-color:#3b6662
+}
+.player-loop-toolbar button:focus-visible{outline:2px solid #a0ebd5;outline-offset:2px}
+@media(max-width:600px){
+  body.model-lab:not([data-legacy-tools="1"]) #main-player-panel #shared-transport>.actions{
+    gap:clamp(18px,9vw,36px);margin:6px auto 2px
+  }
+  body.model-lab:not([data-legacy-tools="1"]) #main-player-panel #shared-transport>.actions button{
+    height:62px;min-height:62px
+  }
+}

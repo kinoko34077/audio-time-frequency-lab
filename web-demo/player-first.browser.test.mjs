@@ -35,6 +35,57 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, open
       .includes("meta-piano-a0-cc0-3s-48khz.wav"),{timeout:20000});
     await page.waitForSelector("#play-main:not([disabled])",{timeout:10000});
     assert.equal(await page.$eval("#player-loop-controls",el=>el.hidden),false);
+    await page.setViewport({width:390,height:844,deviceScaleFactor:1});
+    const transport=await page.evaluate(()=>({
+      playText:document.querySelector("#play-main").textContent.trim(),
+      playIcon:Boolean(document.querySelector("#play-main svg[data-transport-icon]")),
+      playTitle:document.querySelector("#play-main").title,
+      backDisabled:document.querySelector("#seek-backward").disabled,
+      forwardDisabled:document.querySelector("#seek-forward").disabled,
+      stopHidden:document.querySelector("#stop").hidden,
+      dryHidden:document.querySelector("#play-dry").hidden,
+      loopCheckboxHidden:document.querySelector("#player-loop-enabled").hidden,
+      loopPressed:document.querySelector("#player-loop-toggle").getAttribute("aria-pressed"),
+      transportHeight:document.querySelector("#shared-transport>.actions").getBoundingClientRect().height,
+      playHeight:document.querySelector("#play-main").getBoundingClientRect().height,
+      skipHeight:document.querySelector("#seek-backward").getBoundingClientRect().height
+    }));
+    assert.deepEqual(transport,{playText:"",playIcon:true,playTitle:"再生",backDisabled:false,
+      forwardDisabled:false,stopHidden:true,dryHidden:true,
+      loopCheckboxHidden:true,loopPressed:"true",transportHeight:64,
+      playHeight:64,skipHeight:62});
+    await page.setViewport({width:800,height:600,deviceScaleFactor:1});
+    await page.click("#seek-forward");
+    await page.waitForFunction(()=>Number(document.querySelector("#wave-detail")
+      ?.getAttribute("aria-valuenow"))>1000,{timeout:3000});
+    await page.click("#seek-backward");
+    await page.waitForFunction(()=>Number(document.querySelector("#wave-detail")
+      ?.getAttribute("aria-valuenow"))<100,{timeout:3000});
+    await page.click("#player-loop-toggle");
+    await page.waitForFunction(()=>document.querySelector("#player-loop-toggle")
+      ?.getAttribute("aria-pressed")==="false",{timeout:2000});
+    assert.equal(await page.$eval("#player-loop-enabled",el=>el.checked),false);
+    const loopOffColor=await page.$eval("#player-loop-toggle",
+      el=>getComputedStyle(el).backgroundColor);
+    await page.click("#player-loop-toggle");
+    await page.waitForFunction(()=>document.querySelector("#player-loop-toggle")
+      ?.getAttribute("aria-pressed")==="true",{timeout:2000});
+    assert.notEqual(await page.$eval("#player-loop-toggle",
+      el=>getComputedStyle(el).backgroundColor),loopOffColor,
+      "Loop state is visible by button color as well as aria-pressed");
+    await page.click("#player-marker-toggle");
+    await page.waitForFunction(()=>document.querySelector("#player-marker-toggle")
+      ?.dataset.markCount==="1",{timeout:2000});
+    const markedColor=await page.$eval("#player-marker-toggle",
+      el=>getComputedStyle(el).backgroundColor);
+    assert.equal(await page.$eval("#player-marker-toggle",
+      el=>el.getAttribute("aria-pressed")),"true");
+    await page.click("#player-marker-toggle");
+    await page.waitForFunction(()=>document.querySelector("#player-marker-toggle")
+      ?.dataset.markCount==="0",{timeout:2000});
+    assert.notEqual(await page.$eval("#player-marker-toggle",
+      el=>getComputedStyle(el).backgroundColor),markedColor,
+      "Mark state is visible by button color as well as its count");
     const sourceRate=Number((await page.$eval("#file-meta",el=>el.textContent)).match(/(\d+)Hz/)?.[1]);
     assert.ok(sourceRate>=8000);
     await page.evaluate(()=>{
@@ -129,7 +180,7 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, open
     },{timeout:4000});
     await page.click("#play-main");
     await page.waitForFunction(()=>document.querySelector("#play-main")
-      ?.textContent.includes("再開")&&
+      ?.getAttribute("aria-label")==="再生"&&
       document.querySelector("#granular-optin-status")?.dataset.renderRunning==="false",
       {timeout:15000});
     await page.waitForFunction(()=>document.querySelector("#audio-state-summary")
@@ -158,7 +209,7 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, open
     if(paused.media)assert.equal(paused.media,"paused");
     await page.click("#play-main");
     await page.waitForFunction(()=>document.querySelector("#play-main")
-      ?.textContent.includes("一時停止")&&
+      ?.getAttribute("aria-label")==="一時停止"&&
       document.querySelector("#granular-optin-status")?.dataset.renderRunning==="true",
       {timeout:15000});
     await page.waitForFunction(()=>document.querySelector("#audio-state-summary")
@@ -348,6 +399,7 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, open
     const beforePinchSpan=asSeconds(await page.$eval("#wave-zoom-label",
       el=>el.textContent));
     assert.ok(Number.isFinite(beforePinchSpan)&&beforePinchSpan>0);
+    await page.evaluate(()=>{window.__scratchSpeeds=[];});
     const touch=await page.createCDPSession();
     await touch.send("Emulation.setTouchEmulationEnabled",
       {enabled:true,maxTouchPoints:2});
@@ -367,6 +419,21 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, open
         Number(label.replace("秒",""));
       return span<before;
     },{timeout:5000},beforePinchSpan);
+    const zoomOnlyPinch=await page.evaluate(()=>({
+      speeds:window.__scratchSpeeds,
+      frame:Number(document.querySelector("#wave-detail").getAttribute("aria-valuenow"))
+    }));
+    assert.ok(zoomOnlyPinch.speeds.includes(0),
+      "pinch start holds the shared source clock at 0x: "+JSON.stringify(zoomOnlyPinch));
+    assert.ok(zoomOnlyPinch.speeds.every(speed=>Math.abs(speed)<.001),
+      "symmetric pinch zoom must not scratch the source clock: "+JSON.stringify(zoomOnlyPinch));
+    await touch.send("Input.dispatchTouchEvent",{type:"touchMove",
+      touchPoints:[point(.27,21),point(.83,22)]});
+    await page.waitForFunction(previous=>{
+      const speeds=window.__scratchSpeeds||[];
+      const frame=Number(document.querySelector("#wave-detail").getAttribute("aria-valuenow"));
+      return speeds.some(speed=>speed<-.05)&&frame!==previous;
+    },{timeout:5000},zoomOnlyPinch.frame);
     const frameAfterZoomMove=Number(await page.$eval("#wave-detail",
       el=>el.getAttribute("aria-valuenow")));
     // Snapshot emitted audible-seek commands after the intended pinch move.
@@ -394,18 +461,25 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, open
     assert.ok(afterPinchSpan<beforePinchSpan,{beforePinchSpan,afterPinchSpan});
     const afterPinchFrame=Number(await page.$eval("#wave-detail",
       el=>el.getAttribute("aria-valuenow")));
-    // The canvas reports a center frame rounded to an integer. A repaint
-    // may shift under one displayed pixel while the Worklet seek count stays
-    // identical. Do not confuse display quantization with an audio jump.
-    const onePixelFrames=Math.ceil(afterPinchSpan*sourceRate/editingWave.width);
-    assert.ok(Math.abs(afterPinchFrame-frameAfterZoomMove)<=Math.max(2,onePixelFrames),
-      "pinch release must not jump by a visible pixel: "+
-      JSON.stringify({frameAfterZoomMove,afterPinchFrame,beforePinchSpan,afterPinchSpan,onePixelFrames}));
+    // Releasing a translated pinch intentionally enters the kinetic return
+    // curve, so the source frame may continue advancing. The invariant is no
+    // second seek-window command at pointerup and a valid source-frame cursor.
+    const pinchFrameBounds=await page.$eval("#wave-detail",
+      el=>Number(el.getAttribute("aria-valuemax")));
+    assert.ok(Number.isSafeInteger(afterPinchFrame)&&afterPinchFrame>=0&&
+      afterPinchFrame<=pinchFrameBounds,
+      "pinch return remains inside the source clock: "+
+      JSON.stringify({frameAfterZoomMove,afterPinchFrame,pinchFrameBounds}));
     assert.equal(await page.$eval("#player-loop-b",el=>el.value),String(draggedB));
     assert.equal(await page.$eval("#rt-telemetry",el=>Number(el.dataset.pcmNodeStarts)),starts,
       "pinch may not restart the audio engine");
     await page.click("#settings-open");
     await page.waitForFunction(()=>document.querySelector("#settings-dialog")?.open);
+    await page.$eval("#scrub-return-duration",el=>{
+      el.value="1350";el.dispatchEvent(new Event("input",{bubbles:true}));
+    });
+    assert.equal(await page.$eval("#scrub-return-duration-value",el=>el.textContent),"1350 ms");
+    assert.equal(await page.evaluate(()=>localStorage.getItem("audio-lab-scrub-return-duration")),"1350");
     assert.equal(await page.$eval("body",el=>el.dataset.mainTab),"player");
     assert.notEqual(await page.$eval("#audio-lab",el=>getComputedStyle(el).display),"none");
     assert.equal(await page.$eval("#lab-model",el=>el.value),"granular");

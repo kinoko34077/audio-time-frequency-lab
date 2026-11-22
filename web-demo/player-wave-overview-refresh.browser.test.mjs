@@ -212,7 +212,7 @@ test("PCM and overview progress are coalesced to a single waveform paint per fra
     await page.click("#play-main");
     await page.waitForFunction(()=>{
       const button=document.querySelector("#play-main");
-      return button&&!button.disabled&&button.textContent.includes("再開");
+      return button&&!button.disabled&&button.getAttribute("aria-label")==="再生";
     },{timeout:10000});
     assert.ok(result.clearCount>=8,
       "the waveform moved and was rendered during playback: "+JSON.stringify(result));
