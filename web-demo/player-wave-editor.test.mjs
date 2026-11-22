@@ -3,14 +3,15 @@ import assert from "node:assert/strict";
 import {createPlayerWaveEditor} from "./player-wave-editor.mjs";
 
 function makeDrawingContext(segments,getWidth=()=>320){
-  let lastPoint=null;
+  let lastPoint=null,fullClears=0;
   return new Proxy({}, {get:(target,key)=>{
     if(key==="clearRect")return (x,_y,width)=>{
-      if(x<=0&&width>=getWidth())segments.length=0;
+      if(x<=0&&width>=getWidth()){segments.length=0;fullClears++;}
       else for(let i=segments.length-1;i>=0;i--)
         if(segments[i].x>=x&&segments[i].x<x+width)segments.splice(i,1);
       lastPoint=null;
     };
+    if(key==="fullClears")return fullClears;
     if(key==="moveTo")return (x,y)=>{lastPoint={x,y};};
     if(key==="lineTo")return (x,y)=>{
       if(target.strokeStyle==="#75d9c5"&&lastPoint)
@@ -37,6 +38,7 @@ function makeEditor(source,position=.5){
     const handlers=new Map();
     return {hidden:false,style:{},textContent:"",
       addEventListener:(name,handler)=>handlers.set(name,handler),
+      dispatch:(name,event)=>handlers.get(name)?.(event),
       click:()=>handlers.get("click")?.({detail:0})};
   };
   const zoomIn=node(),zoomOut=node();
@@ -49,7 +51,8 @@ function makeEditor(source,position=.5){
     onScrubState:noop});
   editor.setSource(source,48000);
   return {editor,zoomIn,zoomOut,waveSegments,
-    setPosition(value){currentPosition=value;}};
+    setPosition(value){currentPosition=value;},
+    get fullClears(){return context.fullClears;}};
 }
 
 async function waitForReadQuiet(source,reads,{quietMs=400,timeoutMs=10_000}={}){
@@ -154,6 +157,55 @@ test("zooming out within cached one-frame peaks repaints both exposed strips",as
     else delete globalThis.devicePixelRatio;
     if(originalDocument)Object.defineProperty(globalThis,"document",originalDocument);
     else delete globalThis.document;
+  }
+});
+
+test("zooming out across peak resolutions reuses cached fine PCM buckets",async()=>{
+  const sourceFrames=48_000*12,reads=[];let activeReads=0;
+  const source={sourceFrames,maxReadFrames:32_768,
+    overviewPeaks:Array.from({length:96},()=>[-.1,.1]),
+    async read(startFrame,frameCount){
+      activeReads++;
+      try{
+        reads.push({startFrame,frameCount});
+        return {startFrame,channels:[new Float32Array(frameCount).fill(.25)]};
+      }finally{activeReads--;}
+    }};
+  Object.defineProperty(source,"activeReads",{get:()=>activeReads});
+  const original=Object.getOwnPropertyDescriptor(globalThis,"devicePixelRatio");
+  Object.defineProperty(globalThis,"devicePixelRatio",{configurable:true,value:1});
+  let editor,zoomIn,zoomOut,waveSegments;
+  try{
+    ({editor,zoomIn,zoomOut,waveSegments}=makeEditor(source,6));
+    await waitForReadQuiet(source,reads);
+    zoomIn.click();await waitForReadQuiet(source,reads);
+    const beforeFinalRefine=reads.length;
+    zoomIn.click();await waitForReadQuiet(source,reads);
+    assert.equal(editor.spanFrames,144_000,"the finer detail view is three seconds wide");
+    const fineViewReads=reads.slice(beforeFinalRefine);
+    zoomOut.click();await waitForReadQuiet(source,reads);
+    const zoomOutReads=reads.slice(beforeFinalRefine+fineViewReads.length);
+    const repeatedFrames=zoomOutReads.reduce((total,next)=>total+
+      fineViewReads.reduce((overlap,prior)=>overlap+
+        Math.max(0,Math.min(next.startFrame+next.frameCount,
+          prior.startFrame+prior.frameCount)-Math.max(next.startFrame,prior.startFrame)),0),0);
+    assert.equal(repeatedFrames,0,
+      "zooming out across a coarser target resolution must keep every cached fine PCM frame");
+    assert.equal(zoomOutReads.length,0,
+      "newly exposed wide edges must use overview peaks instead of fine-resolution PCM reads");
+    const leftEdge=waveSegments.filter(segment=>segment.x===0).at(-1);
+    const fineCenter=waveSegments.filter(segment=>segment.x===160).at(-1);
+    assert.ok(leftEdge&&(leftEdge.y1+leftEdge.y2)/2>53,
+      "the newly exposed edge stays visible from the whole-track cache: "+
+        JSON.stringify(leftEdge));
+    assert.ok(fineCenter&&(fineCenter.y1+fineCenter.y2)/2<52,
+      "the previously refined center stays sharp after zooming out: "+
+        JSON.stringify(fineCenter));
+  }finally{
+    editor?.setSource(null,48_000);
+    await waitForReadQuiet(source,reads);
+    if(original)Object.defineProperty(globalThis,"devicePixelRatio",original);
+    else delete globalThis.devicePixelRatio;
   }
 });
 
@@ -285,8 +337,11 @@ test("a moving detail viewport redirects the next waveform read to the current p
     created.setPosition(32);
     editor.refresh(true);
     const pendingRightEdge=created.waveSegments.filter(segment=>segment.x===319).at(-1);
-    assert.equal(pendingRightEdge,undefined,
-      "an unread detailed edge must stay blank, without a false centerline while PCM is pending");
+    assert.ok(pendingRightEdge,
+      "a coarse overview peak must remain visible at the unread detailed edge");
+    assert.ok((pendingRightEdge.y1+pendingRightEdge.y2)/2>53,
+      "the pending edge must show the coarse overview, not a false detailed waveform: "+
+        JSON.stringify(pendingRightEdge));
     releaseFirst();
     await waitForReadQuiet(source,reads);
     const newCenter=32*48_000;
@@ -307,6 +362,88 @@ test("a moving detail viewport redirects the next waveform read to the current p
     await waitForReadQuiet(source,reads);
     if(original)Object.defineProperty(globalThis,"devicePixelRatio",original);
     else delete globalThis.devicePixelRatio;
+  }
+});
+
+test("zooming beyond a source bound does not repaint the unchanged waveform",async()=>{
+  const reads=[];let activeReads=0;
+  const source={sourceFrames:24_000,maxReadFrames:32_768,overviewPeaks:[],
+    async read(startFrame,frameCount){
+      activeReads++;
+      reads.push({startFrame,frameCount});
+      try{return {startFrame,channels:[new Float32Array(frameCount).fill(.25)]};}
+      finally{activeReads--;}
+    }};
+  Object.defineProperty(source,"activeReads",{get:()=>activeReads});
+  const original=Object.getOwnPropertyDescriptor(globalThis,"devicePixelRatio");
+  Object.defineProperty(globalThis,"devicePixelRatio",{configurable:true,value:1});
+  let editor,created;
+  try{
+    created=makeEditor(source,.5);editor=created.editor;
+    await waitForReadQuiet(source,reads);
+    const clearsBefore=created.fullClears;
+    created.zoomOut.click();
+    assert.equal(editor.spanFrames,24_000,"the initial span is already source-bounded");
+    assert.equal(created.fullClears,clearsBefore,
+      "a held/clicked zoom step at the clamped bound must not trigger a full repaint");
+  }finally{
+    editor?.setSource(null,48_000);
+    await waitForReadQuiet(source,reads);
+    if(original)Object.defineProperty(globalThis,"devicePixelRatio",original);
+    else delete globalThis.devicePixelRatio;
+  }
+});
+
+test("a held zoom button stops scheduling frames at the source bound",async()=>{
+  const reads=[];let activeReads=0;
+  const source={sourceFrames:24_000,maxReadFrames:32_768,overviewPeaks:[],
+    async read(startFrame,frameCount){
+      activeReads++;
+      reads.push({startFrame,frameCount});
+      try{return {startFrame,channels:[new Float32Array(frameCount).fill(.25)]};}
+      finally{activeReads--;}
+    }};
+  Object.defineProperty(source,"activeReads",{get:()=>activeReads});
+  const originalRatio=Object.getOwnPropertyDescriptor(globalThis,"devicePixelRatio");
+  const originalRequest=Object.getOwnPropertyDescriptor(globalThis,"requestAnimationFrame");
+  const originalCancel=Object.getOwnPropertyDescriptor(globalThis,"cancelAnimationFrame");
+  const pending=new Map();let nextId=1;
+  Object.defineProperty(globalThis,"devicePixelRatio",{configurable:true,value:1});
+  Object.defineProperty(globalThis,"requestAnimationFrame",{configurable:true,
+    value:callback=>{const id=nextId++;pending.set(id,callback);return id;}});
+  Object.defineProperty(globalThis,"cancelAnimationFrame",{configurable:true,
+    value:id=>pending.delete(id)});
+  let editor,zoomOut,created;
+  try{
+    created=makeEditor(source);({editor,zoomOut}=created);
+    await waitForReadQuiet(source,reads);
+    while(pending.size){
+      const [id,frame]=pending.entries().next().value;
+      pending.delete(id);frame(performance.now());
+    }
+    const clearsBefore=created.fullClears;
+    zoomOut.dispatch("pointerdown",{pointerId:3,pointerType:"touch",button:0,
+      preventDefault(){}});
+    await new Promise(resolve=>setTimeout(resolve,240));
+    assert.equal(pending.size,1,"the long-press starts with one scheduled frame");
+    const [id,frame]=pending.entries().next().value;
+    pending.delete(id);frame(performance.now()+40);
+    assert.equal(editor.spanFrames,24_000,"the zoom-out is already at its source bound");
+    assert.equal(pending.size,0,
+      "reaching a clamped zoom bound must stop the long-press animation loop");
+    assert.equal(created.fullClears,clearsBefore,
+      "the stopped hold must not repaint the waveform");
+    zoomOut.dispatch("pointerup",{pointerId:3});
+  }finally{
+    zoomOut?.dispatch("pointercancel",{pointerId:3});
+    editor?.setSource(null,48_000);
+    await waitForReadQuiet(source,reads);
+    if(originalRatio)Object.defineProperty(globalThis,"devicePixelRatio",originalRatio);
+    else delete globalThis.devicePixelRatio;
+    if(originalRequest)Object.defineProperty(globalThis,"requestAnimationFrame",originalRequest);
+    else delete globalThis.requestAnimationFrame;
+    if(originalCancel)Object.defineProperty(globalThis,"cancelAnimationFrame",originalCancel);
+    else delete globalThis.cancelAnimationFrame;
   }
 });
 

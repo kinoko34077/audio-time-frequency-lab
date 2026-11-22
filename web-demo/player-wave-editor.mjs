@@ -106,17 +106,22 @@ export function createPlayerWaveEditor({
       if(detailBlockFrames>0){
         const begin=Math.floor(from/detailBlockFrames);
         const end=Math.floor((to-1)/detailBlockFrames);
-        let complete=true;
-        for(let bucket=begin;bucket<=end;bucket++){
-          const peak=detailBuckets.get(bucket);
-          if(!peak){complete=false;break;}
-          low=Math.min(low,peak[0]);high=Math.max(high,peak[1]);
+        // A finer resolution retained from the previous zoom level can cover
+        // many bins per output pixel after zooming out. Aggregate a bounded
+        // number; wider pixels should use the overview instead of scanning an
+        // unbounded cache range on every paint.
+        if(end-begin<=256){
+          let complete=true;
+          for(let bucket=begin;bucket<=end;bucket++){
+            const peak=detailBuckets.get(bucket);
+            if(!peak){complete=false;break;}
+            low=Math.min(low,peak[0]);high=Math.max(high,peak[1]);
+          }
+          if(complete)return [low,high];
         }
-        if(complete)return [low,high];
-        // While the detailed range is pending, never paint coarse overview
-        // peaks into the zoomed waveform. A short blank edge is more honest
-        // than the recurring low-resolution "seaweed" tail.
-        return null;
+        // Keep the stable coarse source envelope visible until all fine bins
+        // for this pixel have arrived. This also covers newly exposed zoom
+        // edges and avoids a blank flash during progressive decoding.
       }
       if(source.overviewPeaks?.length){
         const peaks=source.overviewPeaks;
@@ -167,25 +172,35 @@ export function createPlayerWaveEditor({
     // currently intersects the source. Quantized bins avoid invalidating all
     // decoded peaks on every small pinch/held-button zoom step.
     const wantedBlock=Math.max(1,Math.ceil(spanFrames/maxSummaryBins));
-    const blockFrames=Math.max(1,Math.min(readFrames,
+    const requestedBlockFrames=Math.max(1,Math.min(readFrames,
       2**Math.ceil(Math.log2(wantedBlock))));
-    const summaryStart=Math.floor(from/blockFrames)*blockFrames;
-    const summaryEnd=Math.min(frames,
-      Math.ceil(to/blockFrames)*blockFrames);
-    if(blockFrames!==detailBlockFrames){
-      detailBuckets.clear();detailBlockFrames=blockFrames;
-      // Keep the existing raster as a scaled preview until the bounded read
-      // fills this resolution. Clearing it here made every zoom look blank.
+    // Refining needs new PCM and replaces the old bucket grid. Coarsening can
+    // aggregate the already cached finer grid, so retain it rather than
+    // discarding and rereading the same source on every zoom-out step.
+    if(!detailBlockFrames||requestedBlockFrames<detailBlockFrames){
+      detailBuckets.clear();detailBlockFrames=requestedBlockFrames;
       signalDirtyRanges.clear();
       detailFailedKey=null;detailRetriedKey=null;
     }
-    if(summaryEnd-summaryStart>readFrames*DETAIL_MAX_READS){
-      // Wide zoom uses the whole-track overview. Stop the old bounded read
-      // after its current chunk and keep no obsolete target queued.
+    const blockFrames=detailBlockFrames;
+    if(requestedBlockFrames>blockFrames){
+      // Zooming out exposes more source, but the cached fine grid is only a
+      // preview at its existing locations. Do not read the newly exposed wide
+      // range at that expensive resolution; overview peaks fill the rest.
       desiredDetailRange=null;
       if(detailPending)detailRevision++;
-      detailBuckets.clear();detailBlockFrames=0;
-      signalNeedsFullPaint=true;signalDirtyRanges.clear();
+      detailFailedKey=null;detailRetriedKey=null;
+      return;
+    }
+    const summaryStart=Math.floor(from/blockFrames)*blockFrames;
+    const summaryEnd=Math.min(frames,
+      Math.ceil(to/blockFrames)*blockFrames);
+    if(summaryEnd-summaryStart>readFrames*DETAIL_MAX_READS){
+      // Wide zoom uses the whole-track overview. Stop the old bounded read
+      // after its current chunk and keep cached detail available for a later
+      // zoom-in. sampledPeak falls back to overview for wide pixels.
+      desiredDetailRange=null;
+      if(detailPending)detailRevision++;
       detailFailedKey=null;detailRetriedKey=null;
       return;
     }
@@ -336,16 +351,18 @@ export function createPlayerWaveEditor({
     });
   }
   function zoom(factor,pivotX=.5){
-    if(!frames)return;
-    if(hover){hover=null;onHoverEnd(false);}
+    if(!frames)return false;
     const c=center(),anchor=c+(pivotX-.5)*spanFrames;
     const next=clamp(spanFrames*factor,2,Math.max(2,frames));
+    if(next===spanFrames)return false;
+    if(hover){hover=null;onHoverEnd(false);}
     spanFrames=next;
     const relocated=clamp(anchor-(pivotX-.5)*next,0,frames-1);
     // Zoom centered on the fixed head is a VISUAL change, not a seek.
     // Avoid resetting active grain synthesis / legacy audio transport.
     if(Math.abs(relocated-c)>=.5)onPosition(relocated/rate,{start:false});
     lastFrame=NaN;refresh(true);
+    return true;
   }
   function ensureSignalCanvases(width,height){
     if(typeof document==="undefined")return null;
@@ -572,7 +589,20 @@ export function createPlayerWaveEditor({
     // the detailed waveform has its own PCM buckets, repainting it for every
     // four overview bins needlessly clears the live canvas dozens of times
     // during source analysis and can look like edge flicker during playback.
-    if(source&&detailBlockFrames>0)return;
+    if(source&&detailBlockFrames>0&&Number.isFinite(startFrame)&&
+       Number.isFinite(endFrame)&&endFrame>startFrame){
+      const visibleStart=Math.max(startFrame,center()-spanFrames/2,0);
+      const visibleEnd=Math.min(endFrame,center()+spanFrames/2,frames);
+      if(visibleEnd<=visibleStart)return;
+      const first=Math.floor(visibleStart/detailBlockFrames);
+      const afterLast=Math.ceil(visibleEnd/detailBlockFrames);
+      let complete=afterLast-first<=256;
+      for(let index=first;complete&&index<afterLast;index++){
+        if(!detailBuckets.has(index))complete=false;
+      }
+      if(complete)return;
+      startFrame=visibleStart;endFrame=visibleEnd;
+    }
     // The app's shared display RAF observes this revision, including while
     // paused. Let it paint instead of starting another canvas render path.
     if(Number.isFinite(startFrame)&&Number.isFinite(endFrame)&&endFrame>startFrame)
@@ -727,9 +757,12 @@ export function createPlayerWaveEditor({
     if(!frames)return;
     if(hover){hover=null;onHoverEnd(false);}
     e.preventDefault();onScrubMotion(0,"cancel");
-    if(e.ctrlKey||e.metaKey)zoom(Math.exp(e.deltaY*.004),pos(e)/canvas.clientWidth);
-    else onPosition(clamp(center()+e.deltaY*spanFrames/canvas.clientWidth,0,frames-1)/rate,{start:false});
-    refresh(true);
+    if(e.ctrlKey||e.metaKey){
+      zoom(Math.exp(e.deltaY*.004),pos(e)/canvas.clientWidth);
+    }else{
+      onPosition(clamp(center()+e.deltaY*spanFrames/canvas.clientWidth,0,frames-1)/rate,{start:false});
+      refresh(true);
+    }
   },{passive:false});
   canvas.addEventListener("keydown",e=>{
     if(!frames)return;
@@ -757,8 +790,37 @@ export function createPlayerWaveEditor({
     const repeat=time=>{
       const elapsed=Math.max(0,Math.min(40,time-lastTime));
       lastTime=time;
-      zoom(Math.exp(-direction*Math.LN2*elapsed/550));
+      // A timer may start RAF in the same frame timestamp. Ignore that zero
+      // interval instead of mistaking it for a clamped zoom bound.
+      if(elapsed<1){animation=requestAnimationFrame(repeat);return;}
+      if(!zoom(Math.exp(-direction*Math.LN2*elapsed/550))){
+        animation=0;return;
+      }
       animation=requestAnimationFrame(repeat);
+    };
+    const stopGlobalTracking=()=>{
+      if(typeof window!="undefined"){
+        window.removeEventListener("pointerup",finishPointer);
+        window.removeEventListener("pointercancel",finishPointer);
+        window.removeEventListener("blur",finishBlur);
+      }
+      if(typeof document!="undefined")
+        document.removeEventListener("visibilitychange",finishVisibility);
+    };
+    const finish=(event,applyTap)=>{
+      if(pointerId===null||
+        (event&&event.pointerId!==pointerId))return;
+      clearTimeout(startTimer);startTimer=0;
+      if(animation)cancelAnimationFrame(animation);
+      animation=0;
+      stopGlobalTracking();
+      if(applyTap&&!held)singleStep();
+      pointerId=null;held=false;
+    };
+    const finishPointer=event=>finish(event,false);
+    const finishBlur=()=>finish(null,false);
+    const finishVisibility=()=>{
+      if(document.hidden)finish(null,false);
     };
     button.addEventListener("pointerdown",event=>{
       if(pointerId!==null||
@@ -766,21 +828,19 @@ export function createPlayerWaveEditor({
       pointerId=event.pointerId;held=false;
       onScrubMotion(0,"cancel");
       try{button.setPointerCapture(event.pointerId);}catch{}
+      if(typeof window!="undefined"){
+        window.addEventListener("pointerup",finishPointer);
+        window.addEventListener("pointercancel",finishPointer);
+        window.addEventListener("blur",finishBlur);
+      }
+      if(typeof document!="undefined")
+        document.addEventListener("visibilitychange",finishVisibility);
       startTimer=setTimeout(()=>{
         held=true;lastTime=performance.now();
         animation=requestAnimationFrame(repeat);
       },220);
       event.preventDefault();
     });
-    const finish=(event,applyTap)=>{
-      if(pointerId===null||
-        (event&&event.pointerId!==pointerId))return;
-      clearTimeout(startTimer);startTimer=0;
-      if(animation)cancelAnimationFrame(animation);
-      animation=0;
-      if(applyTap&&!held)zoom(direction>0?.5:2);
-      pointerId=null;held=false;
-    };
     button.addEventListener("pointerup",event=>finish(event,true));
     button.addEventListener("pointercancel",event=>finish(event,false));
     button.addEventListener("lostpointercapture",event=>finish(event,false));
