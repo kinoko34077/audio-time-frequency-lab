@@ -79,6 +79,8 @@ const controls={
 // The older model-comparison lab keeps its separate Stop action for its
 // inherited regression path. The normal player uses only icon transport.
 controls.stop.hidden=document.body.dataset.legacyTools!=="1";
+controls.dry.hidden=document.body.dataset.legacyTools!=="1";
+controls.wet.hidden=document.body.dataset.legacyTools!=="1";
 const transportIcons={
   play:'<path d="M6 3.8v16.4L20 12 6 3.8Z"/>',
   pause:'<path d="M5 4h5v16H5zM14 4h5v16h-5z"/>',
@@ -2440,7 +2442,7 @@ controls.main.addEventListener("click",()=>void toggleMainPlayer());
 for(const [id,delta] of [["seek-backward",-5],["seek-forward",5]])
   $("#"+id).addEventListener("click",()=>{
     if(!hasAudioSource())return;
-    cancelTemporaryScrub(false);
+    cancelTemporaryScrub(true);
     seek(clamp(playPosition()+delta,0,duration()));
   });
 const scrubDurationInput=$("#scrub-return-duration");

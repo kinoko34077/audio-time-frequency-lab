@@ -681,9 +681,13 @@ export function createPlayerWaveEditor({
   function endGesture(id,reason="release"){
     const ending=gesture;
     if(ending?.type==="pinch")flushPinchMidpoint(ending);
-    const lastPinchRelease=ending?.type==="pinch"&&pointers.size===1;
+    const lastPinchRelease=ending?.type==="pinch"&&pointers.size===2;
     if(ending?.type==="pan"&&ending.id===id)finishScrub(ending,reason);
-    else if(lastPinchRelease)finishScrub(ending,reason);
+    else if(lastPinchRelease){
+      clearTimeout(ending.idleTimer);
+      ending.velocity=0;ending.lastMovedAt=-Infinity;
+      onScrubMotion(0,"hold",ending.lastFrame);
+    }
     pointers.delete(id);
     try{if(canvas.hasPointerCapture(id))canvas.releasePointerCapture(id);}catch{}
     if(pointers.size===0){gesture=null;wrap.removeAttribute("data-interaction");
@@ -696,8 +700,7 @@ export function createPlayerWaveEditor({
       const frame=center();
       gesture={type:"pan",id:firstId,x:p.x,frame,moved:false,lastSeekFrame:frame,
         lastMoveTime:performance.now(),
-        lastMovedAt:ending?.lastMovedAt??-Infinity,
-        velocity:ending?.velocity??0,idleTimer:null,
+        lastMovedAt:-Infinity,velocity:0,idleTimer:null,
         suppressTap:true,fromPinch:ending?.type==="pinch"||ending?.fromPinch};
       wrap.dataset.interaction="pan";
     }

@@ -109,8 +109,12 @@ test("pinch holds playback at the shared frame and only scrubs when its midpoint
 
     // Releasing one finger keeps the remaining finger in the held gesture;
     // releasing the last finger returns to normal transport/inertia.
+    const handoffFrame=motions.at(-1).frame;
     rig.pointer("pointerup",2,280);
     assert.deepEqual(states,[true]);
+    await new Promise(resolve=>setTimeout(resolve,120));
+    assert.deepEqual(motions.at(-1),{speed:0,phase:"hold",frame:handoffFrame},
+      "a stationary finger after pinch must re-arm the source-clock hold");
     rig.pointer("pointermove",1,40);
     assert.equal(motions.at(-1).phase,"move",
       "the remaining finger must continue scrubbing without ending the hold");

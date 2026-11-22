@@ -52,8 +52,20 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, open
     }));
     assert.deepEqual(transport,{playText:"",playIcon:true,playTitle:"再生",backDisabled:false,
       forwardDisabled:false,stopHidden:true,dryHidden:true,
-      loopCheckboxHidden:true,loopPressed:"true",transportHeight:64,
-      playHeight:64,skipHeight:62});
+      loopCheckboxHidden:true,loopPressed:"true",transportHeight:40,
+      playHeight:40,skipHeight:40});
+    const movedIcons=await page.evaluate(()=>{
+      const actions=document.querySelector("#shared-transport");
+      document.querySelector("#model-transport-host").appendChild(actions);
+      const sizes={play:getComputedStyle(document.querySelector(
+        "#model-transport-host #play-main svg")).width,
+        skip:getComputedStyle(document.querySelector(
+          "#model-transport-host #seek-backward svg")).width};
+      document.querySelector("#player-actions-slot").appendChild(actions);
+      return sizes;
+    });
+    assert.deepEqual(movedIcons,{play:"30px",skip:"24px"},
+      "shared transport icons stay compact when reparented into the model tab");
     await page.setViewport({width:800,height:600,deviceScaleFactor:1});
     await page.click("#seek-forward");
     await page.waitForFunction(()=>Number(document.querySelector("#wave-detail")
@@ -127,6 +139,25 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, open
     });
     await page.waitForFunction(()=>document.querySelector("#granular-optin-status")
       ?.dataset.renderRunning==="true",{timeout:15000});
+    const scratchBox=await page.$eval("#wave-detail",element=>{
+      const rect=element.getBoundingClientRect();
+      return {x:rect.x+rect.width*.6,y:rect.y+rect.height/2};
+    });
+    await page.mouse.move(scratchBox.x,scratchBox.y);
+    await page.mouse.down();
+    await page.mouse.move(scratchBox.x-36,scratchBox.y,{steps:4});
+    await page.mouse.up();
+    await page.waitForFunction(()=>{
+      const speed=Number(document.querySelector("#granular-optin-status")
+        ?.dataset.renderSpeed);
+      return Number.isFinite(speed)&&Math.abs(speed-1)>.02;
+    },{timeout:3000});
+    await page.click("#seek-forward");
+    await page.waitForFunction(()=>Math.abs(Number(document.querySelector(
+      "#granular-optin-status")?.dataset.renderSpeed)-1)<.001,{timeout:3000});
+    assert.equal(await page.$eval("#granular-optin-status",
+      element=>element.dataset.renderSpeed),"1",
+      "a skip during scrub return restores the saved playback rate");
     // U2: audit the actual visible canvas during 28 browser animation frames.
     // Resizing either backing dimension on each moving frame discards pixels
     // and creates a paint hitch even when the audio Worklet is continuous.
@@ -707,6 +738,14 @@ test("U1/U5 primary Play routes to REAL selected live/PV/Granular engines and on
     assert.equal(await page.$eval("#lab-model",el=>el.value),"granular");
     assert.equal(await page.$eval("#granular-pitch-value",el=>el.value),"0.125");
     assert.equal(await page.$eval("#model-transport-host #play-main",el=>el.getClientRects().length>0),true);
+    const movedTransport=await page.evaluate(()=>({
+      playIcon:document.querySelector("#model-transport-host #play-main svg")
+        .getBoundingClientRect().width,
+      skipIcon:document.querySelector("#model-transport-host #seek-backward svg")
+        .getBoundingClientRect().width
+    }));
+    assert.deepEqual(movedTransport,{playIcon:30,skipIcon:24},
+      "shared transport SVGs keep compact dimensions after moving into the model tab");
     assert.equal(await page.$eval("#granular-speed-value",el=>el.value),"1.237");
     await set("lab-model","live");
     try{
