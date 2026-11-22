@@ -1498,9 +1498,10 @@ body.model-lab[data-main-tab="player"] #player-loop-controls{
   min-height:25px;padding:2px 4px;border-radius:5px;font-size:16px}
 .wave-detail-wrap .wave-zoom-actions output{min-width:4ch;font-size:9px}
 /* The ruler uses the same full-width source-time coordinates as the canvas.
-   The opaque zoom chip naturally covers labels beneath its controls. */
+   Keep its labels at the top edge; zoom controls and A/B badges sit below. */
 .wave-detail-ruler{right:0}
-.wave-detail-wrap>.wave-zoom-actions{background:#071820f2}
+.wave-detail-wrap>.wave-zoom-actions{top:20px;background:#071820f2}
+.wave-marker{top:54px}
 body.model-lab:not([data-legacy-tools="1"]) #settings-dialog{
   width:min(94vw,520px);max-height:min(92dvh,850px)
 }
@@ -1538,7 +1539,7 @@ body.model-lab:not([data-legacy-tools="1"]) #main-player-panel #play-main{
   .source-picker-button{width:40px;height:40px}
   .source-picker>strong{font-size:13px}
   .gear{width:40px;height:40px;min-width:40px}
-  .wave-detail-wrap>.wave-zoom-actions{top:4px;right:4px}
+  .wave-detail-wrap>.wave-zoom-actions{top:20px;right:4px}
 }
 body.model-lab:not([data-legacy-tools="1"]) .player-tune-control{
   grid-template-columns:80px minmax(0,1fr) var(--player-tune-value-width,52px);
