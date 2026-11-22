@@ -144,6 +144,26 @@ test("real recorded waveform UX across mobile, Android-size, tablet and desktop 
             wave:box(".wave-detail-wrap"),waveEditor:box(".wave-editor"),
             waveOverview:box(".wave-editor .wave-wrap"),head:box(".wave-center-head"),
             zoom:box(".wave-zoom-actions"),sourcePicker:box(".source-picker"),
+            rulerLabelsCoveredByZoom:(()=>{
+              const zoom=document.querySelector(".wave-zoom-actions").getBoundingClientRect();
+              return [...document.querySelectorAll(".wave-detail-ruler [data-ruler-tick]")]
+                .filter(element=>element.textContent.trim())
+                .filter(element=>{
+                  const tick=element.getBoundingClientRect();
+                  return tick.left<zoom.right&&tick.right>zoom.left&&
+                    tick.top<zoom.bottom&&tick.bottom>zoom.top;
+                }).map(element=>element.textContent.trim());
+            })(),
+            markerBadgesCoveredByZoom:(()=>{
+              const zoom=document.querySelector(".wave-zoom-actions").getBoundingClientRect();
+              return [...document.querySelectorAll(".wave-marker:not([hidden])")]
+                .filter(element=>element.getClientRects().length)
+                .filter(element=>{
+                  const marker=element.getBoundingClientRect();
+                  return marker.left<zoom.right&&marker.right>zoom.left&&
+                    marker.top<zoom.bottom&&marker.bottom>zoom.top;
+                }).map(element=>element.textContent.trim());
+            })(),
             sourceButton:box(".source-picker-button"),
             sourcePickerBorderWidth:parseFloat(getComputedStyle(
               document.querySelector("#drop")).borderTopWidth),
@@ -187,6 +207,14 @@ test("real recorded waveform UX across mobile, Android-size, tablet and desktop 
           geometry.zoom.bottom<=geometry.wave.bottom,
           "zoom controls must stay inside the waveform frame: "+
             JSON.stringify({wave:geometry.wave,zoom:geometry.zoom}));
+        assert.deepEqual(geometry.rulerLabelsCoveredByZoom,[],
+          "time labels must stay readable beside the in-frame zoom controls: "+
+            JSON.stringify({zoom:geometry.zoom,
+              labels:geometry.rulerLabelsCoveredByZoom}));
+        assert.deepEqual(geometry.markerBadgesCoveredByZoom,[],
+          "A/B badges must stay readable beside the in-frame zoom controls: "+
+            JSON.stringify({zoom:geometry.zoom,
+              markers:geometry.markerBadgesCoveredByZoom}));
         assert.ok(geometry.sourcePicker.left<geometry.settings.left,
           "the plus file picker belongs at the left of the settings gear");
         assert.ok(geometry.sourcePickerBorderWidth<=0.5,
