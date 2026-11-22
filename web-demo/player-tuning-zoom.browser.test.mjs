@@ -52,6 +52,7 @@ test("tuning rails stay fixed while compact fields change and held zoom redraws 
       {timeout:20000});
     await (await page.$("#audio-file")).uploadFile(WAV);
     await page.waitForSelector("#play-main:not([disabled])",{timeout:15000});
+    await new Promise(resolve=>setTimeout(resolve,500));
     const baseline=await page.evaluate(()=>({
       rails:["#granular-speed","#granular-pitch"].map(selector=>{
         const r=document.querySelector(selector).getBoundingClientRect();
@@ -86,9 +87,39 @@ test("tuning rails stay fixed while compact fields change and held zoom redraws 
     assert.equal(baseline.inputStyle.right,"0px");
     assert.notEqual(baseline.inputStyle.bottom,"0px");
 
+    const zoomUserSelect=await page.$eval("#wave-zoom-in",
+      button=>getComputedStyle(button).userSelect);
+    assert.equal(zoomUserSelect,"none",
+      "holding a zoom control must not select its plus/minus glyph");
+
+    const zoomOutButton=await page.$("#wave-zoom-out");
+    const zoomOutBounds=await zoomOutButton.boundingBox();
+    const client=await page.createCDPSession();
+    const boundedZoom=page.evaluate(async()=>{
+      const label=document.querySelector("#wave-zoom-label");
+      const before=label.textContent;
+      await new Promise(resolve=>setTimeout(resolve,450));
+      return {before,after:label.textContent};
+    });
+    await client.send("Input.dispatchTouchEvent",{type:"touchStart",
+      touchPoints:[{x:zoomOutBounds.x+zoomOutBounds.width/2,
+        y:zoomOutBounds.y+zoomOutBounds.height/2}]});
+    await new Promise(resolve=>setTimeout(resolve,650));
+    await client.send("Input.dispatchTouchEvent",{type:"touchEnd",touchPoints:[]});
+    const atBound=await boundedZoom;
+    assert.equal(atBound.after,atBound.before,
+      "a held zoom-out at the source bound must leave the visible span unchanged");
+
+    await page.evaluate(()=>{
+      window.__zoomTrace=[];
+      const button=document.querySelector("#wave-zoom-in");
+      for(const name of ["pointerdown","pointerup","pointercancel","lostpointercapture","click"])
+        button.addEventListener(name,event=>window.__zoomTrace.push({name,
+          pointerId:event.pointerId,pointerType:event.pointerType,detail:event.detail}));
+      window.addEventListener("blur",()=>window.__zoomTrace.push({name:"blur"}));
+    });
     const button=await page.$("#wave-zoom-in");
     const bounds=await button.boundingBox();
-    const client=await page.createCDPSession();
     const sampled=page.evaluate(async()=>{
       const canvas=document.querySelector("#wave-detail");
       const values=[];
@@ -125,11 +156,13 @@ test("tuning rails stay fixed while compact fields change and held zoom redraws 
     await client.send("Input.dispatchTouchEvent",{type:"touchEnd",touchPoints:[]});
     await client.detach();
     const samples=await sampled;
+    const zoomTrace=await page.evaluate(()=>({trace:window.__zoomTrace,
+      span:document.querySelector("#wave-zoom-label").textContent}));
     const moved=samples.filter((sample,index)=>index&&
       sample.seconds<samples[index-1].seconds*.98);
     assert.ok(moved.length>=2,
       "holding zoom-in repeatedly changes magnification before release: "+
-        JSON.stringify(samples.slice(0,8)));
+        JSON.stringify({samples:samples.slice(0,8),zoomTrace}));
     assert.ok(samples.every(sample=>sample.visible===0||
       sample.signal/sample.visible>=.8),
       "the currently visible source waveform stays drawn during continuous zoom: "+
@@ -162,7 +195,13 @@ test("tuning rails stay fixed while compact fields change and held zoom redraws 
     assert.deepEqual(adjacentWrites,{rangeWrites:0,widthWrites:0},
       "speed slider edits must not rewrite the independent pitch control or field");
   }finally{
-    await closeBrowserTree(browser);
-    await new Promise(resolve=>server.close(resolve));
+    try{
+      await closeBrowserTree(browser);
+    }finally{
+      // Do not leave the local test server holding the test process open if
+      // an isolated browser shutdown reports an error.
+      server.closeAllConnections?.();
+      if(server.listening)await new Promise(resolve=>server.close(resolve));
+    }
   }
 });

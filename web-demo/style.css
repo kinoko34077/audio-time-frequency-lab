@@ -855,7 +855,8 @@ body.model-lab .player-pitch-speed .lab-grid .lab-field:first-child{grid-column:
 .wave-editor-toolbar{display:flex;align-items:center;justify-content:flex-end;gap:10px}
 .wave-editor-caption,.wave-overview-header{font-size:11px;color:#aacdca;font-weight:700}
 .wave-zoom-actions{display:flex;align-items:center;gap:5px}
-.wave-zoom-actions button{height:36px;min-width:36px;padding:4px 7px;font-size:18px;line-height:1;touch-action:none}
+.wave-zoom-actions,.wave-zoom-actions button{user-select:none;-webkit-user-select:none}
+.wave-zoom-actions button{height:36px;min-width:36px;padding:4px 7px;font-size:18px;line-height:1;touch-action:none;-webkit-touch-callout:none}
 .wave-zoom-actions output{min-width:4.5ch;text-align:center;font:10px/1.4 ui-monospace,monospace;color:#a1e3cb}
 .wave-detail-wrap{position:relative;overflow:hidden;border:1px solid #3a6064;border-radius:11px;background:#0a1e27;height:clamp(180px,28vh,245px);touch-action:none}
 .wave-detail-wrap canvas{display:block;width:100%;height:100%;touch-action:none;cursor:grab;outline-offset:-3px}
