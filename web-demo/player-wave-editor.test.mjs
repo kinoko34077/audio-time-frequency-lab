@@ -27,7 +27,7 @@ function makeEditor(source,position=.5){
     const handlers=new Map();
     return {hidden:false,style:{},textContent:"",
       addEventListener:(name,handler)=>handlers.set(name,handler),
-      click:()=>handlers.get("click")?.({})};
+      click:()=>handlers.get("click")?.({detail:0})};
   };
   const zoomIn=node(),zoomOut=node();
   const wrap={dataset:{},removeAttribute:noop};

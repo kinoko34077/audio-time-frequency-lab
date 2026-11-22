@@ -288,6 +288,8 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
             // Keep existing overlap grains/phase and output-time epoch. The
             // renderer joins speed updates through its active OLA windows;
             // fading from one held sample flattened each 128-frame edit join.
+            if(this.processingMode!=="pv"&&this.processingMode!=="spectral")
+              this.synth?.beginTransition();
             break;
           case "pitch":
             if(this.processingMode==="worker")
