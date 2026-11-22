@@ -187,6 +187,7 @@ test("real recorded waveform UX across mobile, Android-size, tablet and desktop 
             tune:box("#granular-optin-controls"),
             loop:box("#player-loop-controls"),
             loopOrder:[...document.querySelectorAll(".player-loop-toolbar>*")]
+              .filter(element=>!element.hidden)
               .map(element=>element.id),
             footer:box(".below-workspace footer"),
             studio:{scrollHeight:studio.scrollHeight,clientHeight:studio.clientHeight},

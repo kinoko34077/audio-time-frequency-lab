@@ -12,7 +12,7 @@ export function releaseScrubSpeed(speed,timeSinceMoveMs){
      timeSinceMoveMs>100||Math.abs(speed)<.3)return 0;
   return clamp(speed,-8,8);
 }
-export function returnToPlaySpeed(scrub,requested,elapsedMs,durationMs=480){
+export function returnToPlaySpeed(scrub,requested,elapsedMs,durationMs=1000){
   if(![scrub,requested,elapsedMs,durationMs].every(Number.isFinite)||
      durationMs<=0)throw RangeError("invalid scrub return parameters");
   const t=clamp(elapsedMs/durationMs,0,1),remain=(1-t)**3;

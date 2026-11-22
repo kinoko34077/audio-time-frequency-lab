@@ -23,7 +23,7 @@ function makeDrawingContext(segments,getWidth=()=>320){
     set:(target,key,value)=>(target[key]=value,true)});
 }
 
-function makeEditor(source,position=.5){
+function makeEditor(source,position=.5,callbacks={}){
   const noop=()=>{};
   let currentPosition=position;
   const waveSegments=[];let canvas;
@@ -47,13 +47,127 @@ function makeEditor(source,position=.5){
   const editor=createPlayerWaveEditor({canvas,wrap,overviewSelection,
     markerA:node(),markerB:node(),zoomIn,zoomOut,zoomLabel:node(),
     visibleStart:node(),visibleEnd:node(),getPosition:()=>currentPosition,
-    onPosition:noop,onStart:noop,onAB:()=>({a:0,b:source.sourceFrames,enabled:false}),
-    onScrubState:noop});
+    onPosition:(value,options)=>{
+      currentPosition=value;callbacks.onPosition?.(value,options);
+    },onStart:callbacks.onStart??noop,
+    onAB:()=>({a:0,b:source.sourceFrames,enabled:false}),
+    onScrubState:callbacks.onScrubState??noop,
+    onScrubMotion:callbacks.onScrubMotion??noop});
   editor.setSource(source,48000);
-  return {editor,zoomIn,zoomOut,waveSegments,
+  return {editor,zoomIn,zoomOut,waveSegments,wrap,
+    pointer(type,id,x){
+      const handler=listeners.get(type);
+      assert.ok(handler,"missing pointer listener "+type);
+      handler({pointerId:id,pointerType:"touch",button:0,isPrimary:true,
+        clientX:x,clientY:60,buttons:type==="pointerup"?0:1,
+        preventDefault:noop});
+    },
     setPosition(value){currentPosition=value;},
     get fullClears(){return context.fullClears;}};
 }
+
+test("pinch holds playback at the shared frame and only scrubs when its midpoint moves",async()=>{
+  const sourceFrames=100_000,reads=[];let activeReads=0;
+  const source={sourceFrames,maxReadFrames:262_144,overviewPeaks:[],
+    async read(startFrame,frameCount){
+      activeReads++;
+      try{reads.push({startFrame,frameCount});
+        return {startFrame,channels:[new Float32Array(frameCount).fill(.2)]};
+      }finally{activeReads--;}
+    }};
+  Object.defineProperty(source,"activeReads",{get:()=>activeReads});
+  const originalRatio=Object.getOwnPropertyDescriptor(globalThis,"devicePixelRatio");
+  Object.defineProperty(globalThis,"devicePixelRatio",{configurable:true,value:1});
+  const states=[],motions=[];
+  const rig=makeEditor(source,1,{
+    onScrubState:value=>states.push(value),
+    onScrubMotion:(speed,phase,frame)=>motions.push({speed,phase,frame})
+  });
+  try{
+    await waitForReadQuiet(source,reads);
+    rig.pointer("pointerdown",1,64);
+    assert.equal(rig.wrap.dataset.interaction,"pan");
+    assert.deepEqual(states,[true]);
+    rig.pointer("pointerdown",2,256);
+    assert.deepEqual(states,[true],
+      "adding a second finger must keep the transport held instead of restarting play");
+    assert.deepEqual(motions.at(-1),{speed:0,phase:"hold",frame:48_000},
+      "a two-finger gesture starts from the held source frame");
+
+    // Symmetric finger movement changes zoom only; it cannot make the audio
+    // cursor oscillate between pointer events.
+    rig.pointer("pointermove",1,40);
+    rig.pointer("pointermove",2,280);
+    await new Promise(resolve=>setTimeout(resolve,10));
+    assert.ok(motions.every(motion=>motion.phase!=="move"||motion.speed===0),motions);
+
+    // Moving the pinch midpoint deliberately scratches the shared clock.
+    rig.pointer("pointermove",1,56);
+    await new Promise(resolve=>setTimeout(resolve,10));
+    assert.equal(motions.at(-1).phase,"move");
+    assert.notEqual(motions.at(-1).frame,48_000);
+
+    // Releasing one finger keeps the remaining finger in the held gesture;
+    // releasing the last finger returns to normal transport/inertia.
+    const handoffFrame=motions.at(-1).frame;
+    rig.pointer("pointerup",2,280);
+    assert.deepEqual(states,[true]);
+    await new Promise(resolve=>setTimeout(resolve,120));
+    assert.deepEqual(motions.at(-1),{speed:0,phase:"hold",frame:handoffFrame},
+      "a stationary finger after pinch must re-arm the source-clock hold");
+    rig.pointer("pointermove",1,40);
+    assert.equal(motions.at(-1).phase,"move",
+      "the remaining finger must continue scrubbing without ending the hold");
+    assert.deepEqual(states,[true]);
+    rig.pointer("pointerup",1,40);
+    assert.deepEqual(states,[true,false]);
+    assert.equal(motions.at(-1).phase,"release");
+  }finally{
+    rig.editor.setSource(null,48000);
+    await waitForReadQuiet(source,reads);
+    if(originalRatio)Object.defineProperty(globalThis,"devicePixelRatio",originalRatio);
+    else delete globalThis.devicePixelRatio;
+  }
+});
+
+test("high-zoom pinch accumulates sub-sample midpoint movement",async()=>{
+  const sourceFrames=100_000,reads=[];let activeReads=0;
+  const source={sourceFrames,maxReadFrames:262_144,overviewPeaks:[],
+    async read(startFrame,frameCount){
+      activeReads++;
+      try{reads.push({startFrame,frameCount});
+        return {startFrame,channels:[new Float32Array(frameCount).fill(.2)]};
+      }finally{activeReads--;}
+    }};
+  Object.defineProperty(source,"activeReads",{get:()=>activeReads});
+  const originalRatio=Object.getOwnPropertyDescriptor(globalThis,"devicePixelRatio");
+  Object.defineProperty(globalThis,"devicePixelRatio",{configurable:true,value:1});
+  const motions=[];
+  const rig=makeEditor(source,1,{onScrubMotion:(speed,phase,frame)=>
+    motions.push({speed,phase,frame})});
+  try{
+    await waitForReadQuiet(source,reads);
+    for(let i=0;i<20;i++)rig.zoomIn.click();
+    rig.pointer("pointerdown",1,200);
+    rig.pointer("pointerdown",2,280);
+    assert.deepEqual(motions.at(-1),{speed:0,phase:"hold",frame:48_000});
+    for(let i=1;i<=160;i++){
+      rig.pointer("pointermove",1,200-i);
+      rig.pointer("pointermove",2,280-i);
+      await new Promise(resolve=>setTimeout(resolve,1));
+    }
+    assert.ok(motions.some(motion=>motion.phase==="move"&&motion.frame===48_001),motions);
+    assert.equal(motions.at(-1).frame,48_001,
+      "160px midpoint travel across a 2-frame view must accumulate to one source sample");
+  }finally{
+    rig.pointer("pointerup",2,120);
+    rig.pointer("pointerup",1,40);
+    rig.editor.setSource(null,48000);
+    await waitForReadQuiet(source,reads);
+    if(originalRatio)Object.defineProperty(globalThis,"devicePixelRatio",originalRatio);
+    else delete globalThis.devicePixelRatio;
+  }
+});
 
 async function waitForReadQuiet(source,reads,{quietMs=400,timeoutMs=10_000}={}){
   const started=Date.now();

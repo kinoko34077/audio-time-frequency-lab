@@ -17,8 +17,10 @@ test("only deliberate recent throws retain momentum",()=>{
 test("kinetic release blends from reverse/forward to canonical speed without overwriting it",()=>{
   assert.equal(returnToPlaySpeed(-5,1.237,0),-5);
   assert.ok(returnToPlaySpeed(-5,1.237,200)<1.237);
-  assert.equal(returnToPlaySpeed(-5,1.237,480),1.237);
-  assert.equal(returnToPlaySpeed(5,-1,480),-1);
-  assert.equal(returnToPlaySpeed(5,0,600),0);
+  assert.notEqual(returnToPlaySpeed(-5,1.237,480),1.237,
+    "the default return window is longer than the former 480ms tail");
+  assert.equal(returnToPlaySpeed(-5,1.237,1000),1.237);
+  assert.equal(returnToPlaySpeed(5,-1,480,480),-1);
+  assert.equal(returnToPlaySpeed(5,0,1000),0);
   assert.throws(()=>returnToPlaySpeed(1,2,4,0),RangeError);
 });

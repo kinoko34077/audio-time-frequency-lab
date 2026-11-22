@@ -28,6 +28,15 @@ import {formatPlaybackStatus,rendererMatchesSelection,
 import {axisShiftUnits,axisShiftCanonical,axisShiftView} from "./axis-shift-view.mjs";
 
 const $=id=>document.querySelector(id);
+const SCRUB_RETURN_STORAGE_KEY="audio-lab-scrub-return-duration";
+const validScrubReturnDuration=value=>Number.isFinite(value)?
+  Math.max(400,Math.min(2000,Math.round(value/50)*50)):1000;
+let scrubReturnDuration=1000;
+try{
+  const stored=Number(localStorage.getItem(SCRUB_RETURN_STORAGE_KEY));
+  if(Number.isFinite(stored)&&stored>=400&&stored<=2000)
+    scrubReturnDuration=validScrubReturnDuration(stored);
+}catch{}
 // Normal Audio Time uses the real Phase Vocoder; raw PCM remains opt-in.
 const PCM_EXPERIMENT=new URLSearchParams(location.search).get("pcmTransport");
 const RAW_PCM_EXPERIMENT=PCM_EXPERIMENT==="1"||PCM_EXPERIMENT==="granular";
@@ -67,6 +76,29 @@ const controls={
   main:$("#play-main"),dry:$("#play-dry"),wet:$("#play-wet"),stop:$("#stop"),
   render:$("#render"),download:$("#download")
 };
+// The older model-comparison lab keeps its separate Stop action for its
+// inherited regression path. The normal player uses only icon transport.
+controls.stop.hidden=document.body.dataset.legacyTools!=="1";
+controls.dry.hidden=document.body.dataset.legacyTools!=="1";
+controls.wet.hidden=document.body.dataset.legacyTools!=="1";
+const transportIcons={
+  play:'<path d="M6 3.8v16.4L20 12 6 3.8Z"/>',
+  pause:'<path d="M5 4h5v16H5zM14 4h5v16h-5z"/>',
+  stop:'<path d="M6 6h12v12H6z"/>'
+};
+function setMainTransportIcon(kind,label){
+  controls.main.innerHTML='<svg data-transport-icon viewBox="0 0 24 24" aria-hidden="true">'+
+    transportIcons[kind]+'</svg>';
+  controls.main.setAttribute("aria-label",label);
+  controls.main.title=label;
+}
+const syncSkipDisabled=()=>{
+  const disabled=controls.main.disabled||!hasAudioSource();
+  $("#seek-backward").disabled=disabled;
+  $("#seek-forward").disabled=disabled;
+};
+new MutationObserver(syncSkipDisabled).observe(controls.main,
+  {attributes:true,attributeFilter:["disabled"]});
 const dualControls={};
 let lowUnitControl=null,highUnitControl=null,pivotUnitControl=null,aMinUnitControl=null,sineUnitControl=null,slopeUnitControl=null;
 const state={
@@ -165,6 +197,7 @@ const fmtTime=seconds=>{
 const sourceFrames=()=>state.source?.sourceFrames??state.dry?.[0]?.length??0;
 const sourceChannels=()=>state.source?.channelCount??state.dry?.length??0;
 const hasAudioSource=()=>Boolean((state.source||state.dry)&&state.decoded);
+syncSkipDisabled();
 const duration=()=>sourceFrames()&&state.decoded?.sampleRate?
   sourceFrames()/state.decoded.sampleRate:0;
 // #36 R3: thin UI over source-timeline + existing granular bridge contracts.
@@ -268,15 +301,16 @@ function waveformScrubMotion(speed,phase,sourceFrame=null){
   if(scrubMotionFrame)cancelAnimationFrame(scrubMotionFrame);
   const token=scrubMotionToken,started=performance.now();
   const from=validatePlaybackSpeed(speed);
+  const duration=scrubReturnDuration;
   // A held finger eases out from 0x; a quick throw continues in its signed
   // direction and smoothly converges to the user's configured playback speed.
   const frame=()=>{
     if(token!==scrubMotionToken)return;
     if(!hasAudioSource()){cancelTemporaryScrub(false);return;}
     const elapsed=performance.now()-started;
-    const target=returnToPlaySpeed(from,granular.speed,elapsed);
-    setTemporaryScrubSpeed(target,elapsed>=480);
-    if(elapsed<480)scrubMotionFrame=requestAnimationFrame(frame);
+    const target=returnToPlaySpeed(from,granular.speed,elapsed,duration);
+    setTemporaryScrubSpeed(target,elapsed>=duration);
+    if(elapsed<duration)scrubMotionFrame=requestAnimationFrame(frame);
     else{
       scrubMotionFrame=0;
       temporaryScrubSpeed=null;
@@ -385,6 +419,18 @@ function refreshAB(){
   const present=hasAudioSource();
   const panel=$("#player-loop-controls");
   panel.hidden=!present;
+  const loopButton=$("#player-loop-toggle");
+  loopButton.setAttribute("aria-pressed",String(ab.enabled));
+  loopButton.disabled=!present;
+  const markerButton=$("#player-marker-toggle");
+  markerButton.dataset.markCount=String(loopMarkers.length);
+  markerButton.setAttribute("aria-pressed",String(loopMarkers.length>0));
+  markerButton.setAttribute("aria-label",loopMarkers.length?
+    `目印 ${loopMarkers.length}件`:"目印を追加");
+  markerButton.title=loopMarkers.length?
+    `目印 ${loopMarkers.length}件・タップで追加/削除、長押しですべて削除`:
+    "タップで目印を追加、長押しですべて削除";
+  markerButton.disabled=!present;
   if(!present)return;
   const frames=sourceFrames();
   for(const [id,value] of [["a",ab.a],["b",ab.b]]){
@@ -395,7 +441,8 @@ function refreshAB(){
   $("#player-loop-enabled").checked=ab.enabled;
   const workerPlayback=Boolean(state.player?.labStream);
   for(const id of ["player-loop-a","player-loop-b","player-loop-enabled",
-    "player-loop-a-now","player-loop-b-now","player-marker-toggle"])
+    "player-loop-a-now","player-loop-b-now","player-loop-toggle",
+    "player-marker-toggle"])
     $("#"+id).disabled=false;
   if(workerPlayback)
     $("#player-loop-hint").textContent=
@@ -488,6 +535,7 @@ $("#player-loop-enabled").addEventListener("change",event=>{
   ab.enabled=event.target.checked;
   $("#player-loop-hint").textContent=ab.enabled?
     "区間をループします。":"区間ループをOFFにしました。";
+  refreshAB();
   syncLoopToPlayer();
 });
 function currentSourceFrame(){
@@ -518,10 +566,11 @@ function shiftLoopAtCurrentFrame(edge,frame=currentSourceFrame()){
 function toggleMarkerAtCurrentFrame(frame=currentSourceFrame()){
   if(!hasAudioSource())return;
   loopMarkers=toggleSourceMarker(loopMarkers,frame);
+  refreshAB();
   detailWaveEditor?.refresh(true);
 }
 function clearLoopMarkers(){
-  loopMarkers=[];detailWaveEditor?.refresh(true);
+  loopMarkers=[];refreshAB();detailWaveEditor?.refresh(true);
 }
 function loopBetweenNearestMarkers(frame=currentSourceFrame()){
   if(!hasAudioSource())return;
@@ -1519,8 +1568,7 @@ async function setMainPlayerPaused(paused){
     p.paused=paused;
     if(paused&&Number.isFinite(receipt.sourceFrame))
       state.seek=clamp(receipt.sourceFrame/state.decoded.sampleRate,0,duration());
-    controls.main.textContent=paused?"▶ 再開":"⏸ 一時停止";
-    controls.main.setAttribute("aria-label",paused?"同じ位置から再生を再開":"再生を一時停止");
+    setMainTransportIcon(paused?"play":"pause",paused?"再生":"一時停止");
     mediaStatus(!paused);
     setPlayerProcessingStatus(paused?"saved":"applied",
       {transport:paused?"paused":"playing"});
@@ -1612,8 +1660,7 @@ async function stop(){
   // Fence any pending async AudioContext/WASM/Worklet launch. A successful
   // file replacement and explicit stop must never be undone by an old click.
   state.transportEpoch++;
-  controls.main.textContent="▶ 再生";
-  controls.main.setAttribute("aria-label","再生");
+  setMainTransportIcon("play","再生");
   activeWavePointer=null;
   if(state.rebuildTimer){clearTimeout(state.rebuildTimer);state.rebuildTimer=null;}
   const p=state.player;
@@ -1900,8 +1947,8 @@ async function play(mode="wet",offset=null){
       if(granularActive&&state.seek!==initializedAt)seek(state.seek);
       mediaStatus(true);void mediaBridge(player);
       controls.stop.disabled=false;
-      controls.main.textContent=mode==="player"?"⏸ 一時停止":"▶ 再生";
-      controls.main.setAttribute("aria-label",mode==="player"?"再生を一時停止":"再生");
+      setMainTransportIcon(mode==="player"?"pause":"play",
+        mode==="player"?"一時停止":"再生");
       controls.main.disabled=false;
       const telemetry=$("#rt-telemetry");
       telemetry.dataset.pcmTransport=granularActive?
@@ -2030,8 +2077,7 @@ async function play(mode="wet",offset=null){
     tuneWet();
     controls.stop.disabled=false;
     if(mode==="wet"){
-      controls.main.textContent="■ モデル停止";
-      controls.main.setAttribute("aria-label","選択した処理モデルの再生を停止");
+      setMainTransportIcon("stop","選択した処理モデルを停止");
     }
     indicator("稼働中 · Rust/WASM AudioWorklet · "+(1000*result.latencyFrames/ctx.sampleRate).toFixed(1)+" ms DSP遅延");
     message(player.notice ||
@@ -2393,6 +2439,24 @@ for(const id of ["crusher-enabled","crusher-bits","crusher-hold"]){
 }
 
 controls.main.addEventListener("click",()=>void toggleMainPlayer());
+for(const [id,delta] of [["seek-backward",-5],["seek-forward",5]])
+  $("#"+id).addEventListener("click",()=>{
+    if(!hasAudioSource())return;
+    cancelTemporaryScrub(true);
+    seek(clamp(playPosition()+delta,0,duration()));
+  });
+const scrubDurationInput=$("#scrub-return-duration");
+const scrubDurationOutput=$("#scrub-return-duration-value");
+function updateScrubReturnDuration(raw=scrubDurationInput.value){
+  scrubReturnDuration=validScrubReturnDuration(Number(raw));
+  scrubDurationInput.value=String(scrubReturnDuration);
+  scrubDurationOutput.value=scrubReturnDuration+" ms";
+  scrubDurationOutput.textContent=scrubReturnDuration+" ms";
+  try{localStorage.setItem(SCRUB_RETURN_STORAGE_KEY,String(scrubReturnDuration));}catch{}
+}
+scrubDurationInput.value=String(scrubReturnDuration);
+updateScrubReturnDuration(scrubReturnDuration);
+scrubDurationInput.addEventListener("input",()=>updateScrubReturnDuration());
 controls.dry.addEventListener("click",()=>play("dry"));
 controls.wet.addEventListener("click",()=>play("wet"));
 controls.stop.addEventListener("click",()=>stop());
@@ -3084,8 +3148,7 @@ async function startModelPlayback(offset=null,appliedOverride=null){
         enabled:ab.enabled}};
     state.player=player;controls.stop.disabled=false;
     refreshAB();
-    controls.main.textContent="■ モデル停止";
-    controls.main.setAttribute("aria-label","選択した処理モデルの再生を停止");
+    setMainTransportIcon("stop","選択した処理モデルを停止");
     mediaStatus(true);stream.start();refreshPlayhead();
   }catch(error){
     labStatusText("処理開始失敗: "+error.message);
