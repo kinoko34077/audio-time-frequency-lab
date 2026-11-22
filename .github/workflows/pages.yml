@@ -28,6 +28,16 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Provide python3 alias to Node browser helpers
+        run: |
+          command -v python
+          python --version
+          if ! command -v python3 >/dev/null 2>&1; then
+            ln -s "$(command -v python)" "$RUNNER_TEMP/python3"
+            echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+            export PATH="$RUNNER_TEMP:$PATH"
+          fi
+          python3 --version
       - name: Install native browser test runtime
         run: |
           npm install --no-save --no-package-lock puppeteer-core@24
@@ -78,6 +88,9 @@ jobs:
       - name: Native Chrome recorded CC0 upright piano file-to-R3 Worklet (real recording)
         run: |
           node --test web-demo/source-recorded-player.browser.test.mjs
+      - name: Native Chrome recorded piano live PV speed and pitch continuity
+        run: |
+          node --test web-demo/source-pv-live-edit.browser.test.mjs
       - name: Fetch complete CC0 stereo orchestral music (test-only, not published)
         run: |
           set -euo pipefail
@@ -117,6 +130,9 @@ jobs:
         if: always()
         run: |
           node --test web-demo/player-cross-viewport.browser.test.mjs
+      - name: Mobile tuning alignment and continuous waveform zoom
+        run: |
+          node --test web-demo/player-tuning-zoom.browser.test.mjs
       - name: Preserve UI screenshots for human visual review
         if: always()
         uses: actions/upload-artifact@v4

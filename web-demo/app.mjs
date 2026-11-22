@@ -169,22 +169,28 @@ const duration=()=>sourceFrames()&&state.decoded?.sampleRate?
   sourceFrames()/state.decoded.sampleRate:0;
 // #36 R3: thin UI over source-timeline + existing granular bridge contracts.
 // Presentation rounding and rail visibility must not rewrite canonical values.
-function refreshGranular(){
+function refreshGranular(changedKind=null){
   if(!PLAYER_GRANULAR_AVAILABLE)return;
-  const s=$("#granular-speed"),p=$("#granular-pitch");
-  const st=$("#granular-speed-value"),pt=$("#granular-pitch-value");
-  s.min=String(-granular.railMax);s.max=String(granular.railMax);
-  s.value=String(speedOnRail(granular.speed,granular.railMax));
-  s.setAttribute("aria-valuetext",formatPlaybackSpeed(granular.speed)+"倍");
-  p.value=String(granular.pitch);
-  if(document.activeElement!==st)st.value=formatPlaybackSpeed(granular.speed,{editing:true});
-  if(document.activeElement!==pt)pt.value=String(granular.pitch);
-  fitInlineNumber(st);fitInlineNumber(pt);
-  $("#granular-speed-output").textContent=formatPlaybackSpeed(granular.speed)+"×";
-  $("#granular-pitch-output").textContent=granular.pitch.toFixed(1)+" 半音";
-  $("#granular-range").value=String(granular.railMax);
-  $("#granular-rail-note").textContent=Math.abs(granular.speed)>granular.railMax?
-    "指定速度はレール外です。直接入力した数値は保持されています。":"";
+  if(changedKind===null||changedKind==="speed"){
+    const slider=$("#granular-speed"),input=$("#granular-speed-value");
+    slider.min=String(-granular.railMax);slider.max=String(granular.railMax);
+    slider.value=String(speedOnRail(granular.speed,granular.railMax));
+    slider.setAttribute("aria-valuetext",formatPlaybackSpeed(granular.speed)+"倍");
+    if(document.activeElement!==input)
+      input.value=formatPlaybackSpeed(granular.speed,{editing:true});
+    fitInlineNumber(input);
+    $("#granular-speed-output").textContent=formatPlaybackSpeed(granular.speed)+"×";
+    $("#granular-range").value=String(granular.railMax);
+    $("#granular-rail-note").textContent=Math.abs(granular.speed)>granular.railMax?
+      "指定速度はレール外です。直接入力した数値は保持されています。":"";
+  }
+  if(changedKind===null||changedKind==="pitch"){
+    const slider=$("#granular-pitch"),input=$("#granular-pitch-value");
+    slider.value=String(granular.pitch);
+    if(document.activeElement!==input)input.value=String(granular.pitch);
+    fitInlineNumber(input);
+    $("#granular-pitch-output").textContent=granular.pitch.toFixed(1)+" 半音";
+  }
 }
 const inlineNumberMeasureContext=document.createElement("canvas").getContext("2d");
 function fitInlineNumber(input){
@@ -204,12 +210,6 @@ function fitInlineNumber(input){
     width=measuredWidth+"px";
   }
   input.style.width=width;
-  const grid=input.closest("#granular-optin-controls")?.querySelector(".player-tune-grid");
-  if(grid){
-    const widths=[...grid.querySelectorAll(".player-tune-control>.inline-number")]
-      .map(control=>control.getBoundingClientRect().width);
-    grid.style.setProperty("--player-tune-value-width",Math.max(52,...widths)+"px");
-  }
 }
 // All waveform-scrub commands share one queue: an old seek must NEVER apply
 // after the gesture's newest speed or after its kinetic release.
@@ -301,8 +301,8 @@ function editGranular(kind,raw,fromModelTab=false){
     input.setCustomValidity(error.message);input.reportValidity();return;
   }
   input.setCustomValidity("");
-  if(Object.is(granular[kind],value)){refreshGranular();return;}
-  granular[kind]=value;refreshGranular();
+  if(Object.is(granular[kind],value)){refreshGranular(kind);return;}
+  granular[kind]=value;refreshGranular(kind);
   const bridge=state.player?.pcmBridge;
   if(!bridge||!isPCMModel(bridge.processingMode)){
     setPlayerProcessingStatus(state.player&&state.player.mode!=="dry"?

@@ -2,23 +2,33 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {createPlayerWaveEditor} from "./player-wave-editor.mjs";
 
-function makeEditor(source,position=.5){
-  const noop=()=>{};
-  let currentPosition=position;
-  const waveSegments=[];let lastPoint=null;
-  const context=new Proxy({}, {get:(target,key)=>{
-    if(key==="clearRect")return ()=>{waveSegments.length=0;lastPoint=null;};
+function makeDrawingContext(segments,getWidth=()=>320){
+  let lastPoint=null;
+  return new Proxy({}, {get:(target,key)=>{
+    if(key==="clearRect")return (x,_y,width)=>{
+      if(x<=0&&width>=getWidth())segments.length=0;
+      else for(let i=segments.length-1;i>=0;i--)
+        if(segments[i].x>=x&&segments[i].x<x+width)segments.splice(i,1);
+      lastPoint=null;
+    };
     if(key==="moveTo")return (x,y)=>{lastPoint={x,y};};
     if(key==="lineTo")return (x,y)=>{
       if(target.strokeStyle==="#75d9c5"&&lastPoint)
-        waveSegments.push({x:lastPoint.x,y1:lastPoint.y,y2:y});
+        segments.push({x:lastPoint.x,y1:lastPoint.y,y2:y});
       lastPoint=null;
     };
-    return target[key]??noop;
+    return target[key]??(()=>{});
   },
     set:(target,key,value)=>(target[key]=value,true)});
+}
+
+function makeEditor(source,position=.5){
+  const noop=()=>{};
+  let currentPosition=position;
+  const waveSegments=[];let canvas;
+  const context=makeDrawingContext(waveSegments,()=>canvas.width);
   const listeners=new Map();
-  const canvas={isConnected:true,clientWidth:320,clientHeight:120,width:0,height:0,
+  canvas={isConnected:true,clientWidth:320,clientHeight:120,width:0,height:0,
     addEventListener:(name,handler)=>listeners.set(name,handler),
     getContext:()=>context,getBoundingClientRect:()=>({left:0,width:320}),
     setAttribute:noop,hasPointerCapture:()=>false,releasePointerCapture:noop,
@@ -27,7 +37,7 @@ function makeEditor(source,position=.5){
     const handlers=new Map();
     return {hidden:false,style:{},textContent:"",
       addEventListener:(name,handler)=>handlers.set(name,handler),
-      click:()=>handlers.get("click")?.({})};
+      click:()=>handlers.get("click")?.({detail:0})};
   };
   const zoomIn=node(),zoomOut=node();
   const wrap={dataset:{},removeAttribute:noop};
@@ -87,6 +97,64 @@ test("short-source detail waveform reads fixed-size PCM chunks and sharpens on z
   assert.ok(reads.length>1,"detail PCM must be summarized in bounded pieces");
   assert.ok(reads.every(read=>read.frameCount<=32_768),reads);
   assert.ok(reads.every(read=>read.frameCount<sourceFrames),reads);
+});
+
+test("zooming out within cached one-frame peaks repaints both exposed strips",async()=>{
+  const sourceFrames=48_000*12,reads=[];let activeReads=0;
+  const source={sourceFrames,maxReadFrames:262_144,overviewPeaks:[],
+    async read(startFrame,frameCount){
+      activeReads++;
+      try{
+        reads.push({startFrame,frameCount});
+        return {startFrame,channels:[new Float32Array(frameCount).fill(.25)]};
+      }finally{activeReads--;}
+    }};
+  Object.defineProperty(source,"activeReads",{get:()=>activeReads});
+  const originalRatio=Object.getOwnPropertyDescriptor(globalThis,"devicePixelRatio");
+  const originalDocument=Object.getOwnPropertyDescriptor(globalThis,"document");
+  const rasterCanvases=[];
+  Object.defineProperty(globalThis,"devicePixelRatio",{configurable:true,value:1});
+  Object.defineProperty(globalThis,"document",{configurable:true,value:{
+    createElement(){
+      const segments=[];
+      const raster={width:0,height:0,id:"",getContext:()=>
+        makeDrawingContext(segments,()=>raster.width)};
+      rasterCanvases.push({raster,segments});
+      return raster;
+    }
+  }});
+  let editor,zoomIn,zoomOut;
+  try{
+    ({editor,zoomIn,zoomOut}=makeEditor(source));
+    await waitForReadQuiet(source,reads);
+    for(let step=0;step<11;step++)zoomIn.click();
+    await waitForReadQuiet(source,reads);
+    assert.equal(editor.spanFrames,281.25,"wide view uses 1-frame peak bins");
+    const cachedReadCount=reads.length;
+
+    zoomIn.click();
+    await waitForReadQuiet(source,reads);
+    assert.equal(editor.spanFrames,140.625,"narrow view keeps the same peak resolution");
+    assert.equal(reads.length,cachedReadCount,"narrow view uses already cached peaks");
+
+    zoomOut.click();
+    await waitForReadQuiet(source,reads);
+    assert.equal(editor.spanFrames,281.25);
+    assert.equal(reads.length,cachedReadCount,
+      "zooming out within the same cached peak resolution must not reread PCM");
+    const segments=rasterCanvases[0].segments;
+    assert.ok(segments.some(segment=>segment.x<80),
+      "cached PCM repaints the newly exposed left strip");
+    assert.ok(segments.some(segment=>segment.x>=240),
+      "cached PCM repaints the newly exposed right strip");
+  }finally{
+    editor?.setSource(null,48_000);
+    await waitForReadQuiet(source,reads);
+    if(originalRatio)Object.defineProperty(globalThis,"devicePixelRatio",originalRatio);
+    else delete globalThis.devicePixelRatio;
+    if(originalDocument)Object.defineProperty(globalThis,"document",originalDocument);
+    else delete globalThis.document;
+  }
 });
 
 test("a preempted detail-waveform read retries once for the same viewport",async()=>{

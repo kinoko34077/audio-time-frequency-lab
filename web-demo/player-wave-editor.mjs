@@ -164,18 +164,19 @@ export function createPlayerWaveEditor({
       reader.maxReadFrames:DETAIL_READ_FRAMES;
     const readFrames=Math.max(1,Math.min(DETAIL_READ_FRAMES,maxRead));
     // Peak resolution follows the complete viewport, not the portion that
-    // currently intersects the source. If it followed (to-from), the first
-    // and last seconds would change bin size as the head approached an edge;
-    // each change cleared every cached bucket and visibly blinked the wave.
+    // currently intersects the source. Quantized bins avoid invalidating all
+    // decoded peaks on every small pinch/held-button zoom step.
+    const wantedBlock=Math.max(1,Math.ceil(spanFrames/maxSummaryBins));
     const blockFrames=Math.max(1,Math.min(readFrames,
-      Math.ceil(spanFrames/maxSummaryBins)));
+      2**Math.ceil(Math.log2(wantedBlock))));
     const summaryStart=Math.floor(from/blockFrames)*blockFrames;
     const summaryEnd=Math.min(frames,
       Math.ceil(to/blockFrames)*blockFrames);
     if(blockFrames!==detailBlockFrames){
       detailBuckets.clear();detailBlockFrames=blockFrames;
-      contentRevision++;
-      signalNeedsFullPaint=true;signalDirtyRanges.clear();
+      // Keep the existing raster as a scaled preview until the bounded read
+      // fills this resolution. Clearing it here made every zoom look blank.
+      signalDirtyRanges.clear();
       detailFailedKey=null;detailRetriedKey=null;
     }
     if(summaryEnd-summaryStart>readFrames*DETAIL_MAX_READS){
@@ -337,7 +338,6 @@ export function createPlayerWaveEditor({
   function zoom(factor,pivotX=.5){
     if(!frames)return;
     if(hover){hover=null;onHoverEnd(false);}
-    onScrubMotion(0,"cancel");
     const c=center(),anchor=c+(pivotX-.5)*spanFrames;
     const next=clamp(spanFrames*factor,2,Math.max(2,frames));
     spanFrames=next;
@@ -391,17 +391,53 @@ export function createPlayerWaveEditor({
     }
     context.stroke();context.restore();
   }
+  function drawZoomPreview(context,width,height,c){
+    const oldStart=signalFrame-signalSpan/2,oldEnd=signalFrame+signalSpan/2;
+    const nextStart=c-spanFrames/2,nextEnd=c+spanFrames/2;
+    // Only reuse pixels whose time belongs to the source. A previous raster
+    // may contain stale edge pixels while a zoom is being coalesced; carrying
+    // those past frame 0 or EOF makes the blank margin visibly flicker.
+    const from=Math.max(oldStart,nextStart,0);
+    const to=Math.min(oldEnd,nextEnd,frames);
+    if(to<=from)return;
+    const sourceX=(from-oldStart)/signalSpan*width;
+    const sourceWidth=(to-from)/signalSpan*width;
+    const targetX=(from-nextStart)/spanFrames*width;
+    const targetWidth=(to-from)/spanFrames*width;
+    context.drawImage(signalShiftCanvas,sourceX,0,sourceWidth,height,
+      targetX,0,targetWidth,height);
+  }
   function updateSignalBuffer(buffers,c,width,height,ratio,baseChanged,positionChanged){
     if(!buffers)return false;
     const {signal,shift}=buffers;
-    if(baseChanged||signalWidth!==width||signalHeight!==height||
-       signalSpan!==spanFrames||!Number.isFinite(signalFrame)){
+    const dimensionsChanged=signalWidth!==width||signalHeight!==height;
+    const spanChanged=signalSpan!==spanFrames;
+    const canZoomPreview=spanChanged&&!dimensionsChanged&&
+      Number.isFinite(signalFrame)&&signalSpan>0&&!signalNeedsFullPaint;
+    if(canZoomPreview){
+      shift.clearRect(0,0,width,height);
+      shift.drawImage(signalCanvas,0,0);
+      signal.clearRect(0,0,width,height);
+      drawZoomPreview(signal,width,height,c);
+      const oldStart=signalFrame-signalSpan/2,oldEnd=signalFrame+signalSpan/2;
+      const nextStart=c-spanFrames/2,nextEnd=c+spanFrames/2;
+      const overlapStart=Math.max(oldStart,nextStart);
+      const overlapEnd=Math.min(oldEnd,nextEnd);
+      if(overlapEnd>overlapStart){
+        const leftEnd=(overlapStart-nextStart)/spanFrames*width;
+        const rightStart=(overlapEnd-nextStart)/spanFrames*width;
+        drawSignal(signal,width,height,c,ratio,0,leftEnd);
+        drawSignal(signal,width,height,c,ratio,rightStart,width);
+      }else drawSignal(signal,width,height,c,ratio);
+      signalFrame=c;signalSpan=spanFrames;
+    }else if(baseChanged||dimensionsChanged||!Number.isFinite(signalFrame)){
       signal.clearRect(0,0,width,height);
       drawSignal(signal,width,height,c,ratio);
       signalFrame=c;signalWidth=width;signalHeight=height;
       signalSpan=spanFrames;signalNeedsFullPaint=false;signalDirtyRanges.clear();
       return true;
     }
+    signalWidth=width;signalHeight=height;
     if(positionChanged){
       // Reuse the PCM raster while the playhead advances. Move whole backing
       // pixels to avoid repeated full-width path generation and resampling blur,
@@ -471,8 +507,10 @@ export function createPlayerWaveEditor({
       const buffers=ensureSignalCanvases(width,height);
       if(contentChanged&&!signalNeedsFullPaint&&!signalDirtyRanges.size)
         signalNeedsFullPaint=true;
+      const signalBaseChanged=dimensionsChanged||signalNeedsFullPaint||
+        (force&&!spanChanged);
       const signalUpdated=updateSignalBuffer(buffers,c,width,height,ratio,
-        force||dimensionsChanged||spanChanged||signalNeedsFullPaint,positionChanged);
+        signalBaseChanged,positionChanged);
       context.clearRect(0,0,width,height);
       context.fillStyle="#0a1e27";context.fillRect(0,0,width,height);
       const {a,b,enabled}=onAB();
@@ -710,8 +748,48 @@ export function createPlayerWaveEditor({
     onPosition(clamp(next,0,frames-1)/rate,{start:false});
     refresh(true);
   });
-  zoomIn.addEventListener("click",()=>zoom(.5));
-  zoomOut.addEventListener("click",()=>zoom(2));
+  function bindZoomButton(button,direction){
+    let pointerId=null,startTimer=0,animation=0,held=false,lastTime=0;
+    const singleStep=()=>{
+      onScrubMotion(0,"cancel");
+      zoom(direction>0?.5:2);
+    };
+    const repeat=time=>{
+      const elapsed=Math.max(0,Math.min(40,time-lastTime));
+      lastTime=time;
+      zoom(Math.exp(-direction*Math.LN2*elapsed/550));
+      animation=requestAnimationFrame(repeat);
+    };
+    button.addEventListener("pointerdown",event=>{
+      if(pointerId!==null||
+        (event.pointerType==="mouse"&&event.button!==0))return;
+      pointerId=event.pointerId;held=false;
+      onScrubMotion(0,"cancel");
+      try{button.setPointerCapture(event.pointerId);}catch{}
+      startTimer=setTimeout(()=>{
+        held=true;lastTime=performance.now();
+        animation=requestAnimationFrame(repeat);
+      },220);
+      event.preventDefault();
+    });
+    const finish=(event,applyTap)=>{
+      if(pointerId===null||
+        (event&&event.pointerId!==pointerId))return;
+      clearTimeout(startTimer);startTimer=0;
+      if(animation)cancelAnimationFrame(animation);
+      animation=0;
+      if(applyTap&&!held)zoom(direction>0?.5:2);
+      pointerId=null;held=false;
+    };
+    button.addEventListener("pointerup",event=>finish(event,true));
+    button.addEventListener("pointercancel",event=>finish(event,false));
+    button.addEventListener("lostpointercapture",event=>finish(event,false));
+    // Native keyboard activation dispatches click with detail=0.
+    button.addEventListener("click",event=>{
+      if(event.detail===0)singleStep();
+    });
+  }
+  bindZoomButton(zoomIn,1);bindZoomButton(zoomOut,-1);
   return {setSource,refresh,refreshOverview,get spanFrames(){return spanFrames;},
     get isScrubbing(){return active;}};
 }

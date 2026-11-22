@@ -5,6 +5,7 @@ import {createHash} from "node:crypto";
 import {performance} from "node:perf_hooks";
 import {createSourcePCMRenderer,SOURCE_WINDOW_FRAMES} from "./source-pcm-renderer.mjs";
 import {createGranularTimePitch} from "./source-granular.mjs";
+import {createSpectralTimePitch} from "./source-spectral.mjs";
 
 // Audio Lab #36 R2/R3 — REAL RECORDED audio, not a synthesized oscillator.
 // Exact CC0 fixture reused from frequency-warp-vst; not shipped in Pages.
@@ -54,6 +55,87 @@ function frequencyAmplitude(x,hz){
   }
   return 2*Math.hypot(real,imag)/x.length;
 }
+test("recorded piano PV slider edits avoid a held-sample reattack",async()=>{
+  const pcm=recordedPCM(await readFile(FIXTURE));
+  const makePlayer=({speed=1,pitch=0}={})=>{
+    const renderer=createSourcePCMRenderer({sourceFrames:pcm.length,
+      sourceSampleRate:RATE,outputSampleRate:RATE,channelCount:1,
+      startFrame:8192,speed});
+    for(let at=0;at<pcm.length;at+=SOURCE_WINDOW_FRAMES)
+      renderer.installWindow(at,[pcm.slice(at,Math.min(pcm.length,at+SOURCE_WINDOW_FRAMES))]);
+    const pv=createSpectralTimePitch({sourceSampleRate:RATE,
+      outputSampleRate:RATE,channelCount:1,phaseLock:true,pitchSemitones:pitch});
+    return {renderer,pv,render(frames){
+      const out=new Float32Array(frames);
+      for(let at=0;at<frames;at+=128){
+        const block=new Float32Array(128);
+        assert.equal(renderer.renderSpectral([block],pv),0,
+          "recorded source has no cache misses");
+        out.set(block,at);
+      }
+      return out;
+    }};
+  };
+  const cases=[
+    {kind:"pitch",settings:{},apply:p=>p.pv.setPitch(.25)},
+    {kind:"speed",settings:{pitch:.25},apply:p=>p.renderer.timeline.setSpeed(.9)}
+  ];
+  const isolated=[];
+  for(const {kind,settings,apply} of cases){
+    const live=makePlayer(settings),held=makePlayer(settings);
+    live.render(8192);held.render(8192);
+    const before=live.render(2048);held.render(2048);
+    apply(live);apply(held);held.pv.beginTransition();
+    const actual=live.render(128),oldPath=held.render(128);
+    isolated.push({kind,liveRms:rms(actual),heldSampleFadeRms:rms(oldPath),
+      ratio:rms(actual)/rms(oldPath),
+      boundary:Math.abs(actual[0]-before.at(-1)),
+      localStep:Math.max(maxStep(before.subarray(-512)),maxStep(actual))});
+  }
+  const burst=makePlayer({pitch:.25}),held=makePlayer({pitch:.25});
+  burst.render(8192);held.render(8192);
+  const burstEdits=[
+    ["pitch",.05],["pitch",.1],["pitch",.2],["pitch",.35],
+    ["pitch",.2],["pitch",.05],["speed",.98],["speed",.94],
+    ["speed",.9],["speed",.82],["speed",.7],["speed",.63],
+    ["speed",.76],["speed",.9],["pitch",-.1],["pitch",0]
+  ];
+  const burstMetrics=[];
+  for(const [kind,value] of burstEdits){
+    const before=burst.render(512);held.render(512);
+    if(kind==="pitch"){
+      burst.pv.setPitch(value);held.pv.setPitch(value);
+    }else{
+      burst.renderer.timeline.setSpeed(value);held.renderer.timeline.setSpeed(value);
+    }
+    held.pv.beginTransition();
+    const after=burst.render(128),oldPath=held.render(128);
+    const boundary=Math.abs(after[0]-before.at(-1));
+    const neighboringStep=Math.max(maxStep(before.subarray(-256)),
+      maxStep(after));
+    const levelRatio=rms(after)/rms(oldPath);
+    burstMetrics.push({kind,value,ratio:levelRatio,liveRms:rms(after),
+      heldSampleFadeRms:rms(oldPath),boundary,localStep:neighboringStep});
+  }
+  for(const metric of [...isolated,...burstMetrics]){
+    assert.ok(metric.boundary<=metric.localStep*2+.01,
+      "recorded piano slider edit boundary stays near adjacent PCM steps: "+
+        JSON.stringify(metric));
+  }
+  const speedEdit=isolated.find(metric=>metric.kind==="speed");
+  assert.ok(speedEdit.ratio>1.2,
+    "live speed edit keeps more real piano energy than the former held-sample fade: "+
+      JSON.stringify(speedEdit));
+  for(const kind of ["pitch","speed"]){
+    const group=burstMetrics.filter(metric=>metric.kind===kind);
+    const liveEnergy=group.reduce((sum,metric)=>sum+metric.liveRms**2,0);
+    const heldEnergy=group.reduce((sum,metric)=>sum+metric.heldSampleFadeRms**2,0);
+    const pooledRatio=Math.sqrt(liveEnergy/heldEnergy);
+    assert.ok(pooledRatio>1.1,
+      "repeated "+kind+" slider edits retain more PCM energy than the old held-sample fade: "+
+        JSON.stringify({pooledRatio,group}));
+  }
+});
 function renderRecording(pcm,{mode,speed,pitch=0,startFrame=8192}){
   const renderer=createSourcePCMRenderer({
     sourceFrames:pcm.length,sourceSampleRate:RATE,outputSampleRate:RATE,

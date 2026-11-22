@@ -85,7 +85,9 @@ export function createSpectralTimePitch({
       throw RangeError("pitch must be finite in ±12 semitones");
     if(semitones!==pitch){
       pitch=semitones;ratio=2**(pitch/12);revision++;
-      beginTransition();
+      // Keep the accumulated phase and already-overlapped OLA frames. A fade
+      // from one held sample flattens 128 output frames at every slider edit;
+      // the next analysis hops already provide a continuous parameter change.
     }
     return {pitchSemitones:pitch,pitchRatio:ratio,pitchRevision:revision};
   }
