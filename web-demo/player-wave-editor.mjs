@@ -419,6 +419,16 @@ export function createPlayerWaveEditor({
       shift.drawImage(signalCanvas,0,0);
       signal.clearRect(0,0,width,height);
       drawZoomPreview(signal,width,height,c);
+      const oldStart=signalFrame-signalSpan/2,oldEnd=signalFrame+signalSpan/2;
+      const nextStart=c-spanFrames/2,nextEnd=c+spanFrames/2;
+      const overlapStart=Math.max(oldStart,nextStart);
+      const overlapEnd=Math.min(oldEnd,nextEnd);
+      if(overlapEnd>overlapStart){
+        const leftEnd=(overlapStart-nextStart)/spanFrames*width;
+        const rightStart=(overlapEnd-nextStart)/spanFrames*width;
+        drawSignal(signal,width,height,c,ratio,0,leftEnd);
+        drawSignal(signal,width,height,c,ratio,rightStart,width);
+      }else drawSignal(signal,width,height,c,ratio);
       signalFrame=c;signalSpan=spanFrames;
     }else if(baseChanged||dimensionsChanged||!Number.isFinite(signalFrame)){
       signal.clearRect(0,0,width,height);
