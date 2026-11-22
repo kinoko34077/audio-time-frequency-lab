@@ -83,6 +83,62 @@ test("fractional pitch value remains exact; spectral synthesis changes sounding 
   const a=binEnergy(output[0],659.26),b=binEnergy(output[0],440);
   assert.ok(a>b*1.2,{a,b});
 });
+test("live PV parameter edit keeps the output envelope through the control boundary",()=>{
+  const frames=96_000,pcm=new Float32Array(frames);
+  for(let i=0;i<frames;i++)pcm[i]=.3*Math.sin(2*Math.PI*440*i/SR)+
+    .12*Math.sin(2*Math.PI*659.25*i/SR+.4);
+  const renderer=createSourcePCMRenderer({sourceFrames:frames,
+    sourceSampleRate:SR,outputSampleRate:SR,channelCount:1,
+    startFrame:24_000,speed:1});
+  renderer.installWindow(0,[pcm.slice(0,65_536)]);
+  renderer.installWindow(65_536,[pcm.slice(65_536)]);
+  const pv=createSpectralTimePitch({sourceSampleRate:SR,
+    outputSampleRate:SR,channelCount:1,phaseLock:true});
+  const render=count=>{
+    const output=new Float32Array(count);
+    for(let at=0;at<count;at+=128){
+      const block=new Float32Array(128);
+      assert.equal(renderer.renderSpectral([block],pv),0);
+      output.set(block,at);
+    }
+    return output;
+  };
+  render(8192);
+  const beforePitch=render(2048);
+  pv.setPitch(.25);
+  const afterPitch=render(2048);
+  const beforeSpeed=render(2048);
+  renderer.timeline.setSpeed(.9);
+  const afterSpeed=render(2048);
+  const blockRms=buffer=>Array.from({length:buffer.length/128},(_,index)=>
+    rms(buffer.subarray(index*128,(index+1)*128)));
+  const maxStep=buffer=>{
+    let max=0;
+    for(let i=1;i<buffer.length;i++)max=Math.max(max,
+      Math.abs(buffer[i]-buffer[i-1]));
+    return max;
+  };
+  const evidence={beforePitch:blockRms(beforePitch),afterPitch:blockRms(afterPitch),
+    beforeSpeed:blockRms(beforeSpeed),afterSpeed:blockRms(afterSpeed)};
+  assert.ok(Object.values(evidence).flat().every(Number.isFinite));
+  for(const [label,before,after] of [
+    ["pitch",evidence.beforePitch,evidence.afterPitch],
+    ["speed",evidence.beforeSpeed,evidence.afterSpeed]
+  ]){
+    const localLevel=rms(Float32Array.from(before.slice(-8)));
+    assert.ok(after[0]>=localLevel*.85,
+      label+" edit must not flatten the first 128 samples toward one held sample: "+
+        JSON.stringify({localLevel,firstEditedBlock:after[0]}));
+  }
+  for(const [label,before,after] of [["pitch",beforePitch,afterPitch],
+    ["speed",beforeSpeed,afterSpeed]]){
+    const steadyStep=maxStep(before.subarray(-512));
+    const editStep=maxStep(after.subarray(0,512));
+    assert.ok(editStep<=steadyStep*2+.01,
+      label+" edit must stay within the source's neighboring sample-step range: "+
+        JSON.stringify({steadyStep,editStep}));
+  }
+});
 test("44.1k source through 48k output preserves absolute pitch during a 0x spectral freeze",()=>{
   const sourceRate=44100,outputRate=48000,frames=110250;
   const mono=new Float32Array(frames);

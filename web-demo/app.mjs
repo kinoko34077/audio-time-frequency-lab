@@ -204,12 +204,6 @@ function fitInlineNumber(input){
     width=measuredWidth+"px";
   }
   input.style.width=width;
-  const grid=input.closest("#granular-optin-controls")?.querySelector(".player-tune-grid");
-  if(grid){
-    const widths=[...grid.querySelectorAll(".player-tune-control>.inline-number")]
-      .map(control=>control.getBoundingClientRect().width);
-    grid.style.setProperty("--player-tune-value-width",Math.max(52,...widths)+"px");
-  }
 }
 // All waveform-scrub commands share one queue: an old seek must NEVER apply
 // after the gesture's newest speed or after its kinetic release.

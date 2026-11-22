@@ -78,6 +78,9 @@ jobs:
       - name: Native Chrome recorded CC0 upright piano file-to-R3 Worklet (real recording)
         run: |
           node --test web-demo/source-recorded-player.browser.test.mjs
+      - name: Native Chrome recorded piano live PV speed and pitch continuity
+        run: |
+          node --test web-demo/source-pv-live-edit.browser.test.mjs
       - name: Fetch complete CC0 stereo orchestral music (test-only, not published)
         run: |
           set -euo pipefail
@@ -117,6 +120,9 @@ jobs:
         if: always()
         run: |
           node --test web-demo/player-cross-viewport.browser.test.mjs
+      - name: Mobile tuning alignment and continuous waveform zoom
+        run: |
+          node --test web-demo/player-tuning-zoom.browser.test.mjs
       - name: Preserve UI screenshots for human visual review
         if: always()
         uses: actions/upload-artifact@v4

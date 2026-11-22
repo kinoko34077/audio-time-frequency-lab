@@ -285,11 +285,9 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
             if(this.processingMode==="worker")
               throw Error("legacy Worker speed changes must reset the Worker generation");
             t.setSpeed(m.speed);
-            // Keep the existing overlap grains and output-time epoch: a
-            // scrub wheel changes signed speed many times per second.
-            // Clearing every grain on every speed command produces audible
-            // joins even when the source PCM window is already cached.
-            this.synth?.beginTransition();
+            // Keep existing overlap grains/phase and output-time epoch. The
+            // renderer joins speed updates through its active OLA windows;
+            // fading from one held sample flattened each 128-frame edit join.
             break;
           case "pitch":
             if(this.processingMode==="worker")
