@@ -1,17 +1,32 @@
-/** #63 U1/U5: dispatch guard for ACTUAL model DSP routes.
- * Spectral STFT, Granular, Rust, and legacy Worker models share the bounded
- * PCM source-time Worklet. Each route exposes only the capabilities its DSP
- * and transport actually implement.
+/** #36 / #63: one source of truth for player models and PCM-route eligibility.
+ * The optional legacy individual-period path keeps its historical capability
+ * limits; it is no longer a mandatory product parity target (2026-11-23).
+ * Unknown renderer modes (raw/worker) are not user-selectable PCM models.
  */
-export const MODEL_IDS=Object.freeze(["spectral","granular","live","pv","wsola","dual","am"]);
+const MODEL_DEFINITIONS=Object.freeze({
+  spectral:Object.freeze({label:"STFT",alwaysPCM:true}),
+  granular:Object.freeze({label:"Granular",alwaysPCM:true}),
+  live:Object.freeze({label:"Rust/WASM",alwaysPCM:false}),
+  pv:Object.freeze({label:"PV",alwaysPCM:false}),
+  wsola:Object.freeze({label:"WSOLA",alwaysPCM:false}),
+  dual:Object.freeze({label:"Dual",alwaysPCM:false}),
+  am:Object.freeze({label:"AM",alwaysPCM:false})
+});
+export const MODEL_IDS=Object.freeze(Object.keys(MODEL_DEFINITIONS));
+export const MODEL_LABELS=Object.freeze(Object.fromEntries(
+  Object.entries(MODEL_DEFINITIONS).map(([id,entry])=>[id,entry.label])));
+
+export function isContinuousPCMModel(mode,{individual=false}={}){
+  const definition=Object.hasOwn(MODEL_DEFINITIONS,mode)?MODEL_DEFINITIONS[mode]:null;
+  return Boolean(definition&&(definition.alwaysPCM||!individual));
+}
+
 export function primaryModelCapability(mode,speed,{individual=false}={}){
   if(!MODEL_IDS.includes(mode))throw RangeError("unknown playback model");
   if(typeof speed!=="number"||!Number.isFinite(speed)||speed<-8||speed>8)
     throw RangeError("speed must be finite within -8..8");
   if(typeof individual!=="boolean")throw TypeError("invalid individual-mode setting");
-  const continuousPCM=mode==="spectral"||mode==="granular"||
-    mode==="live"&&!individual||
-    (mode==="pv"||mode==="wsola"||mode==="dual"||mode==="am")&&!individual;
+  const continuousPCM=isContinuousPCMModel(mode,{individual});
   const sampleAB=continuousPCM||mode!=="live";
   return Object.freeze({
     mode,supported:continuousPCM||(speed>=.5&&speed<=2),

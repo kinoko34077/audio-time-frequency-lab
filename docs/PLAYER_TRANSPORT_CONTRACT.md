@@ -1,5 +1,13 @@
 # Audio Lab — Source-time transport contract (#36)
 
+## Current scope amendment — 2026-11-23 (user decision)
+
+- **Individual-period / 個別波長 processing is not a required feature or an acceptance condition for the normal Audio Lab player.** Completing parity for this optional research route (0×, reverse, ±8×, instant scrub, etc.) is not a blocker for the product or for refactoring acceptance. Historical investigation of that route remains documented below.
+- Preserve the currently implemented research Worker route as an optional compatibility feature unless a separate, explicitly scoped removal is accepted. Do not silently substitute a different DSP for it or misreport its limited capabilities.
+- The normal product contract remains native, genuinely distinct PV/STFT/WSOLA/Dual/AM/Rust processing, signed source-time clock/loop/scrub where implemented, independent pitch, progressive uncapped-duration source loading, and existing user interaction. A structural refactor must preserve observable behavior and preserve existing U3/WAV/perceptual/on-device holds.
+- This dated scope amendment supersedes earlier parity/to-do language for individual-period models; it does not retroactively invalidate historical experiments or completed PR evidence.
+
+
 ## Current playback defaults and hold (2026-11-19)
 
 - **Phase Vocoder is the normal playback default.** Spectral STFT, Granular, Rust/WASM, WSOLA, Dual and AM remain separate selectable models; selecting PV uses the existing peak-locked PV renderer.
