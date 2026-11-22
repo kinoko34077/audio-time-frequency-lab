@@ -1113,3 +1113,37 @@ test("staged Worker generation activates after a loop-spanning queue and late fa
     "the shared clock keeps its fractional phase across the setting edit");
   assert.equal(p.statistics.missingFrames,0);
 });
+
+test("native Granular, Spectral and Rust share accounting, EOF and source-clock ownership",()=>{
+  for(const [name,rust] of [["renderGranular",false],["renderSpectral",false],["renderRust",true]]){
+    const p=mk([new Float32Array(64).fill(.1)],{speed:1});
+    let calls=0;
+    const synth={state:{pitchSemitones:2},render(...args){
+      calls++;
+      assert.equal(args.length,rust?5:4,name);
+      assert.equal(args[3],64,name);
+      assert.equal(args[1].sourceFrame,0,name);
+      assert.equal(typeof args[2],"function",name);
+      if(rust)assert.equal(typeof args[4],"function",name);
+      args[0][0].fill(.25);
+      return {missingFrames:3,firstMissingFrame:12};
+    }};
+    const out=[new Float32Array(8)];
+    assert.equal(p[name](out,synth),3,name);
+    assert.equal(calls,1,name);
+    assert.ok(out[0].every(v=>v===.25),name);
+    assert.equal(p.firstMissingFrame,12,name);
+    assert.equal(p.statistics.missingFrames,3,name);
+    assert.equal(p.statistics.renderedFrames,8,name);
+    assert.equal(p.timeline.state.sourceFrame,8,name);
+    p.render([new Float32Array(64)]);
+    assert.equal(p.timeline.state.ended,true,name);
+    const eof=[new Float32Array(8).fill(9)];
+    const before=p.statistics.renderedFrames;
+    assert.equal(p[name](eof,synth),0,name);
+    assert.equal(calls,1,"ended model must not resynthesize "+name);
+    assert.ok(eof[0].every(v=>v===0),name);
+    assert.equal(p.statistics.renderedFrames,before+8,name);
+    assert.equal(p.statistics.missingFrames,3,name);
+  }
+});
