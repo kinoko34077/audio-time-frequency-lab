@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {MODEL_IDS,primaryModelCapability} from "../web-demo/model-route.mjs";
+import {MODEL_IDS,MODEL_LABELS,isContinuousPCMModel,primaryModelCapability} from "../web-demo/model-route.mjs";
 
 test("selected engine has explicit source-time and A/B capabilities, not Granular disguise",()=>{
   assert.deepEqual(MODEL_IDS,["spectral","granular","live","pv","wsola","dual","am"]);
@@ -49,4 +49,28 @@ test("selected engine has explicit source-time and A/B capabilities, not Granula
   assert.equal(primaryModelCapability("am",1,{individual:true}).sampleAB,true);
   assert.throws(()=>primaryModelCapability("wrong",1),RangeError);
   assert.throws(()=>primaryModelCapability("live",9),RangeError);
+});
+
+test("canonical model metadata keeps labels, PCM route membership, and legacy capabilities aligned",()=>{
+  const labels=[
+    ["spectral","STFT"],["granular","Granular"],["live","Rust/WASM"],
+    ["pv","PV"],["wsola","WSOLA"],["dual","Dual"],["am","AM"]
+  ];
+  assert.deepEqual(MODEL_IDS,labels.map(([id])=>id));
+  assert.deepEqual(MODEL_LABELS,Object.fromEntries(labels));
+  for(const [mode] of labels){
+    assert.equal(isContinuousPCMModel(mode),true,mode);
+    assert.equal(isContinuousPCMModel(mode,{individual:true}),
+      mode==="spectral"||mode==="granular",mode);
+    for(const individual of [false,true]){
+      const cap=primaryModelCapability(mode,1,{individual});
+      assert.equal(cap.signed,isContinuousPCMModel(mode,{individual}),mode);
+      assert.equal(cap.zeroAudible,cap.signed,mode);
+      assert.equal(cap.sampleAB,cap.signed||mode!=="live",mode);
+    }
+  }
+  // These are real renderer identifiers, not user-selectable DSP models.
+  for(const mode of ["raw","worker","unknown","__proto__"]){
+    assert.equal(isContinuousPCMModel(mode),false,mode);
+  }
 });
