@@ -133,6 +133,32 @@ export function createSourcePCMRenderer({
     }
     return missing;
   }
+  // Synthesizers own their audio, never the source clock, source-window cache,
+  // neutral identity transition, missing-frame telemetry, or EOF semantics.
+  function renderSynthesized(output,engine,invalidMessage,sourceFrameAt=null){
+    if(!engine||typeof engine.render!=="function")
+      throw RangeError(invalidMessage);
+    const state=timeline.state;
+    if(state.ended&&!state.loopEnabled){
+      for(const channel of output)channel.fill(0);
+      firstMissingFrame=null;
+      renderedFrames+=output[0].length;
+      return 0;
+    }
+    const result=sourceFrameAt?
+      engine.render(output,state,readFrame,sourceFrames,sourceFrameAt):
+      engine.render(output,state,readFrame,sourceFrames);
+    firstMissingFrame=result.firstMissingFrame;
+    const identityMisses=blendNeutralPCM(output,state,
+      engine.state.pitchSemitones);
+    const misses=identityOnlyRaw?identityMisses:
+      Math.max(result.missingFrames,identityMisses);
+    missingFrames+=misses;
+    renderedFrames+=output[0].length;
+    timeline.advance(output[0].length);
+    rememberLastAudible(output);
+    return misses;
+  }
   const api={
     timeline,beginOutputTransition,
     get firstMissingFrame(){return firstMissingFrame;},
@@ -763,83 +789,17 @@ export function createSourcePCMRenderer({
      * Returns missing output-frame count (not a newly allocated status object).
      */
     renderGranular(output,granular){
-      // Experimental independent pitch. Reuse EXACTLY the existing R2
-      // bounded window cache, source timeline and missing-frame telemetry.
-      // No whole-song clone into the AudioWorklet.
-      if(!granular||typeof granular.render!=="function")
-        throw RangeError("invalid experimental granular engine");
-      const state=timeline.state;
-      // Unlooped EOF is an exhausted transport, not a time-freeze request.
-      // Do not keep resynthesizing the last grain forever at the clamped
-      // frame; a later explicit seek or genuine reversal can re-arm it.
-      if(state.ended&&!state.loopEnabled){
-        for(const channel of output)channel.fill(0);
-        firstMissingFrame=null;
-        renderedFrames+=output[0].length;
-        return 0;
-      }
-      const outcome=granular.render(
-        output,state,readFrame,sourceFrames);
-      firstMissingFrame=outcome.firstMissingFrame;
-      const identityMisses=blendNeutralPCM(output,state,
-        granular.state.pitchSemitones);
-      const misses=identityOnlyRaw?identityMisses:
-        Math.max(outcome.missingFrames,identityMisses);
-      missingFrames+=misses;
-      renderedFrames+=output[0].length;
-      timeline.advance(output[0].length);
-      rememberLastAudible(output);
-      return misses;
+      // Experimental Granular keeps its own sound model; post-render state
+      // changes are shared with Spectral and Rust.
+      return renderSynthesized(output,granular,"invalid experimental granular engine");
     },
     renderSpectral(output,spectral){
-      // A phase-coherent STFT synthesizer owns only sound, never the source
-      // clock. Reuse the same cache/loop/telemetry contract as Granular.
-      if(!spectral||typeof spectral.render!=="function")
-        throw RangeError("invalid realtime spectral engine");
-      const state=timeline.state;
-      if(state.ended&&!state.loopEnabled){
-        for(const channel of output)channel.fill(0);
-        firstMissingFrame=null;
-        renderedFrames+=output[0].length;
-        return 0;
-      }
-      const result=spectral.render(output,state,readFrame,sourceFrames);
-      firstMissingFrame=result.firstMissingFrame;
-      const identityMisses=blendNeutralPCM(output,state,
-        spectral.state.pitchSemitones);
-      const misses=identityOnlyRaw?identityMisses:
-        Math.max(result.missingFrames,identityMisses);
-      missingFrames+=misses;
-      renderedFrames+=output[0].length;
-      timeline.advance(output[0].length);
-      rememberLastAudible(output);
-      return misses;
+      return renderSynthesized(output,spectral,"invalid realtime spectral engine");
     },
     renderRust(output,rust){
-      // The Rust engine owns only its partial/residual sound model. It reads
-      // source windows and receives the shared timeline cursor read-only;
-      // the renderer advances the sole transport exactly once.
-      if(!rust||typeof rust.render!=="function")
-        throw RangeError("invalid Rust source-time engine");
-      const state=timeline.state;
-      if(state.ended&&!state.loopEnabled){
-        for(const channel of output)channel.fill(0);
-        firstMissingFrame=null;
-        renderedFrames+=output[0].length;
-        return 0;
-      }
-      const result=rust.render(output,state,readFrame,sourceFrames,
+      // Rust receives the source position read-only; transport advances here.
+      return renderSynthesized(output,rust,"invalid Rust source-time engine",
         timeline.sourceFrameAt);
-      firstMissingFrame=result.firstMissingFrame;
-      const identityMisses=blendNeutralPCM(output,state,
-        rust.state.pitchSemitones);
-      const misses=identityOnlyRaw?identityMisses:
-        Math.max(result.missingFrames,identityMisses);
-      missingFrames+=misses;
-      renderedFrames+=output[0].length;
-      timeline.advance(output[0].length);
-      rememberLastAudible(output);
-      return misses;
     },
     render(output){
       if(!Array.isArray(output)||output.length!==channelCount||
