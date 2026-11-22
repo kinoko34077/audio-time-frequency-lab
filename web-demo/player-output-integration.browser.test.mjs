@@ -532,7 +532,9 @@ test(`native Chrome actual ${profile.model} output follows 0×, reverse and sign
       }));
       throw Error(profile.model+" signed drag not observed: "+JSON.stringify({panStart,...actual})+" / "+error.message);
     }
-    await sleep(570);
+    const returnDuration=await page.$eval("#scrub-return-duration",
+      element=>Number(element.value));
+    await sleep(returnDuration+120);
     const scratch=await page.evaluate(()=>window.__pvScratch.slice());
     const thrown=scratch.filter(x=>x.kind==="scrub"&&x.speed<0);
     const inertia=scratch.filter(x=>x.kind==="command"&&
