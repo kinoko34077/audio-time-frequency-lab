@@ -135,6 +135,32 @@ test("tuning rails stay fixed while compact fields change and held zoom redraws 
       "the currently visible source waveform stays drawn during continuous zoom: "+
         JSON.stringify(samples.filter(sample=>sample.visible&&
           sample.signal/sample.visible<.8).slice(0,8)));
+
+    const adjacentWrites=await page.evaluate(()=>{
+      const pitch=document.querySelector("#granular-pitch");
+      const pitchValue=document.querySelector("#granular-pitch-value");
+      const rangeDescriptor=Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,"value");
+      const widthDescriptor=Object.getOwnPropertyDescriptor(
+        CSSStyleDeclaration.prototype,"width");
+      let rangeWrites=0,widthWrites=0;
+      Object.defineProperty(pitch,"value",{configurable:true,
+        get(){return rangeDescriptor.get.call(this);},
+        set(value){rangeWrites++;rangeDescriptor.set.call(this,value);}});
+      Object.defineProperty(pitchValue.style,"width",{configurable:true,
+        get(){return widthDescriptor.get.call(this);},
+        set(value){widthWrites++;widthDescriptor.set.call(this,value);}});
+      const speed=document.querySelector("#granular-speed");
+      for(const value of ["0.9","0.8","0.7"]){
+        speed.value=value;
+        speed.dispatchEvent(new Event("input",{bubbles:true}));
+      }
+      delete pitch.value;
+      delete pitchValue.style.width;
+      return {rangeWrites,widthWrites};
+    });
+    assert.deepEqual(adjacentWrites,{rangeWrites:0,widthWrites:0},
+      "speed slider edits must not rewrite the independent pitch control or field");
   }finally{
     await closeBrowserTree(browser);
     await new Promise(resolve=>server.close(resolve));
