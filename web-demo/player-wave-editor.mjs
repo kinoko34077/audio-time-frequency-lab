@@ -394,7 +394,11 @@ export function createPlayerWaveEditor({
   function drawZoomPreview(context,width,height,c){
     const oldStart=signalFrame-signalSpan/2,oldEnd=signalFrame+signalSpan/2;
     const nextStart=c-spanFrames/2,nextEnd=c+spanFrames/2;
-    const from=Math.max(oldStart,nextStart),to=Math.min(oldEnd,nextEnd);
+    // Only reuse pixels whose time belongs to the source. A previous raster
+    // may contain stale edge pixels while a zoom is being coalesced; carrying
+    // those past frame 0 or EOF makes the blank margin visibly flicker.
+    const from=Math.max(oldStart,nextStart,0);
+    const to=Math.min(oldEnd,nextEnd,frames);
     if(to<=from)return;
     const sourceX=(from-oldStart)/signalSpan*width;
     const sourceWidth=(to-from)/signalSpan*width;

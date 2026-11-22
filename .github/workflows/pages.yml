@@ -35,6 +35,7 @@ jobs:
           if ! command -v python3 >/dev/null 2>&1; then
             ln -s "$(command -v python)" "$RUNNER_TEMP/python3"
             echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+            export PATH="$RUNNER_TEMP:$PATH"
           fi
           python3 --version
       - name: Install native browser test runtime
