@@ -7,7 +7,7 @@ import {advanceOverviewBuildToken,overviewBinCount,overviewNeedsResample,readOve
 import {returnToPlaySpeed,scrubSpeed,releaseScrubSpeed} from "./scrub-kinetics.mjs";
 import {createPlayerWaveEditor} from "./player-wave-editor.mjs";
 import {toggleSourceMarker,nearestMarkerLoop,shiftLoopToFrame} from "./player-ab-markers.mjs";
-import {primaryModelCapability} from "./model-route.mjs";
+import {primaryModelCapability,isContinuousPCMModel} from "./model-route.mjs";
 import {validatePlaybackSpeed,validateSpeedRailRange,speedOnRail,formatPlaybackSpeed} from "./source-timeline.mjs";
 import {frequencyFromSlider,sliderFromFrequency,holdFromFrequency,drawCrusherPreview} from "./crusher-visual.mjs";
 import {drawFrequencyGraph} from "./graph.mjs";
@@ -49,8 +49,7 @@ const PLAYER_GRANULAR_AVAILABLE=true;
 // regression/comparison path. Normal Audio Time uses the real PV route.
 // PV is a real peak-locked streaming Worklet unless period-joint is enabled.
 const isPCMModel=(mode,individual=lab.individual)=>
-  mode==="spectral"||mode==="granular"||mode==="live"&&!individual||
-  ((mode==="pv"||mode==="wsola"||mode==="dual"||mode==="am")&&!individual);
+  isContinuousPCMModel(mode,{individual});
 const initialModel=GRANULAR_EXPERIMENT||
   new URLSearchParams(location.search).get("model")==="granular"?
   "granular":"pv";
