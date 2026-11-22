@@ -264,7 +264,13 @@ test("tuning rails stay fixed while compact fields change and held zoom redraws 
         const updateMs=performance.now()-started;
         await waitQuiet();
         const newReads=reads.slice(readCountBefore);
-        return {spanBefore,spanAfter:editor.spanFrames,previewY,updatedY,updateMs,
+        const spanAfter=editor.spanFrames;
+        zoomIn.click();
+        const cachedResolutionY=centerY();
+        await waitQuiet();
+        const restoredCacheY=centerY();
+        return {spanBefore,spanAfter,previewY,updatedY,updateMs,
+          cachedResolutionY,restoredCacheY,
           readCount:newReads.length,readFrames:newReads.reduce((n,r)=>n+r.frameCount,0),
           maxReadFrames:Math.max(...newReads.map(r=>r.frameCount))};
       }finally{
@@ -283,6 +289,10 @@ test("tuning rails stay fixed while compact fields change and held zoom redraws 
         JSON.stringify(zoomRefresh));
     assert.ok(zoomRefresh.updateMs<250,
       "fresh visible waveform PCM must repaint in under 250 ms: "+JSON.stringify(zoomRefresh));
+    assert.ok(zoomRefresh.updatedY>75&&zoomRefresh.cachedResolutionY<58&&
+      zoomRefresh.restoredCacheY<58,
+      "switching back to a fully cached resolution must restore its PCM detail: "+
+        JSON.stringify(zoomRefresh));
     assert.ok(zoomRefresh.maxReadFrames<=32768&&
       zoomRefresh.readFrames<=24*48000+32768,
       "zoom refresh remains bounded to its viewport: "+JSON.stringify(zoomRefresh));
