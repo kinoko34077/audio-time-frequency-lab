@@ -194,6 +194,98 @@ test("tuning rails stay fixed while compact fields change and held zoom redraws 
     });
     assert.deepEqual(adjacentWrites,{rangeWrites:0,widthWrites:0},
       "speed slider edits must not rewrite the independent pitch control or field");
+
+    const zoomRefresh=await page.evaluate(async()=>{
+      const {createPlayerWaveEditor}=await import("./player-wave-editor.mjs");
+      const holder=document.createElement("div");
+      holder.style.cssText="position:fixed;left:-1000px;top:0;width:320px;height:120px";
+      const canvas=document.createElement("canvas");
+      canvas.style.cssText="display:block;width:320px;height:120px";
+      holder.append(canvas);document.body.append(holder);
+      const makeNode=tag=>document.createElement(tag);
+      const markerA=makeNode("span"),markerB=makeNode("span");
+      const zoomIn=makeNode("button"),zoomOut=makeNode("button");
+      const zoomLabel=makeNode("output");
+      holder.append(markerA,markerB,zoomIn,zoomOut,zoomLabel);
+      const sourceFrames=60*48000,reads=[];
+      let activeReads=0,coarse=false;
+      const source={sourceFrames,maxReadFrames:32768,
+        overviewPeaks:Array.from({length:96},()=>[-.1,.1]),
+        async read(startFrame,frameCount){
+          activeReads++;reads.push({startFrame,frameCount});
+          try{
+            if(coarse)await new Promise(resolve=>setTimeout(resolve,25));
+            return {startFrame,channels:[new Float32Array(frameCount).fill(
+              coarse?-.5:.25)]};
+          }finally{activeReads--;}
+        }};
+      const waitQuiet=async()=>{
+        const started=performance.now();let count=reads.length,quiet=started;
+        while(performance.now()-started<6000){
+          await new Promise(resolve=>setTimeout(resolve,5));
+          if(activeReads===0&&reads.length===count){
+            if(performance.now()-quiet>100)return;
+          }else{count=reads.length;quiet=performance.now();}
+        }
+        throw Error("synthetic waveform detail reads did not settle");
+      };
+      const centerY=()=>{
+        const context=canvas.getContext("2d"),x=Math.floor(canvas.width/2);
+        const pixels=context.getImageData(x,0,1,canvas.height).data;
+        let total=0,count=0;
+        for(let y=0;y<canvas.height;y++){
+          const i=y*4,r=pixels[i],g=pixels[i+1],b=pixels[i+2];
+          if(g>150&&g>r*1.25&&b>r*1.1){total+=y;count++;}
+        }
+        return count?total/count/(canvas.height/120):null;
+      };
+      let editor;
+      try{
+        editor=createPlayerWaveEditor({canvas,wrap:holder,
+          overviewSelection:makeNode("div"),markerA,markerB,zoomIn,zoomOut,
+          zoomLabel,getPosition:()=>30,onPosition:()=>{},onStart:()=>{},
+          onAB:()=>({a:0,b:sourceFrames,enabled:false})});
+        editor.setSource(source,48000);await waitQuiet();
+        zoomIn.click();await waitQuiet();
+        zoomIn.click();await waitQuiet();
+        zoomOut.click();await waitQuiet();
+        zoomOut.click();await waitQuiet();
+        const spanBefore=editor.spanFrames;
+        coarse=true;
+        const readCountBefore=reads.length,started=performance.now();
+        zoomOut.click();
+        const previewY=centerY(),startedReads=reads.length-readCountBefore;
+        let updatedY=null;
+        while(performance.now()-started<500){
+          await new Promise(resolve=>setTimeout(resolve,5));
+          updatedY=centerY();
+          if(updatedY!==null&&updatedY>75)break;
+        }
+        const updateMs=performance.now()-started;
+        await waitQuiet();
+        const newReads=reads.slice(readCountBefore);
+        return {spanBefore,spanAfter:editor.spanFrames,previewY,updatedY,updateMs,
+          readCount:newReads.length,readFrames:newReads.reduce((n,r)=>n+r.frameCount,0),
+          maxReadFrames:Math.max(...newReads.map(r=>r.frameCount))};
+      }finally{
+        editor?.setSource(null,48000);await waitQuiet();holder.remove();
+      }
+    });
+    assert.equal(zoomRefresh.spanBefore,576000);
+    assert.equal(zoomRefresh.spanAfter,1152000);
+    assert.ok(zoomRefresh.readCount>0,
+      "the wider viewport must start a fresh bounded detail read immediately: "+
+        JSON.stringify(zoomRefresh));
+    assert.ok(zoomRefresh.previewY>43&&zoomRefresh.previewY<58,
+      "cached waveform remains visible as an instant preview: "+JSON.stringify(zoomRefresh));
+    assert.ok(zoomRefresh.updatedY>75,
+      "the browser canvas must replace the stretched preview with new coarse PCM: "+
+        JSON.stringify(zoomRefresh));
+    assert.ok(zoomRefresh.updateMs<250,
+      "fresh visible waveform PCM must repaint in under 250 ms: "+JSON.stringify(zoomRefresh));
+    assert.ok(zoomRefresh.maxReadFrames<=32768&&
+      zoomRefresh.readFrames<=24*48000+32768,
+      "zoom refresh remains bounded to its viewport: "+JSON.stringify(zoomRefresh));
   }finally{
     try{
       await closeBrowserTree(browser);

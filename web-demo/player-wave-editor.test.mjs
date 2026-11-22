@@ -160,15 +160,17 @@ test("zooming out within cached one-frame peaks repaints both exposed strips",as
   }
 });
 
-test("zooming out across peak resolutions reuses cached fine PCM buckets",async()=>{
-  const sourceFrames=48_000*12,reads=[];let activeReads=0;
+test("zooming out across peak resolutions shows preview then refreshes from bounded coarse PCM",async()=>{
+  const sourceFrames=48_000*60,reads=[];let activeReads=0,coarseRequested=false;
   const source={sourceFrames,maxReadFrames:32_768,
     overviewPeaks:Array.from({length:96},()=>[-.1,.1]),
     async read(startFrame,frameCount){
       activeReads++;
       try{
         reads.push({startFrame,frameCount});
-        return {startFrame,channels:[new Float32Array(frameCount).fill(.25)]};
+        if(coarseRequested)await new Promise(resolve=>setTimeout(resolve,25));
+        return {startFrame,channels:[new Float32Array(frameCount).fill(
+          coarseRequested?-.5:.25)]};
       }finally{activeReads--;}
     }};
   Object.defineProperty(source,"activeReads",{get:()=>activeReads});
@@ -176,31 +178,52 @@ test("zooming out across peak resolutions reuses cached fine PCM buckets",async(
   Object.defineProperty(globalThis,"devicePixelRatio",{configurable:true,value:1});
   let editor,zoomIn,zoomOut,waveSegments;
   try{
-    ({editor,zoomIn,zoomOut,waveSegments}=makeEditor(source,6));
+    ({editor,zoomIn,zoomOut,waveSegments}=makeEditor(source,30));
     await waitForReadQuiet(source,reads);
     zoomIn.click();await waitForReadQuiet(source,reads);
-    const beforeFinalRefine=reads.length;
     zoomIn.click();await waitForReadQuiet(source,reads);
     assert.equal(editor.spanFrames,144_000,"the finer detail view is three seconds wide");
-    const fineViewReads=reads.slice(beforeFinalRefine);
     zoomOut.click();await waitForReadQuiet(source,reads);
-    const zoomOutReads=reads.slice(beforeFinalRefine+fineViewReads.length);
-    const repeatedFrames=zoomOutReads.reduce((total,next)=>total+
-      fineViewReads.reduce((overlap,prior)=>overlap+
-        Math.max(0,Math.min(next.startFrame+next.frameCount,
-          prior.startFrame+prior.frameCount)-Math.max(next.startFrame,prior.startFrame)),0),0);
-    assert.equal(repeatedFrames,0,
-      "zooming out across a coarser target resolution must keep every cached fine PCM frame");
-    assert.equal(zoomOutReads.length,0,
-      "newly exposed wide edges must use overview peaks instead of fine-resolution PCM reads");
-    const leftEdge=waveSegments.filter(segment=>segment.x===0).at(-1);
-    const fineCenter=waveSegments.filter(segment=>segment.x===160).at(-1);
-    assert.ok(leftEdge&&(leftEdge.y1+leftEdge.y2)/2>53,
-      "the newly exposed edge stays visible from the whole-track cache: "+
-        JSON.stringify(leftEdge));
-    assert.ok(fineCenter&&(fineCenter.y1+fineCenter.y2)/2<52,
-      "the previously refined center stays sharp after zooming out: "+
-        JSON.stringify(fineCenter));
+    zoomOut.click();await waitForReadQuiet(source,reads);
+    assert.equal(editor.spanFrames,576_000,"the previously cached coarse view is twelve seconds wide");
+    coarseRequested=true;
+    const started=performance.now();
+    const readCountBeforeZoomOut=reads.length;
+    zoomOut.click();
+    const readCountAfterZoomOut=reads.length;
+    const zoomOutReads=reads.slice(readCountBeforeZoomOut);
+    assert.ok(readCountAfterZoomOut>readCountBeforeZoomOut,
+      "zooming out must start a fresh bounded read immediately");
+    const leftPreview=waveSegments.filter(segment=>segment.x===0).at(-1);
+    const finePreview=waveSegments.filter(segment=>segment.x===160).at(-1);
+    assert.ok(leftPreview&&(leftPreview.y1+leftPreview.y2)/2>53,
+      "the newly exposed edge must remain visible during the refresh");
+    assert.ok(finePreview&&(finePreview.y1+finePreview.y2)/2<52,
+      "the cached fine waveform must remain as an immediate anti-flicker preview");
+    const updateStarted=performance.now();
+    let refreshedCenter;
+    while(performance.now()-updateStarted<500){
+      await new Promise(resolve=>setTimeout(resolve,5));
+      refreshedCenter=waveSegments.filter(segment=>segment.x===160).at(-1);
+      if(refreshedCenter&&(refreshedCenter.y1+refreshedCenter.y2)/2>75)break;
+    }
+    const updateMs=performance.now()-updateStarted;
+    assert.ok(refreshedCenter&&(refreshedCenter.y1+refreshedCenter.y2)/2>75,
+      "new coarse PCM must replace the stretched preview with the new waveform: "+
+        JSON.stringify(refreshedCenter));
+    assert.ok(updateMs<250,
+      "fresh visible detail must arrive promptly instead of waiting for a whole-track overview: "+
+        updateMs+"ms");
+    await waitForReadQuiet(source,reads);
+    const completedZoomOutReads=reads.slice(readCountBeforeZoomOut);
+    assert.ok(completedZoomOutReads.every(read=>read.frameCount<=32_768),
+      "coarse refresh must use bounded PCM windows");
+    const totalZoomOutFrames=completedZoomOutReads.reduce((total,read)=>total+read.frameCount,0);
+    assert.ok(totalZoomOutFrames<=24*48_000+32_768,
+      "coarse refresh must stay near the twenty-four-second viewport, not rescan the full source: "+
+        totalZoomOutFrames);
+    assert.ok(performance.now()-started<5_000,
+      "the six-second view's bounded detail pass must complete within five seconds");
   }finally{
     editor?.setSource(null,48_000);
     await waitForReadQuiet(source,reads);

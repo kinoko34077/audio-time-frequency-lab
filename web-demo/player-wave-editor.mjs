@@ -7,6 +7,7 @@ import {scrubSpeed,releaseScrubSpeed} from "./scrub-kinetics.mjs";
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 const DETAIL_READ_FRAMES=32_768;
 const DETAIL_MAX_READS=64;
+const DETAIL_MAX_CACHE_LEVELS=8;
 const timestamp=seconds=>{
   const value=Math.max(0,seconds);
   return Math.floor(value/60)+":"+(value%60).toFixed(2).padStart(5,"0");
@@ -44,7 +45,8 @@ export function createPlayerWaveEditor({
   onScrubMotion=()=>{},onHoverFrame=()=>false,onHoverEnd=()=>{},
   continuousRefresh=false
 }){
-  let channels=null,source=null,detailBuckets=new Map(),detailBlockFrames=0;
+  let channels=null,source=null,detailBuckets=new Map(),detailLevels=new Map(),
+    detailBlockFrames=0;
   let detailPending=null,desiredDetailRange=null;
   let detailFailedKey=null,detailRetriedKey=null;
   let detailRetryTimer=null,detailRevision=0;
@@ -80,7 +82,8 @@ export function createPlayerWaveEditor({
     channels=source?null:nextChannels;
     if(detailRetryTimer!==null)clearTimeout(detailRetryTimer);
     detailRetryTimer=null;
-    detailBuckets.clear();detailBlockFrames=0;desiredDetailRange=null;
+    detailBuckets.clear();detailLevels.clear();detailBuckets=new Map();
+    detailBlockFrames=0;desiredDetailRange=null;
     detailPending=null;
     detailFailedKey=null;detailRetriedKey=null;detailRevision++;
     contentRevision++;
@@ -104,24 +107,29 @@ export function createPlayerWaveEditor({
     let low=1,high=-1;
     if(source){
       if(detailBlockFrames>0){
-        const begin=Math.floor(from/detailBlockFrames);
-        const end=Math.floor((to-1)/detailBlockFrames);
         // A finer resolution retained from the previous zoom level can cover
-        // many bins per output pixel after zooming out. Aggregate a bounded
-        // number; wider pixels should use the overview instead of scanning an
-        // unbounded cache range on every paint.
-        if(end-begin<=256){
-          let complete=true;
+        // many bins per output pixel after zooming out. Try nearby cached
+        // resolutions, but bound aggregation and fall back to the overview
+        // instead of scanning an unbounded cache range on every paint.
+        const candidates=[...detailLevels.keys()].sort((a,b)=>
+          Math.abs(Math.log2(a/detailBlockFrames))-
+          Math.abs(Math.log2(b/detailBlockFrames)));
+        for(const blockFrames of candidates){
+          const buckets=detailLevels.get(blockFrames);
+          const begin=Math.floor(from/blockFrames);
+          const end=Math.floor((to-1)/blockFrames);
+          if(end-begin>256)continue;
+          let complete=true,levelLow=1,levelHigh=-1;
           for(let bucket=begin;bucket<=end;bucket++){
-            const peak=detailBuckets.get(bucket);
+            const peak=buckets.get(bucket);
             if(!peak){complete=false;break;}
-            low=Math.min(low,peak[0]);high=Math.max(high,peak[1]);
+            levelLow=Math.min(levelLow,peak[0]);
+            levelHigh=Math.max(levelHigh,peak[1]);
           }
-          if(complete)return [low,high];
+          if(complete)return [levelLow,levelHigh];
         }
-        // Keep the stable coarse source envelope visible until all fine bins
-        // for this pixel have arrived. This also covers newly exposed zoom
-        // edges and avoids a blank flash during progressive decoding.
+        // Keep an existing absolute-source raster/overview visible while the
+        // active-resolution detail read fills its cache.
       }
       if(source.overviewPeaks?.length){
         const peaks=source.overviewPeaks;
@@ -174,24 +182,25 @@ export function createPlayerWaveEditor({
     const wantedBlock=Math.max(1,Math.ceil(spanFrames/maxSummaryBins));
     const requestedBlockFrames=Math.max(1,Math.min(readFrames,
       2**Math.ceil(Math.log2(wantedBlock))));
-    // Refining needs new PCM and replaces the old bucket grid. Coarsening can
-    // aggregate the already cached finer grid, so retain it rather than
-    // discarding and rereading the same source on every zoom-out step.
-    if(!detailBlockFrames||requestedBlockFrames<detailBlockFrames){
-      detailBuckets.clear();detailBlockFrames=requestedBlockFrames;
+    // Keep each quantized grid separately. A zoom-out can reuse matching
+    // coarse bins, or request bounded coarse PCM while a finer grid continues
+    // to serve as the instant raster preview.
+    if(requestedBlockFrames!==detailBlockFrames){
+      let buckets=detailLevels.get(requestedBlockFrames);
+      if(!buckets)buckets=new Map();
+      detailLevels.delete(requestedBlockFrames);
+      detailLevels.set(requestedBlockFrames,buckets);
+      while(detailLevels.size>DETAIL_MAX_CACHE_LEVELS){
+        const oldest=detailLevels.keys().next().value;
+        detailLevels.delete(oldest);
+      }
+      detailBlockFrames=requestedBlockFrames;detailBuckets=buckets;
       signalDirtyRanges.clear();
       detailFailedKey=null;detailRetriedKey=null;
+    }else if(!detailLevels.has(detailBlockFrames)){
+      detailBuckets=new Map();detailLevels.set(detailBlockFrames,detailBuckets);
     }
     const blockFrames=detailBlockFrames;
-    if(requestedBlockFrames>blockFrames){
-      // Zooming out exposes more source, but the cached fine grid is only a
-      // preview at its existing locations. Do not read the newly exposed wide
-      // range at that expensive resolution; overview peaks fill the rest.
-      desiredDetailRange=null;
-      if(detailPending)detailRevision++;
-      detailFailedKey=null;detailRetriedKey=null;
-      return;
-    }
     const summaryStart=Math.floor(from/blockFrames)*blockFrames;
     const summaryEnd=Math.min(frames,
       Math.ceil(to/blockFrames)*blockFrames);
