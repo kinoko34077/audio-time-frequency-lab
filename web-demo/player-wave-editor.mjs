@@ -196,6 +196,20 @@ export function createPlayerWaveEditor({
       }
       detailBlockFrames=requestedBlockFrames;detailBuckets=buckets;
       signalDirtyRanges.clear();
+      // updateSignalBuffer stretches the previous raster while a new zoom
+      // level is loading. If this resolution is already cached, repaint its
+      // visible absolute-source buckets immediately so the preview does not
+      // remain stretched after requestDetail's complete-cache fast path.
+      const visibleStart=Math.max(0,Math.floor(center()-spanFrames/2));
+      const visibleEnd=Math.min(frames,Math.ceil(center()+spanFrames/2));
+      const firstVisibleBucket=Math.floor(visibleStart/requestedBlockFrames);
+      const afterVisibleBucket=Math.ceil(visibleEnd/requestedBlockFrames);
+      for(let bucket=firstVisibleBucket;bucket<afterVisibleBucket;bucket++){
+        if(!detailBuckets.has(bucket))continue;
+        const bucketStart=bucket*requestedBlockFrames;
+        markSignalDirty("cached-resolution:"+requestedBlockFrames+":"+bucket,
+          bucketStart,Math.min(frames,bucketStart+requestedBlockFrames));
+      }
       detailFailedKey=null;detailRetriedKey=null;
     }else if(!detailLevels.has(detailBlockFrames)){
       detailBuckets=new Map();detailLevels.set(detailBlockFrames,detailBuckets);
