@@ -12,6 +12,11 @@ export function releaseScrubSpeed(speed,timeSinceMoveMs){
      timeSinceMoveMs>100||Math.abs(speed)<.3)return 0;
   return clamp(speed,-8,8);
 }
+export function scaleScrubInertia(speed,strength=1){
+  if(!Number.isFinite(speed)||!Number.isFinite(strength))
+    throw RangeError("invalid scrub inertia parameters");
+  return clamp(speed*clamp(strength,0,3),-8,8);
+}
 export function returnToPlaySpeed(scrub,requested,elapsedMs,durationMs=1000){
   if(![scrub,requested,elapsedMs,durationMs].every(Number.isFinite)||
      durationMs<=0)throw RangeError("invalid scrub return parameters");

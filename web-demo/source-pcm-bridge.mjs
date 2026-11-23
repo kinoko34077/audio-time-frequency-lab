@@ -376,6 +376,15 @@ export async function createSourcePCMBridge({
       loop=enabled;
       return updateLoop(A,B,enabled,"loop");
     },
+    setLoopConfiguration(a,b,enabled){
+      if(processingMode==="worker")
+        return Promise.reject(Error("A/B playback is unavailable for the legacy Worker"));
+      if(!Number.isSafeInteger(a)||!Number.isSafeInteger(b)||
+         a<0||a>=b||b>frames||typeof enabled!=="boolean")
+        return Promise.reject(RangeError("invalid A/B configuration"));
+      A=a;B=b;loop=enabled;
+      return updateLoop(a,b,enabled,"configuration");
+    },
     pushRenderedChunk(chunk){
       if(processingMode!=="worker")
         return Promise.reject(Error("rendered Worker chunks require Worker processing mode"));

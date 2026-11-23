@@ -532,9 +532,9 @@ test(`native Chrome actual ${profile.model} output follows 0×, reverse and sign
       }));
       throw Error(profile.model+" signed drag not observed: "+JSON.stringify({panStart,...actual})+" / "+error.message);
     }
-    const returnDuration=await page.$eval("#scrub-return-duration",
-      element=>Number(element.value));
-    await sleep(returnDuration+120);
+    // The release transition is fixed at one second; the user setting scales
+    // throw strength rather than changing this convergence duration.
+    await sleep(1120);
     const scratch=await page.evaluate(()=>window.__pvScratch.slice());
     const thrown=scratch.filter(x=>x.kind==="scrub"&&x.speed<0);
     const inertia=scratch.filter(x=>x.kind==="command"&&
@@ -545,6 +545,38 @@ test(`native Chrome actual ${profile.model} output follows 0×, reverse and sign
       "release must keep moving backward and smoothly regain saved +1× in actual Worklet");
     assert.equal(Number(await page.$eval("#rt-telemetry",e=>e.dataset.pcmNodeStarts)),start,
       "scrubbing cannot recreate a new PCM node for every pointer movement");
+    if(profile.model==="pv"){
+      await page.evaluate(()=>{window.__pvScratch=[];});
+      await page.mouse.move(bounds.x+bounds.w*panStart,bounds.y+bounds.h*.74);
+      await page.mouse.down();
+      await page.mouse.move(bounds.x+bounds.w*(panStart+.06),
+        bounds.y+bounds.h*.74,{steps:8});
+      await page.mouse.up();
+      await page.waitForFunction(()=>window.__pvScratch.some(x=>
+        x.kind==="scrub"&&x.speed<0),{timeout:4000});
+      await sleep(100);
+      const forward=await page.$eval("#seek-forward",el=>{
+        const r=el.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};
+      });
+      await page.mouse.move(forward.x,forward.y);
+      const beforeHold=await page.evaluate(()=>window.__pvScratch.length);
+      await page.mouse.down();
+      await sleep(300);
+      const holdEvidence=await page.evaluate(start=>({
+        speeds:window.__pvScratch.slice(start)
+          .filter(x=>Number.isFinite(x.speed)).map(x=>x.speed),
+        buttonDisabled:document.querySelector("#seek-forward").disabled,
+        processing:document.querySelector("#granular-optin-status")?.dataset.renderRunning,
+        route:document.querySelector("#rt-telemetry")?.dataset.pcmTransport
+      }),beforeHold);
+      const heldSpeeds=holdEvidence.speeds;
+      assert.ok(heldSpeeds.length>=1&&heldSpeeds.every(speed=>speed===4),
+        "a held 4× shuttle must not be overwritten by pending scrub inertia: "+
+        JSON.stringify(holdEvidence));
+      await page.mouse.up();
+      await page.waitForFunction(()=>window.__pvScratch.some(x=>
+        x.kind==="command"&&Math.abs(x.speed-1)<.01),{timeout:4000});
+    }
     assert.ok(await measure()>1e-5,
       "selected DSP must still produce samples after releasing the drag");
     assert.deepEqual(errors,[]);

@@ -67,12 +67,33 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, open
     assert.deepEqual(movedIcons,{play:"30px",skip:"24px"},
       "shared transport icons stay compact when reparented into the model tab");
     await page.setViewport({width:800,height:600,deviceScaleFactor:1});
-    await page.click("#seek-forward");
-    await page.waitForFunction(()=>Number(document.querySelector("#wave-detail")
-      ?.getAttribute("aria-valuenow"))>1000,{timeout:3000});
-    await page.click("#seek-backward");
-    await page.waitForFunction(()=>Number(document.querySelector("#wave-detail")
-      ?.getAttribute("aria-valuenow"))<100,{timeout:3000});
+    const holdTransport=async(selector,speed)=>{
+      const before=Number(await page.$eval("#wave-detail",node=>
+        node.getAttribute("aria-valuenow")));
+      const box=await page.$eval(selector,node=>{
+        const r=node.getBoundingClientRect();
+        return {x:r.x+r.width/2,y:r.y+r.height/2};
+      });
+      await page.mouse.move(box.x,box.y);
+      await page.mouse.down();
+      try{
+        await page.waitForFunction(({speed,before})=>{
+          const rendered=Number(document.querySelector("#wave-detail")
+            ?.getAttribute("aria-valuenow"));
+          return document.querySelector("#granular-optin-status")
+              ?.dataset.renderSpeed===String(speed)&&
+            (speed>0?rendered>before+1000:rendered<before-1000);
+        },{timeout:5000},{speed,before});
+      }finally{await page.mouse.up();}
+      await page.waitForFunction(()=>document.querySelector("#granular-optin-status")
+        ?.dataset.renderRunning!=="true",{timeout:5000});
+    };
+    await holdTransport("#seek-forward",4);
+    assert.equal(await page.$eval("#granular-speed-value",node=>node.value),"1",
+      "held 4x forward transport does not overwrite the configured speed");
+    await holdTransport("#seek-backward",-4);
+    assert.equal(await page.$eval("#granular-speed-value",node=>node.value),"1",
+      "held 4x reverse transport does not overwrite the configured speed");
     await page.click("#player-loop-toggle");
     await page.waitForFunction(()=>document.querySelector("#player-loop-toggle")
       ?.getAttribute("aria-pressed")==="false",{timeout:2000});
@@ -506,11 +527,11 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, open
       "pinch may not restart the audio engine");
     await page.click("#settings-open");
     await page.waitForFunction(()=>document.querySelector("#settings-dialog")?.open);
-    await page.$eval("#scrub-return-duration",el=>{
-      el.value="1350";el.dispatchEvent(new Event("input",{bubbles:true}));
+    await page.$eval("#scrub-inertia",el=>{
+      el.value="180";el.dispatchEvent(new Event("input",{bubbles:true}));
     });
-    assert.equal(await page.$eval("#scrub-return-duration-value",el=>el.textContent),"1350 ms");
-    assert.equal(await page.evaluate(()=>localStorage.getItem("audio-lab-scrub-return-duration")),"1350");
+    assert.equal(await page.$eval("#scrub-inertia-value",el=>el.textContent),"180%");
+    assert.equal(await page.evaluate(()=>localStorage.getItem("audio-lab-scrub-inertia")),"180");
     assert.equal(await page.$eval("body",el=>el.dataset.mainTab),"player");
     assert.notEqual(await page.$eval("#audio-lab",el=>getComputedStyle(el).display),"none");
     assert.equal(await page.$eval("#lab-model",el=>el.value),"granular");
@@ -777,7 +798,8 @@ test("U1/U5 primary Play routes to REAL selected live/PV/Granular engines and on
       document.querySelector("#granular-optin-status")?.dataset.renderRunning==="true",
       {timeout:20000});
     assert.match(await page.$eval("#rt-indicator",el=>el.textContent),/Rust · 再生中/);
-    assert.match(await page.$eval("#lab-model-compatibility",el=>el.textContent),/0(?:倍|\/)・?逆再生・サンプル単位A\/B/);
+    assert.equal(await page.$eval("#lab-model-compatibility",el=>el.textContent),"",
+      "supported Rust playback does not repeat its feature list as redundant copy");
     const rustNodeStarts=await page.$eval("#rt-telemetry",el=>el.dataset.pcmNodeStarts);
     assert.equal(await page.evaluate(()=>window.__engineCreations.filter(e=>
       e.kind==="worklet"&&e.name==="audio-lab-source-pcm").length),1,

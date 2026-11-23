@@ -34,14 +34,18 @@
     <div class="lab-grid model-essential-grid">
       <label class="lab-field">処理モデル
         <select id="lab-model" aria-label="再生モデル">
-          <option value="spectral">STFT Spectral · 比較用・正逆/0倍・音程独立</option>
-          <option value="granular">Granular · 比較用・粒状重ね合わせ</option>
-          <option value="live">Rust/WASM 部分音 · リアルタイム</option>
-          <option value="pv" selected>Phase Vocoder · 標準再生・位相ロック/正逆/0倍</option>
-          <option value="wsola">WSOLA · 波形相関・正逆/0倍</option>
-          <option value="dual">Dual · 短WSOLA＋長PV・正逆/0倍</option>
-          <option value="am">AM包絡 + Phase Vocoder · 自動先読み</option>
+          <option value="spectral">STFT Spectral · 比較用</option>
+          <option value="granular">Granular · 比較用</option>
+          <option value="live">Rust/WASM · 部分音＋残差</option>
+          <option value="pv" selected>Phase Vocoder · 標準</option>
+          <option value="wsola">WSOLA</option>
+          <option value="dual">Dual · 短WSOLA＋長PV</option>
+          <option value="am">AM包絡＋PV</option>
         </select>
+      </label>
+      <label class="lab-field lab-inertia-control" for="scrub-inertia">
+        スクラブ慣性 <output id="scrub-inertia-value" for="scrub-inertia">150%</output>
+        <input id="scrub-inertia" type="range" min="0" max="300" step="10" value="150" aria-label="スクラブ後の投げ慣性">
       </label>
     </div>
     <details class="model-info-controls"><summary>モデル情報</summary>
@@ -78,7 +82,7 @@
       <output id="lab-period-cycles-output" for="lab-period-cycles" hidden>8周期</output>
       <small>0.5 · 1 · 2 · 4 · 8 · 16 · 32周期</small>
     </div>
-    <p id="lab-individual-note" class="lab-note">オン：各周波数の周期窓から共通部分音を推定し、残差を上で選択したPV・WSOLA・短長複合・AMで処理します。Rust/WASMリアルタイムとの同時使用は未対応（オン時はPVへ明示的に切替）。オフ：各モデルを元音声に直接適用します。</p>
+    <p id="lab-individual-note" class="lab-note">オン：周波数別の部分音と残差を推定します。Rust/WASMでは使えません。</p>
     <p id="lab-window-note" class="lab-note">複合窓では短窓が音の立ち上がり、長窓が音程の識別を担当します。</p>
     </details>
     <div class="lab-bottom">
@@ -116,9 +120,9 @@
         </section>
         <div id="player-actions-slot"><div id="shared-transport">
           <div class="actions">
-            <button type="button" id="seek-backward" class="transport-skip" aria-label="5秒戻る" title="5秒戻る" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5v14L2 12l9-7Zm11 0v14l-9-7 9-7Z"/></svg></button>
+            <button type="button" id="seek-backward" class="transport-skip" aria-label="4倍速で巻き戻す（長押し）" title="押している間4倍速で巻き戻す" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5v14L2 12l9-7Zm11 0v14l-9-7 9-7Z"/></svg></button>
             <button type="button" id="play-main" class="primary" aria-label="再生" title="再生" disabled><svg data-transport-icon viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3.8v16.4L20 12 6 3.8Z"/></svg></button>
-            <button type="button" id="seek-forward" class="transport-skip" aria-label="5秒進む" title="5秒進む" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 5v14l9-7-9-7ZM2 5v14l9-7-9-7Z"/></svg></button>
+            <button type="button" id="seek-forward" class="transport-skip" aria-label="4倍速で早送りする（長押し）" title="押している間4倍速で早送りする" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 5v14l9-7-9-7ZM2 5v14l9-7-9-7Z"/></svg></button>
             <button id="stop" hidden disabled>停止</button>
             <button id="play-dry" hidden disabled>原音を聴く</button>
             <button id="play-wet" hidden disabled>モデルで再生</button>
@@ -414,8 +418,6 @@
       <label class="setting-checkbox" for="debug-mode"><input id="debug-mode" type="checkbox">デバッグモード（レイアウト編集）</label>
       <p id="debug-mode-feedback" class="setting-help" role="alert" hidden></p>
       <p class="setting-help">ページの要素を選択し、配置・寸法を変更できます。インスペクターは最小化・ドラッグ移動可能です。長押しまたは右クリックで要素メニューを表示します。音声操作を行う際は「動作確認」に切り替えてください。変更はこのブラウザ内のみ保存します。</p>
-      <label for="scrub-return-duration">スクラブ慣性の戻り時間 <output id="scrub-return-duration-value" for="scrub-return-duration">1000 ms</output></label>
-      <input id="scrub-return-duration" type="range" min="400" max="2000" step="50" value="1000" aria-label="スクラブ後に設定速度へ戻る時間">
     </fieldset>
     <fieldset><legend>操作</legend><button id="settings-reset" type="button" class="reset-button">エフェクトの設定を初期値に戻す</button>
       <details class="help-inline"><summary>ⓘ 説明</summary><p class="setting-help">音声ファイルと再生位置はそのまま。研究用試作品のため一部の変更で短い音切れが生じます。</p></details>
