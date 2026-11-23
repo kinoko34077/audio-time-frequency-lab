@@ -29,6 +29,13 @@ export function createProgressivePCMCache({
       cache.delete(key);cache.set(key,resident);
       return resident;
     }
+    const requestedEnd=Math.min(sourceFrames,start+size);
+    for(const [residentKey,window] of cache){
+      if(window.start<=start&&window.start+window.channels[0].length>=requestedEnd){
+        cache.delete(residentKey);cache.set(residentKey,window);
+        return window;
+      }
+    }
     const priority=PRIORITY[options?.priority]??PRIORITY.background;
     const inflight=pending.get(key);
     if(inflight){
@@ -114,7 +121,7 @@ export function createProgressivePCMCache({
         const windowStart=Math.floor(frame/readWindowFrames)*readWindowFrames;
         const window=await readWindow(windowStart,options,readWindowFrames);
         assertLive();
-        const sourceOffset=frame-windowStart;
+        const sourceOffset=frame-window.start;
         const count=Math.min(frameCount-offset,window.channels[0].length-sourceOffset);
         for(let channel=0;channel<channelCount;channel++)
           result[channel].set(window.channels[channel].subarray(sourceOffset,
