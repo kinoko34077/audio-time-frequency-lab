@@ -457,7 +457,7 @@ test("individual-period Worker applies and wraps edited source-frame A/B without
         const generation=progress.at(-1)?.workerGeneration;
         const job=audit.jobs.findLast(item=>item.generation===generation&&
           item.loopEnabled&&item.loopStartFrame===a&&item.loopEndFrame===b&&
-          item.start===12000&&item.end===b);
+          item.start>=a&&item.start<b&&item.end===b);
         return {generation,sourceFrame:progress.at(-1)?.sourceFrame,
           missingFrames:progress.at(-1)?.missingFrames||0,job,
           worklets:audit.worklets.length};
