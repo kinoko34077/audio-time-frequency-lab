@@ -255,11 +255,16 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
             throw Error("A/B playback is unavailable for the legacy Worker");
           // No process() callback can run between endpoint-cache installation
           // and transport bounds/enable update in this synchronous handler.
-          this.renderer.beginOutputTransition();
+          const previousFrame=this.renderer.timeline.state.sourceFrame;
           const st=this.renderer.applyLoopConfiguration(
             m.a,m.b,m.enabled,m.endpoints
           );
-          this.synth?.reset();
+          const preserve=(this.processingMode==="pv"||this.processingMode==="spectral")&&
+            st.sourceFrame===previousFrame;
+          if(!preserve){
+            this.renderer.beginOutputTransition();
+            this.synth?.reset();
+          }
           this.pendingRequest=null;
           this.queueRenderReceipt(m.requestId,st);
           this.port.postMessage({type:"command-accepted",requestId:m.requestId,
