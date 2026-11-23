@@ -449,7 +449,7 @@ function refreshAB(){
     $("#"+id).disabled=false;
   if(workerPlayback)
     $("#player-loop-hint").textContent=
-      "研究WorkerのA/B変更は処理済み音声の準備後に反映します。";
+      "研究WorkerのA/Bは安全な区間境界で反映します。";
   detailWaveEditor?.refresh(true);
 }
 function syncLoopToPlayer(player=state.player){
