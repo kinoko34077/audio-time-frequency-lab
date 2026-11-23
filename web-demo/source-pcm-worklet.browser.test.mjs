@@ -153,15 +153,6 @@ test("native Chrome experimental source-PCM AudioWorklet renders and loops witho
       const pvLoopState=pvLoop.latest;
       await pvLoop.pause();
       pvLoop.dispose();
-      assert.equal(endpointReads.length,2,JSON.stringify(loopReads));
-      assert.ok(endpointReads.every(read=>read.windowFrames===8192&&
-        read.frameCount===8192),JSON.stringify(loopReads));
-      assert.ok(loopEditLatencyMs<100,
-        `progressive PV loop edit took ${loopEditLatencyMs.toFixed(1)}ms`);
-      assert.equal(loopEdit.loopStartFrame,48000);
-      assert.equal(loopEdit.loopEndFrame,96000);
-      assert.equal(pvLoopState?.loopEnabled,true,JSON.stringify(pvLoopState));
-      assert.equal(pvLoopState?.missingFrames,0,JSON.stringify(pvLoopState));
       await player.pause();
       const stable=node===player.node;
       player.dispose();
@@ -249,6 +240,8 @@ test("native Chrome experimental source-PCM AudioWorklet renders and loops witho
       await ctx.close();
       return {
         first,loop,rms,stable,loopMissing,transitions,afterDispose,
+        progressiveLoop:{endpointReads,latencyMs:loopEditLatencyMs,
+          command:loopEdit,state:pvLoopState},
         rust:{freeze:rustFreeze,freezePCM:rustFreezePCM,rms:rustFreezePCM.rms,loop:rustLoop,
           frequency:rustFreezePCM.frequency,freezeRms:rustFreezePCM.rms,
           forwardPCM:rustForwardPCM,reverse:rustReverse,
@@ -306,6 +299,21 @@ test("native Chrome experimental source-PCM AudioWorklet renders and loops witho
     assert.ok(evidence.rms>.01,`expected audible PCM: ${JSON.stringify(evidence)}`);
     assert.equal(evidence.stable,true);
     assert.equal(evidence.transitions.length,4);
+    assert.equal(evidence.progressiveLoop.endpointReads.length,2,
+      evidence.progressiveLoop);
+    assert.ok(evidence.progressiveLoop.endpointReads.every(read=>
+      read.windowFrames===8192&&read.frameCount===8192),
+      evidence.progressiveLoop);
+    assert.ok(evidence.progressiveLoop.latencyMs<100,
+      `progressive PV loop edit took ${evidence.progressiveLoop.latencyMs.toFixed(1)}ms`);
+    assert.equal(evidence.progressiveLoop.command.loopStartFrame,48000,
+      evidence.progressiveLoop);
+    assert.equal(evidence.progressiveLoop.command.loopEndFrame,96000,
+      evidence.progressiveLoop);
+    assert.equal(evidence.progressiveLoop.state?.loopEnabled,true,
+      evidence.progressiveLoop);
+    assert.equal(evidence.progressiveLoop.state?.missingFrames,0,
+      evidence.progressiveLoop);
     for(const {a,b,receipt,current} of evidence.transitions){
       assert.equal(receipt.loopStartFrame,a);
       assert.equal(receipt.loopEndFrame,b);
