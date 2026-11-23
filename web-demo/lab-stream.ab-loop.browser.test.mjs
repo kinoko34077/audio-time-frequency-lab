@@ -198,7 +198,8 @@ test("individual-period Worker applies and wraps edited source-frame A/B without
       assert.equal(before.worklets,1,before);
       assert.equal(before.model,"pv",before);
       assert.ok(before.rms>.01,before);
-      const a=before.sampleRate*2,b=before.sampleRate*4;
+      const a=Math.round(before.sampleRate*.5),
+        b=Math.round(before.sampleRate*2.5);
       await page.evaluate(({a,b})=>{
         for(const [edge,value] of [["a",a],["b",b]]){
           const input=document.querySelector("#player-loop-"+edge);
@@ -591,3 +592,4 @@ test("individual-period Worker applies and wraps edited source-frame A/B without
         "A/B browser test cleanup failed");
     }
   });
+
