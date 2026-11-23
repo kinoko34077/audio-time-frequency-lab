@@ -527,11 +527,11 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, open
       "pinch may not restart the audio engine");
     await page.click("#settings-open");
     await page.waitForFunction(()=>document.querySelector("#settings-dialog")?.open);
-    await page.$eval("#scrub-return-duration",el=>{
-      el.value="1350";el.dispatchEvent(new Event("input",{bubbles:true}));
+    await page.$eval("#scrub-inertia",el=>{
+      el.value="180";el.dispatchEvent(new Event("input",{bubbles:true}));
     });
-    assert.equal(await page.$eval("#scrub-return-duration-value",el=>el.textContent),"1350 ms");
-    assert.equal(await page.evaluate(()=>localStorage.getItem("audio-lab-scrub-return-duration")),"1350");
+    assert.equal(await page.$eval("#scrub-inertia-value",el=>el.textContent),"180%");
+    assert.equal(await page.evaluate(()=>localStorage.getItem("audio-lab-scrub-inertia")),"180");
     assert.equal(await page.$eval("body",el=>el.dataset.mainTab),"player");
     assert.notEqual(await page.$eval("#audio-lab",el=>getComputedStyle(el).display),"none");
     assert.equal(await page.$eval("#lab-model",el=>el.value),"granular");
