@@ -198,8 +198,9 @@ test("Worker PV applies and wraps edited source-frame A/B without PCM gaps",
       assert.equal(before.worklets,1,before);
       assert.equal(before.model,"pv",before);
       assert.ok(before.rms>.01,before);
-      const a=Math.round(before.sampleRate*.5),
-        b=Math.round(before.sampleRate*2.5);
+      // The page defaults to a 0.5s–2.5s loop. Use a distinct range so the
+      // change event exercises a real Worker reconfiguration, not a no-op.
+      const a=48000,b=144000;
       await page.evaluate(({a,b})=>{
         window.__abLoopRequestedAt=performance.now();
         for(const [edge,value] of [["a",a],["b",b]]){
