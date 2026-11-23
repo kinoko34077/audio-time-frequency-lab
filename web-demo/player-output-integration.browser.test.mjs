@@ -555,18 +555,24 @@ test(`native Chrome actual ${profile.model} output follows 0×, reverse and sign
       await page.waitForFunction(()=>window.__pvScratch.some(x=>
         x.kind==="scrub"&&x.speed<0),{timeout:4000});
       await sleep(100);
-      const beforeHold=await page.evaluate(()=>window.__pvScratch.length);
       const forward=await page.$eval("#seek-forward",el=>{
         const r=el.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};
       });
       await page.mouse.move(forward.x,forward.y);
+      const beforeHold=await page.evaluate(()=>window.__pvScratch.length);
       await page.mouse.down();
       await sleep(300);
-      const heldSpeeds=await page.evaluate(start=>window.__pvScratch
-        .slice(start).filter(x=>x.kind==="command"&&Number.isFinite(x.speed))
-        .map(x=>x.speed),beforeHold);
+      const holdEvidence=await page.evaluate(start=>({
+        speeds:window.__pvScratch.slice(start)
+          .filter(x=>Number.isFinite(x.speed)).map(x=>x.speed),
+        buttonDisabled:document.querySelector("#seek-forward").disabled,
+        processing:document.querySelector("#granular-optin-status")?.dataset.renderRunning,
+        route:document.querySelector("#rt-telemetry")?.dataset.pcmTransport
+      }),beforeHold);
+      const heldSpeeds=holdEvidence.speeds;
       assert.ok(heldSpeeds.length>=1&&heldSpeeds.every(speed=>speed===4),
-        "a held 4× shuttle must not be overwritten by pending scrub inertia");
+        "a held 4× shuttle must not be overwritten by pending scrub inertia: "+
+        JSON.stringify(holdEvidence));
       await page.mouse.up();
       await page.waitForFunction(()=>window.__pvScratch.some(x=>
         x.kind==="command"&&Math.abs(x.speed-1)<.01),{timeout:4000});
