@@ -239,9 +239,14 @@ test("individual-period Worker applies and wraps edited source-frame A/B without
         const generation=progress.at(-1)?.workerGeneration;
         return {generation,sourceFrame:progress.at(-1)?.sourceFrame,
           missingFrames:(progress.at(-1)?.missingFrames||0)-beforeMissing,
+          stage:audit.messages.findLast(message=>
+            message.type==="worker-state-staged"&&
+            message.generation===generation),
           jobs:audit.jobs.filter(job=>job.generation===generation&&
             job.loopEnabled&&job.loopStartFrame===a&&job.loopEndFrame===b)};
       },{a,b,beforeMissing:before.missingFrames});
+      assert.equal(applied.stage?.sequence,0,
+        "A/B-only changes replace the live PCM chunk instead of waiting for its 1.5s boundary");
       assert.ok(applied.jobs.some(job=>job.start>=a&&job.end===b&&
         job.wrapRight>0),applied);
       await page.waitForFunction(({a,b,generation})=>{

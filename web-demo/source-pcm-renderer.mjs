@@ -379,7 +379,7 @@ export function createSourcePCMRenderer({
       return renderedChunks.length;
     },
     /** Stage a new Worker configuration after the currently audible chunk. */
-    stageRenderedState({generation,speed,pitchSemitones,
+    stageRenderedState({generation,speed,pitchSemitones,immediateLoop=false,
       loopStartFrame=timeline.state.loopStartFrame,
       loopEndFrame=timeline.state.loopEndFrame,
       loopEnabled=timeline.state.loopEnabled}={}){
@@ -388,7 +388,8 @@ export function createSourcePCMRenderer({
          !Number.isFinite(pitchSemitones)||pitchSemitones<-12||pitchSemitones>12||
          !Number.isSafeInteger(loopStartFrame)||loopStartFrame<0||
          !Number.isSafeInteger(loopEndFrame)||loopStartFrame>=loopEndFrame||
-         loopEndFrame>sourceFrames||typeof loopEnabled!=="boolean")
+         loopEndFrame>sourceFrames||typeof loopEnabled!=="boolean"||
+         typeof immediateLoop!=="boolean")
         throw RangeError("invalid staged Worker playback state");
       const state=timeline.state;
       const position=state.sourceFrame;
@@ -437,7 +438,15 @@ export function createSourcePCMRenderer({
         const currentIndex=activeChunks.indexOf(current);
         let retained=activeChunks.slice(currentIndex,currentIndex+2);
         const boundary=nextRenderedFrame(current.endFrame,state);
-        if(!loopEnabled&&state.loopEnabled&&
+        if(immediateLoop){
+          // A/B edits do not change the selected DSP. Re-render from the live
+          // source position and replace the audible chunk as soon as that
+          // bounded result is ready, instead of waiting for its 1.5s end.
+          frame=loopEnabled&&(position<loopStartFrame||position>=loopEndFrame)?
+            loopStartFrame:Math.floor(position);
+          sequence=current.sequence;
+          retained=[current];
+        }else if(!loopEnabled&&state.loopEnabled&&
            current.endFrame>=state.loopEndFrame){
           frame=loopEndFrame<sourceFrames?loopEndFrame:loopStartFrame;
           if(current.startFrame<=state.loopStartFrame)
@@ -474,7 +483,7 @@ export function createSourcePCMRenderer({
           current.retireAfterLoop=true;
         // Keep old PCM intact while the replacement Worker chunk renders.
         // New loop bounds apply atomically at generation handoff.
-        sequence=current.sequence+1;
+        if(!immediateLoop)sequence=current.sequence+1;
         renderedChunks.splice(0,renderedChunks.length,...retained);
       }else if(activeChunks.length&&
           position>=activeChunks.at(-1).endFrame){

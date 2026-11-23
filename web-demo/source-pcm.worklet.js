@@ -88,6 +88,7 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
           const staged=this.renderer.stageRenderedState({
             generation:m.generation,speed:m.speed,
             pitchSemitones:m.pitchSemitones,
+            immediateLoop:m.immediateLoop===true,
             loopStartFrame:m.loopStartFrame,
             loopEndFrame:m.loopEndFrame,
             loopEnabled:m.loopEnabled

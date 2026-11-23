@@ -201,6 +201,28 @@ test("staged Worker A/B settings activate at the next chunk and repeat the selec
   assert.equal(p.statistics.missingFrames,0);
 });
 
+test("staged Worker A/B-only edits replace the current chunk as soon as prepared",()=>{
+  const p=createSourcePCMRenderer({sourceFrames:32,sourceSampleRate:8,
+    outputSampleRate:8,channelCount:1,speed:1,startFrame:0,
+    loopStartFrame:0,loopEndFrame:32,loopEnabled:false});
+  const chunk=(generation,sequence,startFrame,endFrame,value)=>({generation,
+    sequence,startFrame,endFrame,speed:1,coreFrames:endFrame-startFrame,
+    channels:[new Float32Array(endFrame-startFrame+2).fill(value)]});
+  p.installRenderedChunk(chunk(0,0,0,8,1));
+  p.installRenderedChunk(chunk(0,1,8,16,1));
+  const staged=p.stageRenderedState({generation:1,speed:1,
+    pitchSemitones:0,loopStartFrame:4,loopEndFrame:12,loopEnabled:true,
+    immediateLoop:true});
+  assert.deepEqual(staged,{sourceFrame:4,sequence:0,bufferedSegments:1});
+  assert.equal(p.installRenderedChunk(chunk(1,0,4,12,2)),1);
+  const output=[new Float32Array(2)];
+  assert.equal(p.renderBuffered(output),0);
+  assert.equal(p.workerState.generation,1,
+    "prepared A/B PCM activates before the prior 1.5-second chunk drains");
+  assert.equal(p.timeline.state.sourceFrame,6);
+  assert.ok(output[0].every(value=>value>=0&&value<=2));
+});
+
 test("shortening Worker B keeps the audible retained chunk until replacement PCM arrives",()=>{
   const p=createSourcePCMRenderer({sourceFrames:32,sourceSampleRate:8,
     outputSampleRate:8,channelCount:1,speed:1,startFrame:0,

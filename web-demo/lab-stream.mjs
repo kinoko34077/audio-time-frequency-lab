@@ -95,6 +95,7 @@ export async function createModelStream({ctx,source,sourceChannels,sampleRate,sp
   let handoffJobId=0,handoffGeneration=null,handoffResult=null;
   let handoffUnavailableGeneration=null;
   let generation=0,activeGeneration=0,stagedGeneration=null;
+  let immediateLoopGeneration=null;
   let seekTransitionGeneration=null;
   let bufferedSegments=0,lastMissingFrames=0,latestFrame=0,appliedRevision=0;
   let cursorFrame=0,sequenceCursor=0,activeJob=0,activeJobGeneration=0;
@@ -112,6 +113,13 @@ export async function createModelStream({ctx,source,sourceChannels,sampleRate,sp
         a.length===b.length&&a.every((value,index)=>Object.is(value,b[index])):
         Object.is(a,b);
     });
+  };
+  const sameDSPConfig=(left,right)=>{
+    const transportKeys=new Set(["loopStartFrame","loopEndFrame","loopEnabled"]);
+    const leftKeys=Object.keys(left||{}).filter(key=>!transportKeys.has(key));
+    const rightKeys=Object.keys(right||{}).filter(key=>!transportKeys.has(key));
+    return leftKeys.length===rightKeys.length&&leftKeys.every(key=>
+      Object.is(left[key],right[key]));
   };
   const configs=new Map([[0,config]]),transitionWaiters=new Map();
   const initial=Math.min(totalFrames-1,Math.max(0,
@@ -311,6 +319,7 @@ export async function createModelStream({ctx,source,sourceChannels,sampleRate,sp
         loopStartFrame:requestedConfig.loopStartFrame,
         loopEndFrame:requestedConfig.loopEndFrame,
         loopEnabled:requestedConfig.loopEnabled,
+        immediateLoop:immediateLoopGeneration===requestedGeneration,
         generation:requestedGeneration}).then(accepted=>{
         if(stopped)return;
         if(requestedGeneration!==generation){
@@ -490,6 +499,7 @@ export async function createModelStream({ctx,source,sourceChannels,sampleRate,sp
       resolveTransition(id,{stale:true});
     cancelHandoff();
     config=next;generation++;
+    immediateLoopGeneration=null;
     const requestedGeneration=generation;
     stagedGeneration=null;lastMissingFrames=0;
     if(started){
@@ -556,10 +566,14 @@ export async function createModelStream({ctx,source,sourceChannels,sampleRate,sp
     // clock chooses the next safe retained-PCM boundary for activation.
     const next=validateNext(validationFrame,{...settings,
       speed:speed??config.speed,semitones:semitones??config.semitones});
+    const immediateLoop=Object.keys(settings).length>0&&
+      Object.keys(settings).every(key=>["loopStartFrame","loopEndFrame",
+        "loopEnabled"].includes(key))&&sameDSPConfig(config,next);
     for(const id of [...transitionWaiters.keys()])
       resolveTransition(id,{stale:true});
     seekTransitionGeneration=null;
     config=next;generation++;
+    immediateLoopGeneration=immediateLoop?generation:null;
     configs.set(generation,next);
     for(const key of configs.keys())
       if(key!==activeGeneration&&key!==generation)configs.delete(key);
