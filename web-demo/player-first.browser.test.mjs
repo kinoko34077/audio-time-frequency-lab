@@ -67,6 +67,10 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, open
     await new Promise(resolve=>setTimeout(resolve,600));await page.mouse.up();
     assert.equal(await page.$eval("#player-marker-toggle",el=>el.dataset.markCount),"0",
       "long press clears markers without also firing the single tap");
+    await page.mouse.move(markBox.x,markBox.y);await page.mouse.down();
+    await page.mouse.move(markBox.x+100,markBox.y);await page.mouse.up();
+    assert.equal(await page.$eval("#player-marker-toggle",el=>el.dataset.markCount),"0",
+      "dragging outside cancels the tap");
     await page.click("#player-marker-toggle");
     await page.click("#player-marker-toggle");
     assert.equal(await page.$eval("#player-marker-toggle",el=>el.dataset.markCount),"0");
