@@ -6,7 +6,7 @@ import {createProgressiveAudioSource} from "./progressive-audio-source.mjs";
 import {advanceOverviewBuildToken,overviewBinCount,overviewNeedsResample,readOverviewPeak} from "./waveform-range-peaks.mjs";
 import {returnToPlaySpeed,scrubSpeed,releaseScrubSpeed,scaleScrubInertia} from "./scrub-kinetics.mjs";
 import {createPlayerWaveEditor} from "./player-wave-editor.mjs";
-import {toggleSourceMarker,nearestMarkerLoop,shiftLoopToFrame} from "./player-ab-markers.mjs";
+import {toggleSourceMarker} from "./player-ab-markers.mjs";
 import {primaryModelCapability,isContinuousPCMModel} from "./model-route.mjs";
 import {validatePlaybackSpeed,validateSpeedRailRange,speedOnRail,formatPlaybackSpeed} from "./source-timeline.mjs";
 import {frequencyFromSlider,sliderFromFrequency,holdFromFrequency,drawCrusherPreview} from "./crusher-visual.mjs";
@@ -558,11 +558,6 @@ function setLoopEndpoint(edge,frame=currentSourceFrame()){
   if(!hasAudioSource())return;
   editAB(edge,String(frame));
 }
-function shiftLoopAtCurrentFrame(edge,frame=currentSourceFrame()){
-  if(!hasAudioSource())return;
-  const next=shiftLoopToFrame(ab,edge,frame,sourceFrames());
-  if(next)applyABRange(next,{hint:"A/B区間を移動しました。"});
-}
 function toggleMarkerAtCurrentFrame(frame=currentSourceFrame()){
   if(!hasAudioSource())return;
   loopMarkers=toggleSourceMarker(loopMarkers,frame);
@@ -571,11 +566,6 @@ function toggleMarkerAtCurrentFrame(frame=currentSourceFrame()){
 }
 function clearLoopMarkers(){
   loopMarkers=[];refreshAB();detailWaveEditor?.refresh(true);
-}
-function loopBetweenNearestMarkers(frame=currentSourceFrame()){
-  if(!hasAudioSource())return;
-  const next=nearestMarkerLoop(loopMarkers,frame,sourceFrames());
-  if(next)applyABRange(next,{enabled:true,hint:"目印間をループします。"});
 }
 function resetFullTrackLoop(){
   if(!hasAudioSource())return;
@@ -588,15 +578,13 @@ function toggleLoop(){
   input.checked=!input.checked;
   input.dispatchEvent(new Event("change",{bubbles:true}));
 }
-function installAudioStretchAction(element,{single,double,long,preventDefault=false}){
-  const doubleClickDelay=500;
+function installAudioStretchAction(element,{single,long,preventDefault=false}){
   const nativeToggle=element.querySelector('input[type="checkbox"]');
-  let holdTimer=0,clickTimer=0,longPressFired=false,gestureCanceled=false;
-  let activePointerId=null,pointerContext=null,suppressClick=false,doubleClickHandled=false;
+  let holdTimer=0,longPressFired=false,gestureCanceled=false;
+  let activePointerId=null,pointerContext=null,suppressClick=false;
   const contextAt=event=>({sourceFrame:Number.isSafeInteger(event?.sourceFrame)?
     event.sourceFrame:currentSourceFrame()});
   const clearHold=()=>{if(holdTimer){clearTimeout(holdTimer);holdTimer=0;}};
-  const clearClick=()=>{if(clickTimer){clearTimeout(clickTimer);clickTimer=0;}};
   element.addEventListener("pointerdown",event=>{
     if(event.button!==0||event.isPrimary===false)return;
     activePointerId=event.pointerId;
@@ -604,7 +592,7 @@ function installAudioStretchAction(element,{single,double,long,preventDefault=fa
     gestureCanceled=false;longPressFired=false;
     try{element.setPointerCapture(event.pointerId);}catch{}
     holdTimer=window.setTimeout(()=>{
-      holdTimer=0;longPressFired=true;clearClick();
+      holdTimer=0;longPressFired=true;
       long(pointerContext);
     },520);
   });
@@ -649,36 +637,23 @@ function installAudioStretchAction(element,{single,double,long,preventDefault=fa
     const context=pointerContext||contextAt(event);
     pointerContext=null;
     if(longPressFired){longPressFired=false;return;}
-    if(event.detail>1){
-      clearClick();doubleClickHandled=true;double(context);return;
-    }
-    if(clickTimer)return;
-    clickTimer=window.setTimeout(()=>{clickTimer=0;single(context);},doubleClickDelay);
-  });
-  element.addEventListener("dblclick",event=>{
-    if(preventDefault)event.preventDefault();
-    if(doubleClickHandled){doubleClickHandled=false;return;}
-    clearClick();
-    if(longPressFired){longPressFired=false;return;}
-    double(pointerContext||contextAt(event));pointerContext=null;
+    single(context);
   });
 }
 installAudioStretchAction($("#player-marker-toggle"),{
   single:({sourceFrame})=>toggleMarkerAtCurrentFrame(sourceFrame),
-  double:({sourceFrame})=>toggleMarkerAtCurrentFrame(sourceFrame),long:clearLoopMarkers
+  long:clearLoopMarkers
 });
 installAudioStretchAction($("#player-loop-a-now"),{
   single:({sourceFrame})=>setLoopEndpoint("a",sourceFrame),
-  double:({sourceFrame})=>shiftLoopAtCurrentFrame("a",sourceFrame),
   long:()=>{if(hasAudioSource())editAB("a","0");}
 });
 installAudioStretchAction($("#player-loop-b-now"),{
   single:({sourceFrame})=>setLoopEndpoint("b",sourceFrame),
-  double:({sourceFrame})=>shiftLoopAtCurrentFrame("b",sourceFrame),
   long:()=>{if(hasAudioSource())editAB("b",String(sourceFrames()));}
 });
 installAudioStretchAction($("#player-loop-toggle"),{
-  single:toggleLoop,double:({sourceFrame})=>loopBetweenNearestMarkers(sourceFrame),
+  single:toggleLoop,
   long:resetFullTrackLoop,
   preventDefault:true
 });
