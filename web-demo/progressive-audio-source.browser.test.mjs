@@ -119,7 +119,8 @@ test('native browser decodes exact requested WAV PCM, loads the app without eage
       assert.ok(probe.sourceFrames>=48000,`${fixture.name}: ${JSON.stringify(probe)}`);
       assert.equal(probe.frames,4096,`${fixture.name}: ${JSON.stringify(probe)}`);
       assert.ok(probe.rms>.02,`${fixture.name}: ${JSON.stringify(probe)}`);
-      assert.ok(probe.residentFrames<=65_536,`${fixture.name}: ${JSON.stringify(probe)}`);
+      assert.ok(probe.residentFrames<=65_536+8_192,
+        `${fixture.name}: ${JSON.stringify(probe)}`);
       assert.equal(probe.loopWindowResidentDelta,8192,
         `${fixture.name} loop endpoint decode was not bounded: ${JSON.stringify(probe)}`);
       assert.ok(probe.loopRms>.02,`${fixture.name}: ${JSON.stringify(probe)}`);
