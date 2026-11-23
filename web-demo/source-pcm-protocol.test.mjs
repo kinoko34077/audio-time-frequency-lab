@@ -58,6 +58,27 @@ test("PV keeps the same audio when an inactive loop range is edited",()=>{
   }
   }
 });
+test("PV loop edits outside the active analysis region retain output at signed and zero speeds",()=>{
+  for(const speed of [-0.75,0,0.75]){
+    const options={sourceFrames:16384,sourceSampleRate:48000,channelCount:1,
+      startFrame:8192,speed,processingMode:"pv",pitchSemitones:.5,
+      loopEnabled:true,loopStartFrame:0,loopEndFrame:16384};
+    const edited=processor(options).p,control=processor(options).p;
+    const pcm=Float32Array.from({length:16384},(_,i)=>.25*Math.sin(2*Math.PI*440*i/48000));
+    for(const p of [edited,control]){
+      p.port.onmessage({data:{type:"window",start:0,channels:[pcm.slice()],requestId:1}});
+      p.port.onmessage({data:{type:"command",op:"play",requestId:2}});
+      for(let i=0;i<16;i++)p.process([],[[new Float32Array(128)]]);
+    }
+    edited.port.onmessage({data:{type:"loop-config",op:"configuration",a:1000,b:15000,
+      enabled:true,endpoints:[{start:0,channels:[pcm.slice()]},{start:0,channels:[pcm.slice()]}],requestId:3}});
+    for(let i=0;i<8;i++){
+      const a=[new Float32Array(128)],b=[new Float32Array(128)];
+      edited.process([],[a]);control.process([],[b]);
+      assert.deepEqual(a[0],b[0],`unreached bounds must not alter PCM at ${speed}x`);
+    }
+  }
+});
 test("an unserviced PCM refill stays one in-flight request for 240 quanta",()=>{
   const {p,messages}=processor({
     sourceFrames:1_000_000,sourceSampleRate:48000,
