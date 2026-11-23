@@ -263,8 +263,7 @@ export function createSourcePCMRenderer({
             throw RangeError("invalid loop endpoint PCM window");
         }
       }
-      timeline.setLoopBounds(a,b);
-      timeline.setLoopEnabled(enabled);
+      timeline.setLoopConfiguration(a,b,enabled);
       if(enabled){
         api.installWindow(endpoints[0].start,endpoints[0].channels,"A","seek");
         api.installWindow(endpoints[1].start,endpoints[1].channels,"B","seek");

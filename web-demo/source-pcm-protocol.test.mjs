@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {readFileSync} from "node:fs";
 import {createSourcePCMRenderer} from "./source-pcm-renderer.mjs";
 import {createGranularTimePitch} from "./source-granular.mjs";
+import {createSpectralTimePitch} from "./source-spectral.mjs";
 
 // A deterministic real Worklet-class harness: no wall-clock sleeps, mock only
 // AudioWorkletProcessor's port. The imported renderer is the production module.
@@ -21,13 +22,63 @@ function processor(options){
     }
   }
   new Function("AudioWorkletProcessor","registerProcessor",
-    "createSourcePCMRenderer","createGranularTimePitch","sampleRate",source)(
+    "createSourcePCMRenderer","createGranularTimePitch","createSpectralTimePitch","sampleRate",source)(
     FakeAudioWorkletProcessor,
     (name,constructor)=>{assert.equal(name,"audio-lab-source-pcm");Worklet=constructor;},
-    createSourcePCMRenderer,createGranularTimePitch,48000
+    createSourcePCMRenderer,createGranularTimePitch,createSpectralTimePitch,48000
   );
   return {p:new Worklet({processorOptions:options}),messages};
 }
+test("PV keeps the same audio when an inactive loop range is edited",()=>{
+  const wav=readFileSync(new URL("./test-fixtures/meta-piano-a0-cc0-3s-48khz.wav",import.meta.url));
+  let offset=12;
+  while(offset+8<wav.length&&wav.toString("ascii",offset,offset+4)!=="data"){
+    const size=wav.readUInt32LE(offset+4);offset+=8+size+(size%2);
+  }
+  assert.equal(wav.toString("ascii",offset,offset+4),"data");
+  const recorded=Float32Array.from({length:16384},(_,i)=>
+    wav.readInt16LE(offset+8+(48000+i)*2)/32768);
+  const tone=Float32Array.from({length:16384},(_,i)=>.25*Math.sin(2*Math.PI*440*i/48000));
+  for(const pcm of [tone,recorded]){
+  const options={sourceFrames:16384,sourceSampleRate:48000,channelCount:1,
+    startFrame:4096,speed:0.75,processingMode:"pv",pitchSemitones:0.5,
+    loopEnabled:false,loopStartFrame:0,loopEndFrame:16384};
+  const edited=processor(options).p,control=processor(options).p;
+  for(const p of [edited,control]){
+    p.port.onmessage({data:{type:"window",start:0,channels:[pcm.slice()],requestId:1}});
+    p.port.onmessage({data:{type:"command",op:"play",requestId:2}});
+    for(let i=0;i<24;i++)p.process([],[[new Float32Array(128)]]);
+  }
+  edited.port.onmessage({data:{type:"loop-config",op:"configuration",a:1000,b:14000,
+    enabled:false,endpoints:[],requestId:3}});
+  for(let i=0;i<12;i++){
+    const a=[new Float32Array(128)],b=[new Float32Array(128)];
+    edited.process([],[a]);control.process([],[b]);
+    assert.deepEqual(a[0],b[0],"an inactive range edit must not alter the audio");
+  }
+  }
+});
+test("PV loop edits outside the active analysis region retain output at signed and zero speeds",()=>{
+  for(const speed of [-0.75,0,0.75]){
+    const options={sourceFrames:16384,sourceSampleRate:48000,channelCount:1,
+      startFrame:8192,speed,processingMode:"pv",pitchSemitones:.5,
+      loopEnabled:true,loopStartFrame:0,loopEndFrame:16384};
+    const edited=processor(options).p,control=processor(options).p;
+    const pcm=Float32Array.from({length:16384},(_,i)=>.25*Math.sin(2*Math.PI*440*i/48000));
+    for(const p of [edited,control]){
+      p.port.onmessage({data:{type:"window",start:0,channels:[pcm.slice()],requestId:1}});
+      p.port.onmessage({data:{type:"command",op:"play",requestId:2}});
+      for(let i=0;i<16;i++)p.process([],[[new Float32Array(128)]]);
+    }
+    edited.port.onmessage({data:{type:"loop-config",op:"configuration",a:1000,b:15000,
+      enabled:true,endpoints:[{start:0,channels:[pcm.slice()]},{start:0,channels:[pcm.slice()]}],requestId:3}});
+    for(let i=0;i<8;i++){
+      const a=[new Float32Array(128)],b=[new Float32Array(128)];
+      edited.process([],[a]);control.process([],[b]);
+      assert.deepEqual(a[0],b[0],`unreached bounds must not alter PCM at ${speed}x`);
+    }
+  }
+});
 test("an unserviced PCM refill stays one in-flight request for 240 quanta",()=>{
   const {p,messages}=processor({
     sourceFrames:1_000_000,sourceSampleRate:48000,

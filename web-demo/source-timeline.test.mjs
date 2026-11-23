@@ -183,6 +183,17 @@ test("exhaustion survives same-direction speed edits and freeze until actual rev
   assert.equal(forward.state.ended,false);
 });
 
+test("editing disabled loop bounds at frozen EOF preserves exhaustion",()=>{
+  for(const speed of [-1,1]){
+    const t=make({sourceFrames:10,startFrame:speed<0?0:9,speed});
+    t.advance(128);t.setSpeed(0);
+    assert.equal(t.state.ended,true);
+    t.setLoopConfiguration(2,8,false);
+    assert.equal(t.state.ended,true);
+    assert.equal(t.sourceFrameAt(0),null);
+  }
+});
+
 test("source/sample rate conversion and malformed inputs",()=>{
   const t=createSourceTimeline({sourceFrames:48000,sourceSampleRate:48000,
     outputSampleRate:44100,speed:1});

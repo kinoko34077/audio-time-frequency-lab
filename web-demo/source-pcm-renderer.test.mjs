@@ -1036,6 +1036,15 @@ test("atomic A/B change preloads endpoints before the next output block",()=>{
   assert.equal(p.timeline.state.sourceFrame,404);
 });
 
+test("disabling a loop while changing bounds preserves the current source position",()=>{
+  const p=createSourcePCMRenderer({sourceFrames:1000,sourceSampleRate:48000,
+    outputSampleRate:48000,startFrame:100,loopEnabled:true,
+    loopStartFrame:0,loopEndFrame:200});
+  const result=p.applyLoopConfiguration(400,500,false,[]);
+  assert.equal(result.sourceFrame,100);
+  assert.equal(result.loopEnabled,false);
+});
+
 test("rejected atomic bounds update leaves source time, loop and cache unchanged",()=>{
   const p=createSourcePCMRenderer({
     sourceFrames:1000,sourceSampleRate:48000,outputSampleRate:48000,
