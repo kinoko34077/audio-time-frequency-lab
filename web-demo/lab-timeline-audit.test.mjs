@@ -287,8 +287,23 @@ test('app model playback follows Worklet source frames and reports failures with
   const app=readFileSync(new URL('app.mjs',import.meta.url),'utf8');
   assert.match(app,/if\(state\.player\.labStream\)return state\.player\.stream\.sourcePositionAt\(\)/);
   assert.match(app,/scheduleModelSeek\(p,/);
-  assert.match(app,/const resume=playPosition\(\);\s*void \(async\(\)=>\{\s*await stop\(\);\s*if\(state\.player\)return;\s*state\.seek=resume;/);
-  assert.match(app,/message\("選択モデルで音声処理できませんでした: "\+error,"error"\)/);
+  const recovery=app.match(/async function recoverPlaybackAfterFailure\(\{[\s\S]*?(?=\nasync function play\()/)?.[0];
+  assert.ok(recovery,"shared playback failure recovery is present");
+  assert.match(recovery,/player\?\.playRequested&&!player\.paused/,
+    "only a failure during active playback resumes automatically");
+  assert.match(recovery,/await stop\(\)/,"the failed renderer is stopped before restart");
+  assert.match(recovery,/state\.seek=clamp\(frame,/,
+    "recovery restores the failed source position");
+  assert.match(recovery,/await restart\(\)/,
+    "recovery restarts the selected renderer");
+  assert.match(app,/recoverPlaybackAfterFailure\(\{player,mode:"worker",frame:resume,[\s\S]*?restart:\(\)=>startModelPlayback\(resume,applied\)\}/,
+    "individual-period Worker failures use the shared recovery path");
+  assert.match(app,/recoverPlaybackAfterFailure\(\{player:failedPlayer,[\s\S]*?restart:\(\)=>play\(failedPlayer\.mode,resumeAt\)\}/,
+    "source-PCM failures use the shared recovery path");
+  assert.match(recovery,/message\("処理に失敗しました。音源は保持されています: "\+reason,"error"\)/,
+    "a non-playing failure is reported while keeping the source retryable");
+  assert.match(recovery,/message\("音声処理が再度失敗したため停止しました。音源と位置は保持されています。","error"\)/,
+    "a repeated runtime failure stops instead of retrying forever");
   assert.doesNotMatch(app,/if\(!state\.player\)await play\("dry",resume\)/);
   const stream=readFileSync(new URL('lab-stream.mjs',import.meta.url),'utf8');
   assert.doesNotMatch(stream,/createBufferSource|scheduledSourcePosition/,
