@@ -140,7 +140,10 @@ export function createSourceTimeline({
       if(!valid(a,b)||typeof enabled!=="boolean")
         throw RangeError("invalid A/B source-frame configuration");
       if(A===a&&B===b&&loop===enabled)return state();
-      A=a;B=b;loop=enabled;ended=false;endedDirection=0;reconcile();revision++;
+      const preserveExhaustion=ended&&!loop&&!enabled;
+      A=a;B=b;loop=enabled;
+      if(!preserveExhaustion){ended=false;endedDirection=0;reconcile();}
+      revision++;
       return state();
     },
     setLoopEnabled(enabled){
