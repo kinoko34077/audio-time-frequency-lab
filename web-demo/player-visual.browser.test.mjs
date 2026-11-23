@@ -370,8 +370,10 @@ test("R4 usability visual captures: desktop and mobile player and folded researc
       button.dispatchEvent(new MouseEvent("click",{bubbles:true,button:0,detail:2}));
       button.dispatchEvent(new MouseEvent("dblclick",{bubbles:true,button:0,detail:2}));
     });
-    await page.waitForFunction(()=>document.querySelector("#player-loop-a")?.value==="0"&&
-      document.querySelector("#player-loop-b")?.value==="2000",{timeout:3000});
+    assert.deepEqual(await page.evaluate(()=>({
+      a:document.querySelector("#player-loop-a").value,
+      b:document.querySelector("#player-loop-b").value
+    })),{a:"0",b:"3000"},"two taps act as single taps and do not shift the interval");
     await page.evaluate(()=>{
       document.querySelector("#player-loop-a").value="1000";
       document.querySelector("#player-loop-a").dispatchEvent(new Event("change",{bubbles:true}));

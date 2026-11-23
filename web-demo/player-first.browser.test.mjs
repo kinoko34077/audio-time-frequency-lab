@@ -54,6 +54,39 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, open
       forwardDisabled:false,stopHidden:true,dryHidden:true,
       loopCheckboxHidden:true,loopPressed:"true",transportHeight:40,
       playHeight:40,skipHeight:40});
+    await page.click("#player-loop-toggle");
+    assert.equal(await page.$eval("#player-loop-toggle",el=>el.getAttribute("aria-pressed")),"false",
+      "Loop responds to the tap without waiting for a possible double tap");
+    await page.click("#player-loop-toggle");
+    await page.click("#player-marker-toggle");
+    assert.equal(await page.$eval("#player-marker-toggle",el=>el.dataset.markCount),"1",
+      "Mark responds immediately");
+    const markBox=await page.$eval("#player-marker-toggle",el=>{const r=el.getBoundingClientRect();
+      return {x:r.x+r.width/2,y:r.y+r.height/2};});
+    await page.mouse.move(markBox.x,markBox.y);await page.mouse.down();
+    await new Promise(resolve=>setTimeout(resolve,600));await page.mouse.up();
+    assert.equal(await page.$eval("#player-marker-toggle",el=>el.dataset.markCount),"0",
+      "long press clears markers without also firing the single tap");
+    await page.mouse.move(markBox.x,markBox.y);await page.mouse.down();
+    await page.mouse.move(markBox.x+100,markBox.y);await page.mouse.up();
+    assert.equal(await page.$eval("#player-marker-toggle",el=>el.dataset.markCount),"0",
+      "dragging outside cancels the tap");
+    await page.click("#player-marker-toggle");
+    await page.click("#player-marker-toggle");
+    assert.equal(await page.$eval("#player-marker-toggle",el=>el.dataset.markCount),"0");
+    await page.evaluate(()=>{
+      const set=(id,value)=>{const e=document.getElementById(id);e.value=value;
+        e.dispatchEvent(new Event("change",{bubbles:true}));};
+      set("player-loop-a",1000);set("player-loop-b",100000);
+    });
+    await page.click("#player-loop-a-now");
+    assert.equal(await page.$eval("#player-loop-a",el=>el.value),"0",
+      "A responds immediately at the captured position");
+    await page.click("#player-loop-b-now");
+    assert.equal(await page.$eval("#player-loop-b",el=>el.value),"1",
+      "B responds immediately at the captured position");
+    await page.evaluate(()=>{const e=document.getElementById("player-loop-b");
+      e.value=e.max;e.dispatchEvent(new Event("change",{bubbles:true}));});
     const movedIcons=await page.evaluate(()=>{
       const actions=document.querySelector("#shared-transport");
       document.querySelector("#model-transport-host").appendChild(actions);
@@ -98,17 +131,20 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, open
     await page.waitForFunction(()=>document.querySelector("#player-loop-toggle")
       ?.getAttribute("aria-pressed")==="false",{timeout:2000});
     assert.equal(await page.$eval("#player-loop-enabled",el=>el.checked),false);
+    await new Promise(resolve=>setTimeout(resolve,180));
     const loopOffColor=await page.$eval("#player-loop-toggle",
       el=>getComputedStyle(el).backgroundColor);
     await page.click("#player-loop-toggle");
     await page.waitForFunction(()=>document.querySelector("#player-loop-toggle")
       ?.getAttribute("aria-pressed")==="true",{timeout:2000});
+    await new Promise(resolve=>setTimeout(resolve,180));
     assert.notEqual(await page.$eval("#player-loop-toggle",
       el=>getComputedStyle(el).backgroundColor),loopOffColor,
       "Loop state is visible by button color as well as aria-pressed");
     await page.click("#player-marker-toggle");
     await page.waitForFunction(()=>document.querySelector("#player-marker-toggle")
       ?.dataset.markCount==="1",{timeout:2000});
+    await new Promise(resolve=>setTimeout(resolve,180));
     const markedColor=await page.$eval("#player-marker-toggle",
       el=>getComputedStyle(el).backgroundColor);
     assert.equal(await page.$eval("#player-marker-toggle",
@@ -116,6 +152,7 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, open
     await page.click("#player-marker-toggle");
     await page.waitForFunction(()=>document.querySelector("#player-marker-toggle")
       ?.dataset.markCount==="0",{timeout:2000});
+    await new Promise(resolve=>setTimeout(resolve,180));
     assert.notEqual(await page.$eval("#player-marker-toggle",
       el=>getComputedStyle(el).backgroundColor),markedColor,
       "Mark state is visible by button color as well as its count");
