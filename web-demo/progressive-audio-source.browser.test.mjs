@@ -100,6 +100,7 @@ test('native browser decodes exact requested WAV PCM, loads the app without eage
           const block=await source.read(start,count,{priority:'playback'});
           const samples=block.channels[0];
           const rms=Math.sqrt(samples.reduce((sum,sample)=>sum+sample*sample,0)/samples.length);
+          const reference=await source.read(start+8192,128,{priority:'playback'});
           const beforeLoopRead=source.stats().residentFrames;
           const loopBlock=await source.read(start+8192,128,{
             priority:'playback',windowFrames:8192
@@ -110,7 +111,9 @@ test('native browser decodes exact requested WAV PCM, loads the app without eage
           return {sampleRate:source.sampleRate,channels:source.channelCount,
             sourceFrames:source.sourceFrames,frames:samples.length,rms,
             residentFrames:source.stats().residentFrames,
-            loopWindowResidentDelta:afterLoopRead-beforeLoopRead,loopRms};
+            loopWindowResidentDelta:afterLoopRead-beforeLoopRead,loopRms,
+            loopMatches:loopBlock.channels.every((channel,c)=>
+              channel.every((sample,i)=>sample===reference.channels[c][i]))};
         }finally{source.dispose();}
       },{...fixture,encoded});}
       catch(error){throw Error(`${fixture.name}: ${error.message}`,{cause:error});}
@@ -121,8 +124,9 @@ test('native browser decodes exact requested WAV PCM, loads the app without eage
       assert.ok(probe.rms>.02,`${fixture.name}: ${JSON.stringify(probe)}`);
       assert.ok(probe.residentFrames<=65_536+8_192,
         `${fixture.name}: ${JSON.stringify(probe)}`);
-      assert.equal(probe.loopWindowResidentDelta,8192,
-        `${fixture.name} loop endpoint decode was not bounded: ${JSON.stringify(probe)}`);
+      assert.equal(probe.loopWindowResidentDelta,0,
+        `${fixture.name} should reuse the cached playback window: ${JSON.stringify(probe)}`);
+      assert.equal(probe.loopMatches,true,`${fixture.name}: ${JSON.stringify(probe)}`);
       assert.ok(probe.loopRms>.02,`${fixture.name}: ${JSON.stringify(probe)}`);
     }
 

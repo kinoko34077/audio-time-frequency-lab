@@ -2,6 +2,57 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createProgressivePCMCache} from './progressive-source-cache.mjs';
 
+test('a smaller endpoint read reuses a covering playback window without decoding again',async()=>{
+  const reads=[];
+  const source=createProgressivePCMCache({sourceFrames:4096,channelCount:1,
+    windowFrames:1024,maxCachedWindows:2,decodeWindow:async(start,length)=>{
+      reads.push([start,length]);return [Float32Array.from({length},(_,i)=>start+i)];
+    }});
+  try{
+    await source.read(1030,1,{priority:'playback'});
+    const endpoint=await source.read(1300,100,{priority:'playback',windowFrames:256});
+    assert.deepEqual(reads,[[1024,1024]]);
+    assert.equal(endpoint.channels[0][0],1300);
+    assert.equal(endpoint.channels[0].at(-1),1399);
+    endpoint.channels[0][0]=-1;
+    assert.equal((await source.read(1300,1)).channels[0][0],1300);
+    assert.equal(source.stats().residentWindows,1);
+  }finally{source.dispose();}
+});
+
+test('covering-window reuse updates LRU and handles a partial final window',async()=>{
+  const reads=[];
+  const source=createProgressivePCMCache({sourceFrames:2500,channelCount:1,
+    windowFrames:1024,maxCachedWindows:2,decodeWindow:async(start,length)=>{
+      reads.push([start,length]);return [Float32Array.from({length},(_,i)=>start+i)];
+    }});
+  try{
+    await source.read(10,1);await source.read(1050,1);
+    await source.read(100,1,{windowFrames:256});
+    await source.read(2490,10);
+    const end=await source.read(2490,10,{windowFrames:256});
+    assert.equal(end.channels[0].at(-1),2499);
+    assert.deepEqual(reads,[[0,1024],[1024,1024],[2048,452]]);
+    await source.read(1050,1);
+    assert.deepEqual(reads.at(-1),[1024,1024]);
+    assert.equal(source.stats().residentWindows,2);
+  }finally{source.dispose();}
+});
+
+test('a partially covering window does not satisfy a larger decode request',async()=>{
+  const reads=[];
+  const source=createProgressivePCMCache({sourceFrames:2048,channelCount:1,
+    windowFrames:1024,maxCachedWindows:2,decodeWindow:async(start,length)=>{
+      reads.push([start,length]);return [new Float32Array(length).fill(start+1)];
+    }});
+  try{
+    await source.read(256,1,{windowFrames:256});
+    const large=await source.read(300,1);
+    assert.deepEqual(reads,[[256,256],[0,1024]]);
+    assert.equal(large.channels[0][0],1);
+  }finally{source.dispose();}
+});
+
 test('reads exact source-frame ranges from a long source while retaining only bounded PCM windows',async()=>{
   const windowFrames=1024;
   const sourceFrames=48_000*60*60*10;
