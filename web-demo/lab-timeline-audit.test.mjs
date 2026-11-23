@@ -296,8 +296,8 @@ test('app model playback follows Worklet source frames and reports failures with
     "recovery restores the failed source position");
   assert.match(recovery,/await restart\(\)/,
     "recovery restarts the selected renderer");
-  assert.match(app,/recoverPlaybackAfterFailure\(\{player,mode:"worker",frame:resume,[\s\S]*?restart:\(\)=>startModelPlayback\(resume,applied\)\}/,
-    "individual-period Worker failures use the shared recovery path");
+  assert.match(app,/const recoveryConfig=player\.appliedConfig\|\|applied;[\s\S]*?recoverPlaybackAfterFailure\(\{player,mode:"worker",frame:resume,[\s\S]*?restart:\(\)=>startModelPlayback\(resume,recoveryConfig\)\}/,
+    "Worker failure recovery uses the latest successfully applied configuration");
   assert.match(app,/recoverPlaybackAfterFailure\(\{player:failedPlayer,[\s\S]*?restart:\(\)=>play\(failedPlayer\.mode,resumeAt\)\}/,
     "source-PCM failures use the shared recovery path");
   assert.match(recovery,/message\("処理に失敗しました。音源は保持されています: "\+reason,"error"\)/,

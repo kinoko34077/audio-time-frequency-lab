@@ -2494,6 +2494,8 @@ function beginTransportHold(speed,event){
   if(!hasAudioSource()||heldTransport||
      !isPCMModel(lab.mode)||lab.individual)return;
   event.preventDefault();
+  // A queued inertia frame must not overwrite the held shuttle speed.
+  cancelTemporaryScrub(false);
   const existing=state.player;
   const hold={token:++heldTransportToken,speed,
     wasPlaying:Boolean(existing&&!existing.paused),
@@ -3241,8 +3243,9 @@ async function startModelPlayback(offset=null,appliedOverride=null){
         if(state.player!==player)return;
         labStatusText("モデル処理失敗: "+error);
         const resume=playPosition();
+        const recoveryConfig=player.appliedConfig||applied;
         void recoverPlaybackAfterFailure({player,mode:"worker",frame:resume,
-          reason:error,restart:()=>startModelPlayback(resume,applied)});
+          reason:error,restart:()=>startModelPlayback(resume,recoveryConfig)});
       }
     });
     if(epoch!==state.transportEpoch){stream.stop();return;}
