@@ -198,9 +198,14 @@ test("Worker PV applies and wraps edited source-frame A/B without PCM gaps",
       assert.equal(before.worklets,1,before);
       assert.equal(before.model,"pv",before);
       assert.ok(before.rms>.01,before);
-      // The page defaults to a 0.5s–2.5s loop. Use a distinct range so the
-      // change event exercises a real Worker reconfiguration, not a no-op.
-      const a=48000,b=144000;
+      const currentBounds=await page.evaluate(()=>({
+        a:Number(document.querySelector("#player-loop-a").value),
+        b:Number(document.querySelector("#player-loop-b").value)
+      }));
+      // Choose a near-B loop that differs from this page's actual initial
+      // values, so this event must exercise a Worker reconfiguration.
+      const a=currentBounds.a===48000?72000:48000;
+      const b=currentBounds.b===132000?144000:132000;
       await page.evaluate(({a,b})=>{
         window.__abLoopRequestedAt=performance.now();
         for(const [edge,value] of [["a",a],["b",b]]){
@@ -228,6 +233,7 @@ test("Worker PV applies and wraps edited source-frame A/B without PCM gaps",
               .slice(-8),
             states:audit.messages.filter(message=>
               message.type.includes("worker-state")).slice(-8),
+            commands:audit.commands.slice(-8),
             jobs:audit.jobs.slice(-8),errors};
         },{a,b,errors});
         throw Error("A/B configuration did not reach the Worker PCM clock: "+
