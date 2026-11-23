@@ -201,6 +201,7 @@ test("PV Worker applies and wraps edited source-frame A/B without PCM gaps",
       const a=Math.round(before.sampleRate*.5),
         b=Math.round(before.sampleRate*2.5);
       await page.evaluate(({a,b})=>{
+        window.__abLoopRequestedAt=performance.now();
         for(const [edge,value] of [["a",a],["b",b]]){
           const input=document.querySelector("#player-loop-"+edge);
           input.value=String(value);
@@ -238,16 +239,23 @@ test("PV Worker applies and wraps edited source-frame A/B without PCM gaps",
           message.loopEnabled&&message.loopStartFrame===a&&
           message.loopEndFrame===b);
         const generation=progress.at(-1)?.workerGeneration;
+        const activation=audit.messages.findLast(message=>
+          message.type==="worker-state-activated"&&
+          message.generation===generation);
         return {generation,sourceFrame:progress.at(-1)?.sourceFrame,
           missingFrames:(progress.at(-1)?.missingFrames||0)-beforeMissing,
           stage:audit.messages.findLast(message=>
             message.type==="worker-state-staged"&&
-            message.generation===generation),
+            message.generation===generation),activation,
+          requestToActivationMs:activation?.receivedAt-
+            window.__abLoopRequestedAt,
           jobs:audit.jobs.filter(job=>job.generation===generation&&
             job.loopEnabled&&job.loopStartFrame===a&&job.loopEndFrame===b)};
       },{a,b,beforeMissing:before.missingFrames});
       assert.equal(applied.stage?.sequence,0,
         "A/B-only changes replace the live PCM chunk instead of waiting for its 1.5s boundary");
+      assert.ok(Number.isFinite(applied.requestToActivationMs)&&
+        applied.requestToActivationMs<750,JSON.stringify(applied));
       assert.ok(applied.jobs.some(job=>job.start>=a&&job.end===b&&
         job.wrapRight>0),applied);
       await page.waitForFunction(({a,b,generation})=>{
