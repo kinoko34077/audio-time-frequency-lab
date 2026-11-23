@@ -445,7 +445,6 @@ export function createSourcePCMRenderer({
           frame=loopEnabled&&(position<loopStartFrame||position>=loopEndFrame)?
             loopStartFrame:Math.floor(position);
           sequence=current.sequence;
-          retained=[current];
         }else if(!loopEnabled&&state.loopEnabled&&
            current.endFrame>=state.loopEndFrame){
           frame=loopEndFrame<sourceFrames?loopEndFrame:loopStartFrame;

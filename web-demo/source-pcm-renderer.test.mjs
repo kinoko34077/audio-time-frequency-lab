@@ -213,7 +213,7 @@ test("staged Worker A/B-only edits replace the current chunk as soon as prepared
   const staged=p.stageRenderedState({generation:1,speed:1,
     pitchSemitones:0,loopStartFrame:4,loopEndFrame:12,loopEnabled:true,
     immediateLoop:true});
-  assert.deepEqual(staged,{sourceFrame:4,sequence:0,bufferedSegments:1});
+  assert.deepEqual(staged,{sourceFrame:4,sequence:0,bufferedSegments:2});
   assert.equal(p.installRenderedChunk(chunk(1,0,4,12,2)),1);
   const output=[new Float32Array(2)];
   assert.equal(p.renderBuffered(output),0);
