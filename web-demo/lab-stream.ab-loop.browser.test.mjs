@@ -50,7 +50,7 @@ async function closeServer(server){
   server.closeAllConnections?.();
 }
 
-test("PV Worker applies and wraps edited source-frame A/B without PCM gaps",
+test("Worker PV applies and wraps edited source-frame A/B without PCM gaps",
   {timeout:90000},async()=>{
     const root=path.resolve("web-demo");
     const {server,port}=await startStaticServer(root);
@@ -150,7 +150,7 @@ test("PV Worker applies and wraps edited source-frame A/B without PCM gaps",
         const model=document.querySelector("#lab-model");
         model.value="pv";model.dispatchEvent(new Event("change",{bubbles:true}));
         const individual=document.querySelector("#lab-individual-periods");
-        individual.checked=false;
+        individual.checked=true;
         individual.dispatchEvent(new Event("change",{bubbles:true}));
         // Keep playback well away from EOF while the test exercises several
         // loop edits and the loop-off continuation path.

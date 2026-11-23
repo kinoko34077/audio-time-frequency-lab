@@ -576,8 +576,7 @@ export async function createModelStream({ctx,source,sourceChannels,sampleRate,sp
     // clock chooses the next safe retained-PCM boundary for activation.
     const next=validateNext(validationFrame,{...settings,
       speed:speed??config.speed,semitones:semitones??config.semitones});
-    const loopEdit=next.model!=="period-joint"&&
-      Object.keys(settings).length>0&&
+    const loopEdit=Object.keys(settings).length>0&&
       Object.keys(settings).every(key=>["loopStartFrame","loopEndFrame",
         "loopEnabled"].includes(key))&&sameDSPConfig(config,next);
     for(const id of [...transitionWaiters.keys()])
