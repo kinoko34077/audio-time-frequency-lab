@@ -86,7 +86,7 @@ test("A/B endpoint reads retry when a scrub preempts a shared PCM decode",async(
       windowFrames:65_536,maxCachedWindows:2,maxConcurrentDecodes:2,
       decodeWindow:(startFrame,frameCount,{signal})=>{
         sourceReads.push(startFrame);
-        if(startFrame!==65_536&&startFrame!==286_720)
+        if(startFrame!==65_536&&startFrame!==294_912)
           return Promise.resolve([new Float32Array(frameCount).fill(.2)]);
         started.push(startFrame);
         return new Promise((resolve,reject)=>{
@@ -100,7 +100,7 @@ test("A/B endpoint reads retry when a scrub preempts a shared PCM decode",async(
             resolve([new Float32Array(frameCount).fill(.2)]);
           };
           if(startFrame===65_536)releaseA=release;
-          else if(started.filter(frame=>frame===286_720).length===1)
+          else if(started.filter(frame=>frame===294_912).length===1)
             releaseB=release;
           else release();
         });
@@ -113,7 +113,7 @@ test("A/B endpoint reads retry when a scrub preempts a shared PCM decode",async(
       const node=nodes[0];
       const loopResult=bridge.setLoopBounds(70_000,300_000)
         .then(()=>({ok:true}),error=>({ok:false,error}));
-      await waitFor(()=>started.includes(65_536)&&started.includes(286_720))
+      await waitFor(()=>started.includes(65_536)&&started.includes(294_912))
         .catch(error=>{throw Error(error.message+": "+JSON.stringify({started,
           sourceReads,stats:source.stats()}));});
 

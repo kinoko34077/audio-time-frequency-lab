@@ -143,8 +143,13 @@ export async function createSourcePCMBridge({
     const requestedStart=chooseSourceWindowStart(frame,frames,windowFrames,direction);
     // Progressive readers align decode windows. Align the small endpoint range
     // here too, so a single A/B edit never spills into a second decode window.
-    const start=windowFrames===SOURCE_WINDOW_FRAMES?requestedStart:
-      Math.floor(requestedStart/windowFrames)*windowFrames;
+    let start=requestedStart;
+    if(windowFrames!==SOURCE_WINDOW_FRAMES){
+      start=Math.floor(requestedStart/windowFrames)*windowFrames;
+      if(frame>=start+windowFrames)start+=windowFrames;
+      start=Math.min(start,
+        Math.floor((frames-1)/windowFrames)*windowFrames);
+    }
     const end=Math.min(frames,start+Math.min(windowFrames,frames));
     if(source){
       const range=await source.read(start,end-start,{priority,windowFrames});
