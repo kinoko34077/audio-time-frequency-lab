@@ -4,7 +4,7 @@ import {createModelStream} from "./lab-stream.mjs";
 import {createSourcePCMBridge} from "./source-pcm-bridge.mjs";
 import {createProgressiveAudioSource} from "./progressive-audio-source.mjs";
 import {advanceOverviewBuildToken,overviewBinCount,overviewNeedsResample,readOverviewPeak} from "./waveform-range-peaks.mjs";
-import {returnToPlaySpeed,scrubSpeed,releaseScrubSpeed} from "./scrub-kinetics.mjs";
+import {returnToPlaySpeed,scrubSpeed,releaseScrubSpeed,scaleScrubInertia} from "./scrub-kinetics.mjs";
 import {createPlayerWaveEditor} from "./player-wave-editor.mjs";
 import {toggleSourceMarker,nearestMarkerLoop,shiftLoopToFrame} from "./player-ab-markers.mjs";
 import {primaryModelCapability,isContinuousPCMModel} from "./model-route.mjs";
@@ -28,14 +28,17 @@ import {formatPlaybackStatus,rendererMatchesSelection,
 import {axisShiftUnits,axisShiftCanonical,axisShiftView} from "./axis-shift-view.mjs";
 
 const $=id=>document.querySelector(id);
-const SCRUB_RETURN_STORAGE_KEY="audio-lab-scrub-return-duration";
-const validScrubReturnDuration=value=>Number.isFinite(value)?
-  Math.max(400,Math.min(2000,Math.round(value/50)*50)):1000;
-let scrubReturnDuration=1000;
+const SCRUB_INERTIA_STORAGE_KEY="audio-lab-scrub-inertia";
+const validScrubInertia=value=>Number.isFinite(value)?
+  Math.max(0,Math.min(300,Math.round(value/10)*10)):150;
+let scrubInertia=150;
 try{
-  const stored=Number(localStorage.getItem(SCRUB_RETURN_STORAGE_KEY));
-  if(Number.isFinite(stored)&&stored>=400&&stored<=2000)
-    scrubReturnDuration=validScrubReturnDuration(stored);
+  const saved=localStorage.getItem(SCRUB_INERTIA_STORAGE_KEY);
+  if(saved!==null){
+    const stored=Number(saved);
+    if(Number.isFinite(stored)&&stored>=0&&stored<=300)
+      scrubInertia=validScrubInertia(stored);
+  }
 }catch{}
 // Normal Audio Time uses the real Phase Vocoder; raw PCM remains opt-in.
 const PCM_EXPERIMENT=new URLSearchParams(location.search).get("pcmTransport");
@@ -103,7 +106,8 @@ let lowUnitControl=null,highUnitControl=null,pivotUnitControl=null,aMinUnitContr
 const state={
   ctx:null,decoded:null,dry:null,source:null,loadingSource:null,overviewPeaks:null,
   offline:null,offlineWorker:null,
-  module:null,workletLoaded:false,player:null,position:0,seek:0,
+  module:null,workletLoaded:false,player:null,processingRecovery:null,
+  position:0,seek:0,
   qualityIndex:0,settingsRevision:0,name:"audio",fileName:"",fileMeta:"音声未選択",processing:false,
   precise:Object.create(null),
   effective:{low:20,high:16000},raf:0,lastStats:null,mathCore:null,wasmPromise:null,rebuildTimer:null,overviewResizeTimer:null,sine:null,loadToken:0,transportEpoch:0
@@ -299,8 +303,8 @@ function waveformScrubMotion(speed,phase,sourceFrame=null){
   scrubMotionToken++;
   if(scrubMotionFrame)cancelAnimationFrame(scrubMotionFrame);
   const token=scrubMotionToken,started=performance.now();
-  const from=validatePlaybackSpeed(speed);
-  const duration=scrubReturnDuration;
+  const from=validatePlaybackSpeed(scaleScrubInertia(speed,scrubInertia/100));
+  const duration=1000;
   // A held finger eases out from 0x; a quick throw continues in its signed
   // direction and smoothly converges to the user's configured playback speed.
   const frame=()=>{
@@ -445,7 +449,7 @@ function refreshAB(){
     $("#"+id).disabled=false;
   if(workerPlayback)
     $("#player-loop-hint").textContent=
-      "研究モデルのA/B変更は共通PCM時計の次の安全な区間境界で反映します。";
+      "研究WorkerのA/B変更は処理済み音声の準備後に反映します。";
   detailWaveEditor?.refresh(true);
 }
 function syncLoopToPlayer(player=state.player){
@@ -464,11 +468,8 @@ function syncLoopToPlayer(player=state.player){
       if(player.labStream){
         await player.stream.updateLoop(requested);
       }else{
-        // setLoopBounds delivers an atomic endpoint+transport change. Keep
-        // loop enabled/disabled consistent without restarting the Worklet.
-        await player.pcmBridge.setLoopBounds(requested.a,requested.b);
-        if(state.player!==player)return;
-        await player.pcmBridge.setLoopEnabled(requested.enabled);
+        await player.pcmBridge.setLoopConfiguration(
+          requested.a,requested.b,requested.enabled);
       }
       if(state.player!==player)return;
       player.appliedLoop=requested;
@@ -1704,6 +1705,62 @@ async function stop(){
   setPlayerProcessingStatus("saved",{transport:"stopped"});
   refreshStatusSeek();
 }
+async function recoverPlaybackAfterFailure({player,mode,frame,reason,restart}){
+  if(!player||player.failureRecoveryStarted)return false;
+  player.failureRecoveryStarted=true;
+  const wasPlaying=Boolean(player?.playRequested&&!player.paused);
+  const source=state.source;
+  if(!wasPlaying){
+    const epochBeforeStop=state.transportEpoch;
+    await stop();
+    if(state.source===source&&!state.player&&
+       state.transportEpoch===epochBeforeStop+1){
+      controls.main.disabled=!hasAudioSource();
+      controls.dry.disabled=!hasAudioSource();
+      controls.wet.disabled=!hasAudioSource();
+    }
+    setPlayerProcessingStatus("failed",{transport:"stopped",model:lab.mode});
+    setPlayerProcessingDetail("処理失敗: "+reason);
+    indicator("処理失敗 · 再生停止");
+    message("処理に失敗しました。音源は保持されています: "+reason,"error");
+    return false;
+  }
+  const previous=state.processingRecovery;
+  const repeated=previous?.source===source&&previous?.mode===mode;
+  if(!repeated)state.processingRecovery={source,mode};
+  const epochBeforeStop=state.transportEpoch;
+  await stop();
+  const recoveryEpoch=state.transportEpoch;
+  if(state.source!==source||!hasAudioSource()||state.player||
+     recoveryEpoch!==epochBeforeStop+1)return false;
+  if(repeated){
+    setPlayerProcessingStatus("failed",{transport:"stopped",model:lab.mode});
+    setPlayerProcessingDetail("自動復旧後に再度失敗: "+reason);
+    message("音声処理が再度失敗したため停止しました。音源と位置は保持されています。","error");
+    return false;
+  }
+  state.seek=clamp(frame,0,Math.max(0,duration()-1/state.decoded.sampleRate));
+  message("音声処理を復旧しています…","warning");
+  try{
+    await restart();
+    if(state.source!==source||state.transportEpoch!==recoveryEpoch+1)return false;
+    const resumed=state.player;
+    if(resumed?.playRequested){
+      indicator("処理エラーから再生を自動復旧しました");
+      message("再生を自動復旧しました。","info");
+      setTimeout(()=>{
+        if(state.processingRecovery?.source===source&&
+           state.processingRecovery.mode===mode&&state.player===resumed)
+          state.processingRecovery=null;
+      },5000);
+      return true;
+    }
+  }catch{}
+  setPlayerProcessingStatus("failed",{transport:"stopped",model:lab.mode});
+  setPlayerProcessingDetail("処理の復旧に失敗: "+reason);
+  message("処理を復旧できませんでした。音源と再生位置は保持されています: "+reason,"error");
+  return false;
+}
 async function play(mode="wet",offset=null){
   if(!hasAudioSource())return;
   if(mode==="wet"&&isPCMModel(lab.mode))return play("player",offset);
@@ -1859,21 +1916,11 @@ async function play(mode="wet",offset=null){
             $("#rt-telemetry").textContent="PCM実験経路 · 元音源時刻 "+
               (data.sourceFrame/sourceRate).toFixed(3)+"s · cache不足 "+data.missingFrames;
           }else if(data.type==="fatal-error"&&state.player?.pcmBridge===bridge){
-            // Unexpected termination is not a normal Pause. Clear stale
-            // "playing" state but preserve the successfully decoded source.
-            const failedEpoch=state.transportEpoch;
-            void stop().then(()=>{
-              if(state.player||state.transportEpoch!==failedEpoch+1)return;
-              // A processor can fail before await bridge.play() settles, while
-              // the launch has temporarily disabled both playback buttons.
-              controls.main.disabled=!hasAudioSource();controls.dry.disabled=!hasAudioSource();
-              controls.wet.disabled=!hasAudioSource();
-              setPlayerProcessingStatus("failed",{transport:"stopped"});
-              setPlayerProcessingDetail("PCM再生エンジン異常終了: "+data.message);
-              indicator("PCM実験再生エンジンの異常終了");
-              message("PCM実験再生を停止しました。音源は保持されています: "+
-                data.message,"error");
-            });
+            const failedPlayer=state.player;
+            const resumeAt=playPosition();
+            void recoverPlaybackAfterFailure({player:failedPlayer,
+              mode:failedPlayer.mode,frame:resumeAt,reason:data.message,
+              restart:()=>play(failedPlayer.mode,resumeAt)});
           }
         }
       });
@@ -1932,6 +1979,7 @@ async function play(mode="wet",offset=null){
       await bridge.play();
       if(launchEpoch!==state.transportEpoch||state.player!==player)return;
       player.initializing=false;
+      player.playRequested=true;
       if(granularActive){
         // During async initialization the final finger location is
         // reconciled before play; afterwards only the atomic scratch queue
@@ -2437,28 +2485,96 @@ for(const id of ["crusher-enabled","crusher-bits","crusher-hold"]){
   });
 }
 
-controls.main.addEventListener("click",()=>void toggleMainPlayer());
-for(const [id,delta] of [["seek-backward",-5],["seek-forward",5]])
-  $("#"+id).addEventListener("click",()=>{
-    if(!hasAudioSource())return;
-    cancelTemporaryScrub(true);
-    seek(clamp(playPosition()+delta,0,duration()));
-  });
-const scrubDurationInput=$("#scrub-return-duration");
-const scrubDurationOutput=$("#scrub-return-duration-value");
-function updateScrubReturnDuration(raw=scrubDurationInput.value){
-  scrubReturnDuration=validScrubReturnDuration(Number(raw));
-  scrubDurationInput.value=String(scrubReturnDuration);
-  scrubDurationOutput.value=scrubReturnDuration+" ms";
-  scrubDurationOutput.textContent=scrubReturnDuration+" ms";
-  try{localStorage.setItem(SCRUB_RETURN_STORAGE_KEY,String(scrubReturnDuration));}catch{}
+controls.main.addEventListener("click",()=>{
+  state.processingRecovery=null;
+  void toggleMainPlayer();
+});
+let heldTransport=null,heldTransportToken=0;
+function beginTransportHold(speed,event){
+  if(!hasAudioSource()||heldTransport||
+     !isPCMModel(lab.mode)||lab.individual)return;
+  event.preventDefault();
+  const existing=state.player;
+  const hold={token:++heldTransportToken,speed,
+    wasPlaying:Boolean(existing&&!existing.paused),
+    wasPaused:Boolean(existing?.paused),pointerId:event.pointerId??null,
+    starting:null,released:false};
+  heldTransport=hold;
+  setTemporaryScrubSpeed(speed,true);
+  if(existing?.rawPCM&&existing.mode==="player"){
+    hold.starting=existing.paused?
+      existing.pcmBridge.setSpeed(speed).then(()=>setMainPlayerPaused(false)):
+      Promise.resolve(queueScrubCommand(existing,speed));
+  }else if(!existing){
+    hold.starting=play("player",playPosition());
+  }else{
+    heldTransport=null;cancelTemporaryScrub(false);
+    message("4倍速送りは連続再生中のPV/STFT/WSOLA/Dual/Rustで使えます。","warning");
+    return;
+  }
+  if(event.pointerId!==undefined){
+    try{event.currentTarget.setPointerCapture(event.pointerId);}catch{}
+  }
 }
-scrubDurationInput.value=String(scrubReturnDuration);
-updateScrubReturnDuration(scrubReturnDuration);
-scrubDurationInput.addEventListener("input",()=>updateScrubReturnDuration());
-controls.dry.addEventListener("click",()=>play("dry"));
-controls.wet.addEventListener("click",()=>play("wet"));
-controls.stop.addEventListener("click",()=>stop());
+function endTransportHold(event){
+  const hold=heldTransport;
+  if(!hold||(event.pointerId!==undefined&&hold.pointerId!==null&&
+      event.pointerId!==hold.pointerId))return;
+  heldTransport=null;hold.released=true;
+  const restore=()=>{
+    if(hold.token!==heldTransportToken)return;
+    cancelTemporaryScrub(true);
+    const player=state.player;
+    if(!hold.wasPlaying&&player?.rawPCM&&player.mode==="player")
+      void setMainPlayerPaused(true);
+  };
+  if(hold.starting)void Promise.resolve(hold.starting).then(restore,restore);
+  else restore();
+  try{
+    if(event.pointerId!==undefined&&event.currentTarget.hasPointerCapture(event.pointerId))
+      event.currentTarget.releasePointerCapture(event.pointerId);
+  }catch{}
+}
+for(const [id,speed] of [["seek-backward",-4],["seek-forward",4]]){
+  const button=$("#"+id);
+  button.addEventListener("pointerdown",event=>beginTransportHold(speed,event));
+  for(const type of ["pointerup","pointercancel","lostpointercapture"])
+    button.addEventListener(type,endTransportHold);
+  button.addEventListener("contextmenu",event=>event.preventDefault());
+  button.addEventListener("click",event=>event.preventDefault());
+  button.addEventListener("keydown",event=>{
+    if(event.repeat||![" ","Enter"].includes(event.key))return;
+    beginTransportHold(speed,event);
+  });
+  button.addEventListener("keyup",event=>{
+    if([" ","Enter"].includes(event.key))endTransportHold(event);
+  });
+}
+window.addEventListener("blur",event=>endTransportHold(event));
+const scrubInertiaInput=$("#scrub-inertia");
+const scrubInertiaOutput=$("#scrub-inertia-value");
+function updateScrubInertia(raw=scrubInertiaInput.value){
+  scrubInertia=validScrubInertia(Number(raw));
+  scrubInertiaInput.value=String(scrubInertia);
+  scrubInertiaOutput.value=scrubInertia+"%";
+  scrubInertiaOutput.textContent=scrubInertia+"%";
+  try{localStorage.setItem(SCRUB_INERTIA_STORAGE_KEY,String(scrubInertia));}catch{}
+}
+scrubInertiaInput.value=String(scrubInertia);
+updateScrubInertia(scrubInertia);
+scrubInertiaInput.addEventListener("input",()=>updateScrubInertia());
+controls.dry.addEventListener("click",()=>{
+  state.processingRecovery=null;
+  void play("dry");
+});
+controls.wet.addEventListener("click",()=>{
+  state.processingRecovery=null;
+  void play("wet");
+});
+controls.stop.addEventListener("click",()=>{
+  state.processingRecovery=null;
+  void stop();
+});
 window.addEventListener("resize",()=>{
   drawCurve();drawAudio();detailWaveEditor?.refresh(true);
   const source=state.source;
@@ -2515,7 +2631,8 @@ async function load(file){
     if(state.rebuildTimer){clearTimeout(state.rebuildTimer);state.rebuildTimer=null;}
     if(state.offlineWorker){state.offlineWorker.terminate();state.offlineWorker=null;}
     const previousSource=state.source;
-    state.source=candidate;state.loadingSource=null;candidate=null;
+    state.source=candidate;state.loadingSource=null;
+    state.processingRecovery=null;candidate=null;
     previousSource?.dispose();
     state.offline=null;state.decoded={sampleRate:state.source.sampleRate};
     lab.job++;lab.worker?.terminate();lab.worker=null;lab.processed=null;
@@ -2863,44 +2980,41 @@ function labRefresh(){
   syncLabInput(labWindowsValue,lab.referenceWindows,labWindows.disabled);
   syncLabInput(labPeriodValue,lab.periodCycles,labPeriod.disabled);
   $("#lab-window-note").textContent=lab.mode==="spectral"?
-    "STFTは2048点Hann窓と256サンプルの合成ホップで連続再生します。現在、解析窓の変更・個別波長処理は未接続です。":
+    "窓サイズと個別波長設定は使いません。":
     lab.mode==="pv"&&!lab.individual?
-    "PV（実時間）は2048点・256合成ホップのピーク位相ロック処理です。個別波長をONにした場合のみ従来の先読みPV＋個別波長を使用します。":
+    "個別波長ON時は先読みWorkerへ切り替わります。":
     lab.mode==="am"&&!lab.individual?
-    "AM（実時間）はピーク位相ロックPVを持続音キャリアとして、元音源の緩やかな振幅包絡を平滑に反映します。音源位置・速度・A/Bは共通Transportが管理します。2048点窓固定で、個別波長ONは従来の先読み経路です。":
+    "個別波長ON時は先読みWorkerへ切り替わります。":
     lab.mode==="wsola"&&!lab.individual?
-    "WSOLA（実時間）は短窓で元音源波形を長めの相関参照と照合します。短窓の変更は再生処理を更新します。個別波長ONでは従来の先読み方式です。":
+    "短窓を使います。個別波長ON時は先読みWorkerへ切り替わります。":
     lab.mode==="dual"&&!lab.individual?
-    "Dual（実時間）は短窓WSOLAが打音、長窓ピーク位相ロックPVが持続音を処理し、共通音源位置で切替えます。短/長窓は実DSPに反映します。個別波長ONは従来の先読み経路です。":
+    "短窓は打音、長窓は持続音に使います。":
     lab.mode==="granular"?
-    "GranularはここにあるFFT/個別波長/参照窓の研究設定を使用しません。切替時も設定値は保持します。":
+    "FFT・個別波長の設定は使いません。":
     lab.individual?
-    "周波数別の"+lab.periodCycles+"周期窓×7観測で音程成分を推定し、残りは選択中の"+lab.mode.toUpperCase()+"で処理します。短窓・長窓は各残差モデルに適用、参照窓数は使用しません。":
+    "周波数別に部分音と残差を推定します。":
     lab.mode==="dual"?
-    "短窓＝打音・音の切替の時間精度、長窓＝持続音の周波数精度。それぞれ別々に処理へ反映します。":
-    lab.mode==="wsola"?"WSOLAは短窓を使い、長窓は使用しません。":
-    lab.mode==="live"?"Rust engine 3は元音源サンプル位置から部分音と残差を解析し、長窓設定を反映します。短窓・参照窓数は使いません。":
-    "このモデルは長窓を使います。短窓は複合窓・WSOLAでのみ利用します。";
+    "短窓は打音、長窓は持続音に使います。":
+    lab.mode==="wsola"?"短窓を使います。":
+    lab.mode==="live"?"部分音と残差を合成します。":
+    "長窓を使います。";
   const notes={
-    spectral:"STFT Spectral：周波数成分の位相を連続進行させる再生方式。0倍は同じ波形片の反復ではなく、固定した音源位置のスペクトルから位相を発展させます。極短区間の可聴品質とiOS処理性能は検証中です。",
-    granular:"Granular：波形片の重ね合わせ方式（比較用）。符号付き±8倍・0倍・サンプル単位A/Bに対応します。極低速時の周期感・comb感は既知の評価課題です。",
-    live:"Rust engine 3：部分音発振器と帯域内スペクトル残差を共通PCMの元音源位置から解析し、出力時間で合成します。±8倍・0倍・逆再生・独立音程・A/B・スクラブに接続しました。音質評価は継続中です。",
-    pv:"位相ボコーダー：ピーク近傍の位相関係を保持するSTFT再合成です。通常経路は元音源位置と逆/0倍・スクラブに直接追従します。個別波長選択時は固有DSPの先読みWorkerで処理し、A/Bは安全な区間境界で反映します。打音や極低速の音色は検証中です。",
-    wsola:"WSOLA：ステレオ共通の正規化波形相関によって接続する実時間OLA。通常経路は元音源位置・正逆/0倍・スクラブに追従します。個別波長ONは固有DSPの先読みWorkerで処理し、A/Bは安全な区間境界で反映します。極低速の周期性・打音品質は検証中です。",
-    dual:"短窓WSOLA＋長窓PV：打音の短い波形と持続音の周波数成分を独立合成し、過渡音検出・ステレオ共通位相照合で切替える方式です。通常経路は±8/0/逆とスクラブに対応します。Worker経路は正方向0.5〜2倍とA/Bに対応しますが、音響品質は未受入です。",
-    am:"AM包絡＋PV：元音源の緩やかな音量輪郭をピーク位相ロックPVに35msで平滑反映します。通常経路は共通PCMと正逆・0倍・A/Bに対応。個別波長ONは固有DSPの先読みWorkerで処理し、A/Bは安全な区間境界で反映します。",
-    "period-joint":"周波数ごとの個別波長（研究版）：7つの周波数別周期窓から複数の共通部分音を推定し、残差も処理します。和音・変調・声・打音も再生対象ですが、物理的な音源分離・完全な位相/音色保持は未証明です。"
+    spectral:"周波数ごとの位相を保って伸縮します。",
+    granular:"波形片を重ねる比較用モデルです。",
+    live:"Rust/WASMで部分音と残差を再合成します。",
+    pv:"位相関係を保って伸縮します。",
+    wsola:"波形の似た位置をつないで伸縮します。",
+    dual:"短窓WSOLAで打音、長窓PVで持続音を処理します。",
+    am:"PVに音量包絡を反映します。",
+    "period-joint":"周波数別の部分音を推定し、残差と合わせて再生します。"
   };
   $("#lab-model-description").textContent=lab.individual&&!isPCMModel(lab.mode)?
     "個別波長（"+lab.periodCycles+"周期）＋"+lab.mode.toUpperCase()+"：共通部分音を個別波長で再合成し、残差を選択モデルで処理します。部分音・残差の帰属は推定であり、完全な音源分離は保証しません。":
     notes[lab.mode];
   const cap=primaryModelCapability(lab.mode,granular.speed,
     {individual:lab.individual});
-  $("#lab-model-compatibility").textContent=cap.signed?
-    "0倍・逆再生・サンプル単位A/B・スクラブ対応。":
-    (cap.sampleAB?
-      "Workerは正方向0.5〜2倍。A/Bは元音源サンプル座標で安全な区間境界から反映し、即時スクラブは未対応です。":
-      (cap.reason||"Worker研究モデルは正方向0.5〜2倍のみ対応。0倍・逆方向・±2倍超と即時スクラブは未対応です."));
+  $("#lab-model-compatibility").textContent=cap.signed?"":
+    cap.sampleAB?"Workerは正方向0.5〜2倍です。":(cap.reason||"Workerは正方向0.5〜2倍です。");
   if(!state.player?.labStream)labStatusText(!cap.supported?
     "未適用: "+cap.reason:lab.mode==="live"?
     "Rust/WASMの部分音処理 · 選択時に主再生へ適用":
@@ -3125,18 +3239,9 @@ async function startModelPlayback(offset=null,appliedOverride=null){
       onFailure:error=>{
         if(state.player!==player)return;
         labStatusText("モデル処理失敗: "+error);
-        // Recover from the last AUDIBLE source time, not the initial seek.
-        // A pending Worker may fail minutes after stream launch.
         const resume=playPosition();
-        void (async()=>{
-          await stop();
-          if(state.player)return;
-          state.seek=resume;
-          setPlayerProcessingStatus("failed",{transport:"stopped"});
-          setPlayerProcessingDetail("Workerモデル処理失敗: "+error);
-          indicator("選択モデルの処理失敗 · 再生停止");
-          message("選択モデルで音声処理できませんでした: "+error,"error");
-        })();
+        void recoverPlaybackAfterFailure({player,mode:"worker",frame:resume,
+          reason:error,restart:()=>startModelPlayback(resume,applied)});
       }
     });
     if(epoch!==state.transportEpoch){stream.stop();return;}
@@ -3148,7 +3253,7 @@ async function startModelPlayback(offset=null,appliedOverride=null){
     state.player=player;controls.stop.disabled=false;
     refreshAB();
     setMainTransportIcon("stop","選択した処理モデルを停止");
-    mediaStatus(true);stream.start();refreshPlayhead();
+    mediaStatus(true);stream.start();player.playRequested=true;refreshPlayhead();
   }catch(error){
     labStatusText("処理開始失敗: "+error.message);
     if(state.player===player)await stop();

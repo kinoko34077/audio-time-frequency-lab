@@ -148,6 +148,25 @@ test("A/B endpoint reads retry when a scrub preempts a shared PCM decode",async(
   });
 });
 
+test("one A/B edit applies bounds and loop state in one atomic Worklet command",async()=>{
+  await withFakeWorklet(async nodes=>{
+    const bridge=await createSourcePCMBridge({ctx:context(),
+      source:pcmSource(async(startFrame,frameCount)=>range(startFrame,frameCount)),
+      sourceSampleRate:48_000,startFrame:10_000});
+    try{
+      const update=bridge.setLoopConfiguration(70_000,80_000,true);
+      await waitFor(()=>nodes[0].sent.some(m=>m.type==="loop-config"));
+      const commands=nodes[0].sent.filter(m=>m.type==="loop-config");
+      assert.equal(commands.length,1);
+      assert.deepEqual({a:commands[0].a,b:commands[0].b,enabled:commands[0].enabled},
+        {a:70_000,b:80_000,enabled:true});
+      nodes[0].port.onmessage({data:{type:"command-accepted",
+        requestId:commands[0].requestId}});
+      await update;
+    }finally{bridge.dispose();}
+  });
+});
+
 test("a newer waveform scrub invalidates an in-flight seek",async()=>{
   await withFakeWorklet(async nodes=>{
     let releaseSeek,releaseScrub;
