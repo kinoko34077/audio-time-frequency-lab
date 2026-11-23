@@ -126,6 +126,42 @@ test("native Chrome experimental source-PCM AudioWorklet renders and loops witho
         const current=player.latest;
         transitions.push({a,b,receipt,current});
       }
+
+      // The standard PV player uses a progressive PCM reader. An A/B edit
+      // should decode only small endpoint windows, not two full playback
+      // windows (65,536 frames each).
+      const loopReads=[];
+      const progressive={sourceFrames:48000*20,channelCount:1,
+        async read(startFrame,frameCount,options={}){
+          loopReads.push({startFrame,frameCount,windowFrames:options.windowFrames});
+          return {startFrame,channels:[Float32Array.from(
+            {length:frameCount},(_,i)=>.25*Math.sin(
+              2*Math.PI*440*(startFrame+i)/48000))]};
+        }};
+      const pvLoop=await createSourcePCMBridge({ctx,source:progressive,
+        sourceSampleRate:48000,startFrame:200000,speed:1,
+        processingMode:"pv"});
+      pvLoop.connect(analyser);
+      await pvLoop.play();
+      await new Promise(resolve=>setTimeout(resolve,35));
+      const loopReadStart=loopReads.length;
+      const loopEditStarted=performance.now();
+      const loopEdit=await pvLoop.setLoopConfiguration(48000,96000,true);
+      const loopEditLatencyMs=performance.now()-loopEditStarted;
+      const endpointReads=loopReads.slice(loopReadStart,loopReadStart+2);
+      await new Promise(resolve=>setTimeout(resolve,80));
+      const pvLoopState=pvLoop.latest;
+      await pvLoop.pause();
+      pvLoop.dispose();
+      assert.equal(endpointReads.length,2,JSON.stringify(loopReads));
+      assert.ok(endpointReads.every(read=>read.windowFrames===8192&&
+        read.frameCount===8192),JSON.stringify(loopReads));
+      assert.ok(loopEditLatencyMs<100,
+        `progressive PV loop edit took ${loopEditLatencyMs.toFixed(1)}ms`);
+      assert.equal(loopEdit.loopStartFrame,48000);
+      assert.equal(loopEdit.loopEndFrame,96000);
+      assert.equal(pvLoopState?.loopEnabled,true,JSON.stringify(pvLoopState));
+      assert.equal(pvLoopState?.missingFrames,0,JSON.stringify(pvLoopState));
       await player.pause();
       const stable=node===player.node;
       player.dispose();

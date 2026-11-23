@@ -34,6 +34,27 @@ test('reads exact source-frame ranges from a long source while retaining only bo
   source.dispose();
 });
 
+test('loop-priority reads decode a smaller aligned PCM window than normal playback',async()=>{
+  const decoded=[];
+  const source=createProgressivePCMCache({
+    sourceFrames:48000*60,channelCount:1,windowFrames:65_536,
+    maxCachedWindows:4,maxReadFrames:65_536,
+    decodeWindow:async(start,frames)=>{
+      decoded.push({start,frames});
+      return [Float32Array.from({length:frames},(_,i)=>start+i)];
+    }
+  });
+  const start=70_000;
+  const range=await source.read(start,128,{
+    priority:'playback',windowFrames:4096
+  });
+  assert.deepEqual(decoded,[{start:69_632,frames:4096}]);
+  assert.equal(range.channels[0][0],start);
+  assert.equal(range.channels[0].at(-1),start+127);
+  assert.equal(source.stats().residentFrames,4096);
+  source.dispose();
+});
+
 test('evicts the least recently used PCM window without changing source-frame values',async()=>{
   const reads=[];
   const source=createProgressivePCMCache({

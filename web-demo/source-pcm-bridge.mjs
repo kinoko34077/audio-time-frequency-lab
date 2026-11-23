@@ -7,6 +7,7 @@ import {chooseSourceWindowStart,SOURCE_WINDOW_FRAMES,
 import {validatePlaybackSpeed} from "./source-timeline.mjs";
 
 const installations=new WeakMap();
+const LOOP_ENDPOINT_WINDOW_FRAMES=8192;
 function ensureProcessor(ctx){
   let ready=installations.get(ctx);
   if(!ready){
@@ -136,12 +137,17 @@ export async function createSourcePCMBridge({
       }
     });
   };
-  const windowSlice=async(requested,direction=currentSpeed,priority="playback")=>{
+  const windowSlice=async(requested,direction=currentSpeed,priority="playback",
+    windowFrames=SOURCE_WINDOW_FRAMES)=>{
     const frame=Math.max(0,Math.min(frames-1,Math.floor(requested)));
-    const start=chooseSourceWindowStart(frame,frames,SOURCE_WINDOW_FRAMES,direction);
-    const end=Math.min(frames,start+SOURCE_WINDOW_FRAMES);
+    const requestedStart=chooseSourceWindowStart(frame,frames,windowFrames,direction);
+    // Progressive readers align decode windows. Align the small endpoint range
+    // here too, so a single A/B edit never spills into a second decode window.
+    const start=windowFrames===SOURCE_WINDOW_FRAMES?requestedStart:
+      Math.floor(requestedStart/windowFrames)*windowFrames;
+    const end=Math.min(frames,start+Math.min(windowFrames,frames));
     if(source){
-      const range=await source.read(start,end-start,{priority});
+      const range=await source.read(start,end-start,{priority,windowFrames});
       if(range?.startFrame!==start||!Array.isArray(range.channels)||
          range.channels.length!==outputChannels||
          !range.channels.every(ch=>ch instanceof Float32Array&&ch.length===end-start))
@@ -183,7 +189,8 @@ export async function createSourcePCMBridge({
   const primeLoop=async()=>{
     if(!loop)return;
     const endpoints=await Promise.all([
-      windowSlice(A,1,"playback"),windowSlice(B-1,-1,"playback")
+      windowSlice(A,1,"playback",Math.min(LOOP_ENDPOINT_WINDOW_FRAMES,frames)),
+      windowSlice(B-1,-1,"playback",Math.min(LOOP_ENDPOINT_WINDOW_FRAMES,frames))
     ]);
     if(closed)return;
     postWindow(endpoints[0],"A");postWindow(endpoints[1],"B");
@@ -262,7 +269,10 @@ export async function createSourcePCMBridge({
       while(enabled&&!closed&&revision===loopRevision){
         try{
           endpoints=await Promise.all([
-            windowSlice(a,1,"playback"),windowSlice(b-1,-1,"playback")
+            windowSlice(a,1,"playback",
+              Math.min(LOOP_ENDPOINT_WINDOW_FRAMES,frames)),
+            windowSlice(b-1,-1,"playback",
+              Math.min(LOOP_ENDPOINT_WINDOW_FRAMES,frames))
           ]);
           break;
         }catch(error){
