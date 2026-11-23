@@ -3014,7 +3014,8 @@ function labRefresh(){
   const cap=primaryModelCapability(lab.mode,granular.speed,
     {individual:lab.individual});
   $("#lab-model-compatibility").textContent=cap.signed?"":
-    cap.sampleAB?"Workerは正方向0.5〜2倍です。":(cap.reason||"Workerは正方向0.5〜2倍です。");
+    cap.sampleAB?"Worker: 正方向0.5〜2倍 · A/B対応 · 即時スクラブは未対応":
+      (cap.reason||"Workerは正方向0.5〜2倍です。");
   if(!state.player?.labStream)labStatusText(!cap.supported?
     "未適用: "+cap.reason:lab.mode==="live"?
     "Rust/WASMの部分音処理 · 選択時に主再生へ適用":
