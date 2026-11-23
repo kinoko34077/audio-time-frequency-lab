@@ -201,51 +201,34 @@ test("staged Worker A/B settings activate at the next chunk and repeat the selec
   assert.equal(p.statistics.missingFrames,0);
 });
 
-test("staged Worker A/B-only edits replace the current chunk as soon as prepared",()=>{
+test("loop edit prepares both sides of a short A/B interval before switching live",()=>{
   const p=createSourcePCMRenderer({sourceFrames:32,sourceSampleRate:8,
-    outputSampleRate:8,channelCount:1,speed:1,startFrame:0,
+    outputSampleRate:8,channelCount:1,speed:1,startFrame:7,
     loopStartFrame:0,loopEndFrame:32,loopEnabled:false});
   const chunk=(generation,sequence,startFrame,endFrame,value)=>({generation,
     sequence,startFrame,endFrame,speed:1,coreFrames:endFrame-startFrame,
     channels:[new Float32Array(endFrame-startFrame+2).fill(value)]});
   p.installRenderedChunk(chunk(0,0,0,8,1));
   p.installRenderedChunk(chunk(0,1,8,16,1));
-  const staged=p.stageRenderedState({generation:1,speed:1,
-    pitchSemitones:0,loopStartFrame:4,loopEndFrame:12,loopEnabled:true,
-    immediateLoop:true});
-  assert.deepEqual(staged,{sourceFrame:4,sequence:0,bufferedSegments:2});
-  assert.equal(p.installRenderedChunk(chunk(1,0,4,12,2)),1);
-  const output=[new Float32Array(2)];
-  assert.equal(p.renderBuffered(output),0);
-  assert.equal(p.workerState.generation,1,
-    "prepared A/B PCM activates before the prior 1.5-second chunk drains");
-  assert.equal(p.timeline.state.sourceFrame,6);
-  assert.ok(output[0].every(value=>value>=0&&value<=2));
-});
-
-test("late A/B Worker preparation keeps successor PCM audible until restaging",()=>{
-  const p=createSourcePCMRenderer({sourceFrames:32,sourceSampleRate:8,
-    outputSampleRate:8,channelCount:1,speed:1,startFrame:0,
-    loopStartFrame:0,loopEndFrame:32,loopEnabled:false});
-  const chunk=(generation,sequence,startFrame,endFrame,value)=>({generation,
-    sequence,startFrame,endFrame,speed:1,coreFrames:endFrame-startFrame,
-    channels:[new Float32Array(endFrame-startFrame+2).fill(value)]});
-  p.installRenderedChunk(chunk(0,0,0,8,1));
-  p.installRenderedChunk(chunk(0,1,8,16,3));
-  p.timeline.scrub(7,1);
-  const staged=p.stageRenderedState({generation:1,speed:1,
-    pitchSemitones:0,loopStartFrame:4,loopEndFrame:12,loopEnabled:true,
-    immediateLoop:true});
-  assert.equal(staged.sourceFrame,7);
-  const beforeReplacement=[new Float32Array(3)];
-  assert.equal(p.renderBuffered(beforeReplacement),0);
-  assert.deepEqual(Array.from(beforeReplacement[0]),[1,1,3]);
-  assert.equal(p.installRenderedChunk(chunk(1,0,7,12,2)),false,
-    "a replacement for an already-consumed chunk must be re-staged");
-  const afterReplacement=[new Float32Array(3)];
-  assert.equal(p.renderBuffered(afterReplacement),0,
-    "the previously buffered successor remains audible during re-staging");
-  assert.deepEqual(Array.from(afterReplacement[0]),[3,3,3]);
+  const staged=p.stageRenderedSeekState({generation:1,frame:7,speed:1,
+    pitchSemitones:0,requiredChunks:2,loopStartFrame:4,loopEndFrame:12,
+    loopEnabled:true,preserveLivePosition:true});
+  assert.equal(staged.reusedChunks,0);
+  assert.notEqual(p.installRenderedChunk(chunk(1,0,7,12,2)),false);
+  const oldOutput=[new Float32Array(2)];
+  assert.equal(p.renderBuffered(oldOutput),0,
+    "one prepared side is not enough to activate a short loop");
+  assert.equal(p.workerState.generation,0);
+  assert.notEqual(p.installRenderedChunk(chunk(1,1,4,12,3)),false);
+  const liveOutput=[new Float32Array(2)];
+  assert.equal(p.renderBuffered(liveOutput),0);
+  assert.equal(p.workerState.generation,1);
+  assert.equal(p.timeline.state.sourceFrame,11,
+    "the edit keeps the live cursor when its new PCM covers that frame");
+  const wrapped=[new Float32Array(2)];
+  assert.equal(p.renderBuffered(wrapped),0);
+  assert.equal(p.timeline.state.sourceFrame,5,
+    "the prepared A-side chunk is available at the first new B wrap");
   assert.equal(p.statistics.missingFrames,0);
 });
 
@@ -1195,3 +1178,4 @@ test("native Granular, Spectral and Rust share accounting, EOF and source-clock 
     assert.equal(p.statistics.missingFrames,3,name);
   }
 });
+

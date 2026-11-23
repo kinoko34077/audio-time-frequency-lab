@@ -88,7 +88,6 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
           const staged=this.renderer.stageRenderedState({
             generation:m.generation,speed:m.speed,
             pitchSemitones:m.pitchSemitones,
-            immediateLoop:m.immediateLoop===true,
             loopStartFrame:m.loopStartFrame,
             loopEndFrame:m.loopEndFrame,
             loopEnabled:m.loopEnabled
@@ -115,6 +114,8 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
              m.generation<=this.workerGeneration||
              !Number.isSafeInteger(m.requiredChunks)||
              m.requiredChunks<1||m.requiredChunks>RENDERED_CHUNK_SLOTS||
+             m.preserveLivePosition!==undefined&&
+               typeof m.preserveLivePosition!=="boolean"||
              m.reuseCompatible!==undefined&&
                typeof m.reuseCompatible!=="boolean")
             throw RangeError("invalid staged legacy Worker seek");
@@ -127,6 +128,7 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
             generation:m.generation,frame:m.frame,speed:m.speed,
             pitchSemitones:m.pitchSemitones,
             requiredChunks:m.requiredChunks,
+            preserveLivePosition:m.preserveLivePosition===true,
             loopStartFrame:m.loopStartFrame,
             loopEndFrame:m.loopEndFrame,loopEnabled:m.loopEnabled,
             reuseCompatible:m.reuseCompatible===true,
@@ -451,3 +453,4 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
   }
 }
 registerProcessor("audio-lab-source-pcm",AudioLabSourcePCMProcessor);
+

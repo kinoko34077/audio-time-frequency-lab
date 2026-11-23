@@ -408,7 +408,7 @@ export async function createSourcePCMBridge({
     },
     stageWorkerSeekPlayback({frame,speed:nextSpeed,
       pitchSemitones:nextPitch,generation,requiredChunks=1,
-      reuseCompatible=false,reuseGeneration=null,
+      reuseCompatible=false,reuseGeneration=null,preserveLivePosition=false,
       loopStartFrame=A,loopEndFrame=B,loopEnabled=loop}={}){
       if(processingMode!=="worker")
         return Promise.reject(Error("Worker seek requires Worker processing mode"));
@@ -422,18 +422,18 @@ export async function createSourcePCMBridge({
          !Number.isSafeInteger(requiredChunks)||requiredChunks<1||
          requiredChunks>RENDERED_CHUNK_SLOTS||
          typeof reuseCompatible!=="boolean"||
+         typeof preserveLivePosition!=="boolean"||
          reuseGeneration!==null&&
            (!Number.isSafeInteger(reuseGeneration)||reuseGeneration<0)||
          reuseCompatible&&reuseGeneration===null)
         return Promise.reject(RangeError("invalid staged legacy Worker seek"));
       return submit({type:"worker-seek-stage",frame,speed:nextSpeed,
         pitchSemitones:nextPitch,generation,requiredChunks,reuseCompatible,
-        reuseGeneration,loopStartFrame,loopEndFrame,loopEnabled,
+        reuseGeneration,preserveLivePosition,loopStartFrame,loopEndFrame,loopEnabled,
         requestAudioTime:ctx.currentTime});
     },
     stageWorkerPlayback({speed:nextSpeed,pitchSemitones:nextPitch,
-      loopStartFrame=A,loopEndFrame=B,loopEnabled=loop,generation,
-      immediateLoop=false}={}){
+      loopStartFrame=A,loopEndFrame=B,loopEnabled=loop,generation}={}){
       if(processingMode!=="worker")
         return Promise.reject(Error("staged playback requires Worker processing mode"));
       if(!Number.isFinite(nextSpeed)||nextSpeed<.5||nextSpeed>2||
@@ -441,12 +441,11 @@ export async function createSourcePCMBridge({
          !Number.isSafeInteger(loopStartFrame)||loopStartFrame<0||
          !Number.isSafeInteger(loopEndFrame)||loopStartFrame>=loopEndFrame||
          loopEndFrame>frames||typeof loopEnabled!=="boolean"||
-         !Number.isSafeInteger(generation)||generation<1||
-         typeof immediateLoop!=="boolean")
+         !Number.isSafeInteger(generation)||generation<1)
         return Promise.reject(RangeError("invalid staged legacy Worker playback state"));
       return submit({type:"worker-stage",speed:nextSpeed,
         pitchSemitones:nextPitch,loopStartFrame,loopEndFrame,loopEnabled,
-        immediateLoop,generation,
+        generation,
         requestAudioTime:ctx.currentTime});
     },
     get latest(){return latest;},
@@ -465,3 +464,4 @@ export async function createSourcePCMBridge({
   };
   return api;
 }
+

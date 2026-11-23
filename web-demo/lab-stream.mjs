@@ -95,7 +95,7 @@ export async function createModelStream({ctx,source,sourceChannels,sampleRate,sp
   let handoffJobId=0,handoffGeneration=null,handoffResult=null;
   let handoffUnavailableGeneration=null;
   let generation=0,activeGeneration=0,stagedGeneration=null;
-  let immediateLoopGeneration=null;
+  let loopStage=null;
   let seekTransitionGeneration=null;
   let bufferedSegments=0,lastMissingFrames=0,latestFrame=0,appliedRevision=0;
   let cursorFrame=0,sequenceCursor=0,activeJob=0,activeJobGeneration=0;
@@ -314,25 +314,35 @@ export async function createModelStream({ctx,source,sourceChannels,sampleRate,sp
     if(transitioning&&stagedGeneration!==requestedGeneration){
       stagingOperations++;
       onStatus('設定を切替中 · 現在のPCMを再生しながら次の世代を準備中');
-      void bridge.stageWorkerPlayback({speed:requestedConfig.speed,
-        pitchSemitones:requestedConfig.semitones,
-        loopStartFrame:requestedConfig.loopStartFrame,
-        loopEndFrame:requestedConfig.loopEndFrame,
-        loopEnabled:requestedConfig.loopEnabled,
-        immediateLoop:immediateLoopGeneration===requestedGeneration,
-        generation:requestedGeneration}).then(accepted=>{
+      const stage=loopStage?.generation===requestedGeneration?loopStage:null;
+      const staging=stage?
+        bridge.stageWorkerSeekPlayback({frame:stage.frame,
+          speed:requestedConfig.speed,
+          pitchSemitones:requestedConfig.semitones,
+          loopStartFrame:requestedConfig.loopStartFrame,
+          loopEndFrame:requestedConfig.loopEndFrame,
+          loopEnabled:requestedConfig.loopEnabled,
+          generation:requestedGeneration,requiredChunks:stage.requiredChunks,
+          preserveLivePosition:true}):
+        bridge.stageWorkerPlayback({speed:requestedConfig.speed,
+          pitchSemitones:requestedConfig.semitones,
+          loopStartFrame:requestedConfig.loopStartFrame,
+          loopEndFrame:requestedConfig.loopEndFrame,
+          loopEnabled:requestedConfig.loopEnabled,
+          generation:requestedGeneration});
+      void staging.then(accepted=>{
         if(stopped)return;
         if(requestedGeneration!==generation){
           resolveTransition(requestedGeneration,{stale:true});return;
         }
         stagedGeneration=requestedGeneration;
-        cursorFrame=accepted.sourceFrame;
-        sequenceCursor=accepted.sequence;
+        cursorFrame=accepted.nextFrame??accepted.sourceFrame;
+        sequenceCursor=accepted.nextSequence??accepted.sequence;
         bufferedSegments=accepted.bufferedSegments??bufferedSegments;
         if(pending&&handoffUnavailableGeneration!==requestedGeneration&&
            !accepted.terminal)
           startHandoffJob(requestedGeneration,requestedConfig,
-            accepted.sourceFrame,accepted.sequence);
+            accepted.sourceFrame,accepted.sequence,{seek:!!stage});
       }).catch(error=>{
         if(requestedGeneration===generation){
           const waiter=transitionWaiters.get(requestedGeneration);
@@ -499,7 +509,7 @@ export async function createModelStream({ctx,source,sourceChannels,sampleRate,sp
       resolveTransition(id,{stale:true});
     cancelHandoff();
     config=next;generation++;
-    immediateLoopGeneration=null;
+    loopStage=null;
     const requestedGeneration=generation;
     stagedGeneration=null;lastMissingFrames=0;
     if(started){
@@ -566,14 +576,26 @@ export async function createModelStream({ctx,source,sourceChannels,sampleRate,sp
     // clock chooses the next safe retained-PCM boundary for activation.
     const next=validateNext(validationFrame,{...settings,
       speed:speed??config.speed,semitones:semitones??config.semitones});
-    const immediateLoop=Object.keys(settings).length>0&&
+    const loopEdit=Object.keys(settings).length>0&&
       Object.keys(settings).every(key=>["loopStartFrame","loopEndFrame",
         "loopEnabled"].includes(key))&&sameDSPConfig(config,next);
     for(const id of [...transitionWaiters.keys()])
       resolveTransition(id,{stale:true});
     seekTransitionGeneration=null;
     config=next;generation++;
-    immediateLoopGeneration=immediateLoop?generation:null;
+    loopStage=null;
+    if(loopEdit){
+      const plan=planChunk({totalFrames,sampleRate,speed:next.speed,
+        startSeconds:validationFrame/sampleRate,startFrame:validationFrame,
+        model:next.model,fftSize:next.fftSize,
+        shortFftSize:next.shortFftSize,longFftSize:next.longFftSize,
+        referenceWindows:next.referenceWindows,jointBackend:next.jointBackend,
+        loopStartFrame:next.loopStartFrame,loopEndFrame:next.loopEndFrame,
+        loopEnabled:next.loopEnabled});
+      loopStage={generation,frame:plan.start,
+        requiredChunks:requiredSeekChunkCount({totalFrames,sampleRate,
+          speed:next.speed,loopEnabled:next.loopEnabled,plan})};
+    }
     configs.set(generation,next);
     for(const key of configs.keys())
       if(key!==activeGeneration&&key!==generation)configs.delete(key);
@@ -596,3 +618,4 @@ export async function createModelStream({ctx,source,sourceChannels,sampleRate,sp
     get active(){return !stopped},get firstScheduled(){return started},
     get bufferedSegments(){return bufferedSegments}};
 }
+
