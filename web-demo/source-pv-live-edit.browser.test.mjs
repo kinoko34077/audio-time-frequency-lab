@@ -97,14 +97,15 @@ test("recorded piano output stays continuous through live PV speed and pitch com
       await wait(120);
       const edits=[
         ["pitch",.5],["speed",.9],["pitch",.75],
-        ["speed",.63],["pitch",.25],["speed",.9]
+        ["speed",.63],["pitch",.25],["speed",.9],
+        ["loop",true],["loop",false]
       ];
       const measurements=[];
       for(const [kind,value] of edits){
         await wait(4);
         const before=captureBlocks.at(-1);
-        const receipt=kind==="pitch"?await player.setPitch(value):
-          await player.setSpeed(value);
+        const receipt=kind==="pitch"?await player.setPitch(value):kind==="speed"?
+          await player.setSpeed(value):await player.setLoopConfiguration(10000,130000,value);
         const applied=await waitForApplied(receipt.requestId);
         const output=await waitForCapturedBlock(applied.outputFrame);
         const previous=captureBlocks.find(block=>
@@ -116,7 +117,7 @@ test("recorded piano output stays continuous through live PV speed and pitch com
         const previousStep=maxStep(previousSamples),outputStep=maxStep(outputSamples);
         measurements.push({kind,value,requestId:receipt.requestId,
           outputFrame:applied.outputFrame,speed:applied.speed,
-          pitch:applied.pitchSemitones,boundary,previousStep,outputStep,
+          pitch:applied.pitchSemitones,loopEnabled:receipt.loopEnabled,boundary,previousStep,outputStep,
           missingFrames:applied.missingFramesInBlock});
       }
       const audit=window.__audioSilenceAudit;
@@ -134,7 +135,8 @@ test("recorded piano output stays continuous through live PV speed and pitch com
       "live AudioWorklet emitted real recorded PCM after each edit: "+
         JSON.stringify(result.measurements));
     assert.ok(result.measurements.every(row=>row.kind==="speed"?
-      row.speed===row.value:row.pitch===row.value),
+      row.speed===row.value:row.kind==="pitch"?row.pitch===row.value:
+      row.loopEnabled===row.value),
       "PV applied each requested slider value in the captured Worklet output: "+
         JSON.stringify(result.measurements));
     assert.ok(result.measurements.every(row=>row.missingFrames===0),
