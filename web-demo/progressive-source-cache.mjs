@@ -21,18 +21,19 @@ export function createProgressivePCMCache({
   const assertLive=()=>{
     if(disposed)throw Error("progressive PCM source disposed");
   };
-  const readWindow=async(start,options)=>{
+  const readWindow=async(start,options,size=windowFrames)=>{
     assertLive();
-    const resident=cache.get(start);
+    const key=`${size}:${start}`;
+    const resident=cache.get(key);
     if(resident){
-      cache.delete(start);cache.set(start,resident);
+      cache.delete(key);cache.set(key,resident);
       return resident;
     }
     const priority=PRIORITY[options?.priority]??PRIORITY.background;
-    const inflight=pending.get(start);
+    const inflight=pending.get(key);
     if(inflight){
       if(inflight.controller.signal.aborted)
-        return inflight.cleanup.then(()=>readWindow(start,options));
+        return inflight.cleanup.then(()=>readWindow(start,options,size));
       if(priority>inflight.priority){
         inflight.priority=priority;
         inflight.options={...inflight.options,...options};
@@ -43,13 +44,13 @@ export function createProgressivePCMCache({
       return inflight.promise;
     }
 
-    const entry={start,length:Math.min(windowFrames,sourceFrames-start),
+    const entry={key,start,length:Math.min(size,sourceFrames-start),
       priority,options:{...options},controller:new AbortController(),
       promise:null,resolve:null,reject:null};
     entry.promise=new Promise((resolve,reject)=>{
       entry.resolve=resolve;entry.reject=reject;
     });
-    pending.set(start,entry);
+    pending.set(key,entry);
     queue.push(entry);queue.sort((a,b)=>b.priority-a.priority);
     preemptFor(priority);pump();
     return entry.promise;
@@ -69,12 +70,12 @@ export function createProgressivePCMCache({
         const window={start:entry.start,channels};
         while(cache.size>=maxCachedWindows)
           cache.delete(cache.keys().next().value);
-        cache.set(entry.start,window);
+        cache.set(entry.key,window);
         entry.resolve(window);
       }).catch(error=>entry.reject(error))
       .finally(()=>{
         active.delete(entry);
-        if(pending.get(entry.start)===entry)pending.delete(entry.start);
+        if(pending.get(entry.key)===entry)pending.delete(entry.key);
         pump();
       });
   };
@@ -102,12 +103,16 @@ export function createProgressivePCMCache({
         throw new RangeError("invalid progressive PCM frame range");
       if(frameCount>maxReadFrames)
         throw new RangeError("progressive PCM range exceeds the bounded range limit");
+      const readWindowFrames=options.windowFrames??windowFrames;
+      if(!Number.isSafeInteger(readWindowFrames)||readWindowFrames<1||
+         readWindowFrames>windowFrames)
+        throw new RangeError("invalid progressive PCM read window size");
       const result=Array.from({length:channelCount},()=>new Float32Array(frameCount));
       let frame=startFrame,offset=0;
       while(offset<frameCount){
         assertLive();
-        const windowStart=Math.floor(frame/windowFrames)*windowFrames;
-        const window=await readWindow(windowStart,options);
+        const windowStart=Math.floor(frame/readWindowFrames)*readWindowFrames;
+        const window=await readWindow(windowStart,options,readWindowFrames);
         assertLive();
         const sourceOffset=frame-windowStart;
         const count=Math.min(frameCount-offset,window.channels[0].length-sourceOffset);

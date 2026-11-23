@@ -126,6 +126,33 @@ test("native Chrome experimental source-PCM AudioWorklet renders and loops witho
         const current=player.latest;
         transitions.push({a,b,receipt,current});
       }
+
+      // The standard PV player uses a progressive PCM reader. An A/B edit
+      // should decode only small endpoint windows, not two full playback
+      // windows (65,536 frames each).
+      const loopReads=[];
+      const progressive={sourceFrames:48000*20,channelCount:1,
+        async read(startFrame,frameCount,options={}){
+          loopReads.push({startFrame,frameCount,windowFrames:options.windowFrames});
+          return {startFrame,channels:[Float32Array.from(
+            {length:frameCount},(_,i)=>.25*Math.sin(
+              2*Math.PI*440*(startFrame+i)/48000))]};
+        }};
+      const pvLoop=await createSourcePCMBridge({ctx,source:progressive,
+        sourceSampleRate:48000,startFrame:200000,speed:1,
+        processingMode:"pv"});
+      pvLoop.connect(analyser);
+      await pvLoop.play();
+      await new Promise(resolve=>setTimeout(resolve,35));
+      const loopReadStart=loopReads.length;
+      const loopEditStarted=performance.now();
+      const loopEdit=await pvLoop.setLoopConfiguration(48000,96000,true);
+      const loopEditLatencyMs=performance.now()-loopEditStarted;
+      const endpointReads=loopReads.slice(loopReadStart,loopReadStart+2);
+      await new Promise(resolve=>setTimeout(resolve,80));
+      const pvLoopState=pvLoop.latest;
+      await pvLoop.pause();
+      pvLoop.dispose();
       await player.pause();
       const stable=node===player.node;
       player.dispose();
@@ -213,6 +240,8 @@ test("native Chrome experimental source-PCM AudioWorklet renders and loops witho
       await ctx.close();
       return {
         first,loop,rms,stable,loopMissing,transitions,afterDispose,
+        progressiveLoop:{endpointReads,latencyMs:loopEditLatencyMs,
+          command:loopEdit,state:pvLoopState},
         rust:{freeze:rustFreeze,freezePCM:rustFreezePCM,rms:rustFreezePCM.rms,loop:rustLoop,
           frequency:rustFreezePCM.frequency,freezeRms:rustFreezePCM.rms,
           forwardPCM:rustForwardPCM,reverse:rustReverse,
@@ -270,6 +299,21 @@ test("native Chrome experimental source-PCM AudioWorklet renders and loops witho
     assert.ok(evidence.rms>.01,`expected audible PCM: ${JSON.stringify(evidence)}`);
     assert.equal(evidence.stable,true);
     assert.equal(evidence.transitions.length,4);
+    assert.equal(evidence.progressiveLoop.endpointReads.length,2,
+      evidence.progressiveLoop);
+    assert.ok(evidence.progressiveLoop.endpointReads.every(read=>
+      read.windowFrames===8192&&read.frameCount===8192),
+      evidence.progressiveLoop);
+    assert.ok(evidence.progressiveLoop.latencyMs<100,
+      `progressive PV loop edit took ${evidence.progressiveLoop.latencyMs.toFixed(1)}ms`);
+    assert.equal(evidence.progressiveLoop.command.loopStartFrame,48000,
+      evidence.progressiveLoop);
+    assert.equal(evidence.progressiveLoop.command.loopEndFrame,96000,
+      evidence.progressiveLoop);
+    assert.equal(evidence.progressiveLoop.state?.loopEnabled,true,
+      evidence.progressiveLoop);
+    assert.equal(evidence.progressiveLoop.state?.missingFrames,0,
+      evidence.progressiveLoop);
     for(const {a,b,receipt,current} of evidence.transitions){
       assert.equal(receipt.loopStartFrame,a);
       assert.equal(receipt.loopEndFrame,b);
