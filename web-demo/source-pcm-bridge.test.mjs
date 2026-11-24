@@ -264,3 +264,43 @@ test("latest A/B intent stays bounded and Loop OFF bypasses obsolete cold endpoi
     }finally{release.forEach(fn=>fn());bridge.dispose();}
   });
 });
+
+test("unchanged endpoint windows are reused without rereading or transferring retained buffers",async()=>{
+  await withFakeWorklet(async nodes=>{
+    const reads=[];
+    const source=pcmSource(async(startFrame,frameCount)=>{
+      reads.push({startFrame,frameCount});
+      return range(startFrame,frameCount);
+    });
+    const bridge=await createSourcePCMBridge({ctx:context(),source,
+      sourceSampleRate:48_000,startFrame:10_000});
+    const node=nodes[0];
+    const nativePost=node.port.postMessage;
+    // Mimic actual ownership transfer: every posted PCM buffer is detached.
+    node.port.postMessage=(m,transfers=[])=>{
+      nativePost.call(node.port,structuredClone(m,{transfer:transfers}));
+    };
+    const apply=async(a,b,enabled=true)=>{
+      const before=node.sent.filter(m=>m.type==="loop-config").length;
+      const pending=bridge.setLoopConfiguration(a,b,enabled);
+      await waitFor(()=>node.sent.filter(m=>m.type==="loop-config").length>before);
+      const msg=node.sent.findLast(m=>m.type==="loop-config");
+      node.port.onmessage({data:{type:"command-accepted",requestId:msg.requestId}});
+      await pending;
+      return msg;
+    };
+    try{
+      const initial=await apply(70_000,180_000);
+      const afterInitial=reads.length;
+      const changed=await apply(90_000,180_000);
+      assert.equal(reads.length-afterInitial,1,"unchanged B must not reread");
+      assert.deepEqual(changed.endpoints[1],initial.endpoints[1]);
+      const afterChange=reads.length;
+      await apply(90_000,180_000,false);
+      const reenabled=await apply(90_000,180_000);
+      assert.equal(reads.length,afterChange,"same endpoints reuse both retained windows");
+      assert.deepEqual(reenabled.endpoints,changed.endpoints);
+      assert.ok(reenabled.endpoints.every(w=>w.channels[0].length===8192));
+    }finally{bridge.dispose();}
+  });
+});
