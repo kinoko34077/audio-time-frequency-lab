@@ -335,6 +335,42 @@ test("real recorded waveform UX across mobile, Android-size, tablet and desktop 
           document.querySelector("#granular-speed").getBoundingClientRect().right-
           document.querySelector("#granular-pitch").getBoundingClientRect().right)<=1),true,
           "editing number widths does not push either slider to a different horizontal stop");
+        // The normal inline value opens the exact same FW wheel component.
+        // Real pointer interaction, signed 4th-place change, cancel and
+        // no-op open must preserve the existing canonical value.
+        await page.$eval("#granular-speed-value",el=>el.scrollIntoView({block:"center"}));
+        await page.click("#granular-speed-value");
+        await page.waitForSelector("#vr-wheel-overlay:not([hidden])");
+        assert.equal(await page.$eval("#granular-speed-value",el=>el.value),"-1.237");
+        assert.equal(await page.$eval("#vr-wheel-overlay",el=>
+          el.querySelectorAll(".vr-wheel-track").length),6);
+        await page.click("[data-wheel-done]");
+        assert.equal(await page.$eval("#granular-speed-value",el=>el.value),"-1.237");
+        await page.click("#granular-pitch-value");
+        await page.waitForSelector("#vr-wheel-overlay:not([hidden])");
+        await page.$eval('.vr-wheel-track[data-wheel-place="-4"]',el=>el.focus());
+        await page.keyboard.press("ArrowDown");
+        assert.equal(await page.$eval("#granular-pitch-value",el=>el.value),"7.1235");
+        await page.click("[data-wheel-cancel]");
+        assert.equal(await page.$eval("#granular-pitch-value",el=>el.value),"7.1234");
+        await page.click("#granular-pitch-value");
+        await page.waitForSelector("#vr-wheel-overlay:not([hidden])");
+        await page.$eval('.vr-wheel-track[data-wheel-place="-4"]',el=>el.focus());
+        await page.keyboard.press("ArrowDown");
+        await page.click("[data-wheel-done]");
+        assert.equal(await page.$eval("#granular-pitch-value",el=>el.value),"7.1235");
+        // Direct keyboard editing remains available for exact values beyond
+        // a particular wheel display precision; restore the existing fixture.
+        await page.focus("#granular-pitch-value");
+        await page.keyboard.press("Home");
+        await page.keyboard.down("Shift");await page.keyboard.press("End");
+        await page.keyboard.up("Shift");
+        await page.keyboard.type("7.1234");
+        await page.keyboard.press("Tab");
+        assert.equal(await page.$eval("#granular-pitch-value",el=>el.value),"7.1234");
+        assert.equal(await page.$eval("#vr-wheel-overlay",el=>el.hidden),true);
+        console.log("U04_SHARED_WHEEL "+JSON.stringify({profile:profile.name,
+          speed:"-1.237",pitch:"7.1234",cancel:true,commit:true,exactInput:true}));
         await page.evaluate(()=>{
           document.querySelector(".studio")?.scrollTo(0,0);
           window.scrollTo(0,0);
