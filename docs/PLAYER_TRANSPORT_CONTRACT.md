@@ -1,5 +1,10 @@
 # Audio Lab — Source-time transport contract (#36)
 
+## 2026-11-25 scrub inertia baseline amendment (#124 U13)
+
+Implementation candidate until exact-head CI / Review / main and Pages acceptance. The slider retains 0–300%, its stored percentage and the existing signed ±8× transport bound. Moving release uses the existing scaled signed throw speed and cubic convergence to the configured playback speed, with return duration `1000 * (1 + strength)` ms (strength = percentage / 100). At 100%, 150%, 300% this is 2s, 2.5s, 4s respectively. A stationary release or 0% retains the previous 1s return, without a throw. Dragging again, shuttle, pause, or cancel interrupts the temporary override; canonical speed/pitch remain unchanged. Historical fixed 480ms/1s throw evidence is not today's duration contract. The numerical baseline is a proposed tuning value responding to the stronger-inertia request, not physical-device subjective acceptance.
+
+
 ## Current scope amendment — 2026-11-23 (user decision)
 
 - **Individual-period / 個別波長 processing is not a required feature or an acceptance condition for the normal Audio Lab player.** Completing parity for this optional research route (0×, reverse, ±8×, instant scrub, etc.) is not a blocker for the product or for refactoring acceptance. Historical investigation of that route remains documented below.
