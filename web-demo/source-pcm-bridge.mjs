@@ -92,6 +92,9 @@ export async function createSourcePCMBridge({
   let requestId=0,closed=false,closureError=null,latest=null,scratchCached=null;
   let refillRevision=0;
   let loopPreparing=false,queuedLoop=null;
+  // Source is immutable for this bridge lifetime. Retain only the two most
+  // recent endpoint windows; transfer copies rather than detach these buffers.
+  const endpointCache=[null,null];
   const pending=new Map();
   const closedFailure=()=>closureError??Error("PCM bridge disposed");
   let rustReadyResolve=null,rustReadyReject=null;
@@ -101,6 +104,7 @@ export async function createSourcePCMBridge({
       ticket.reject(error);
     }
     pending.clear();
+    endpointCache.fill(null);
     if(queuedLoop){queuedLoop.reject(error);queuedLoop=null;}
   };
   const failProcessor=error=>{
@@ -139,8 +143,7 @@ export async function createSourcePCMBridge({
       }
     });
   };
-  const windowSlice=async(requested,direction=currentSpeed,priority="playback",
-    windowFrames=SOURCE_WINDOW_FRAMES)=>{
+  const sourceWindowRange=(requested,direction,windowFrames)=>{
     const frame=Math.max(0,Math.min(frames-1,Math.floor(requested)));
     const requestedStart=chooseSourceWindowStart(frame,frames,windowFrames,direction);
     // Progressive readers align decode windows. Align the small endpoint range
@@ -152,7 +155,11 @@ export async function createSourcePCMBridge({
       start=Math.min(start,
         Math.floor((frames-1)/windowFrames)*windowFrames);
     }
-    const end=Math.min(frames,start+Math.min(windowFrames,frames));
+    return {start,end:Math.min(frames,start+Math.min(windowFrames,frames))};
+  };
+  const windowSlice=async(requested,direction=currentSpeed,priority="playback",
+    windowFrames=SOURCE_WINDOW_FRAMES)=>{
+    const {start,end}=sourceWindowRange(requested,direction,windowFrames);
     if(source){
       const range=await source.read(start,end-start,{priority,windowFrames});
       if(range?.startFrame!==start||!Array.isArray(range.channels)||
@@ -162,6 +169,17 @@ export async function createSourcePCMBridge({
       return {start,channels:range.channels};
     }
     return {start,channels:sourceChannels.map(x=>x.slice(start,end))};
+  };
+  const endpointWindow=async(frame,direction,slot)=>{
+    const size=Math.min(LOOP_ENDPOINT_WINDOW_FRAMES,frames);
+    const {start,end}=sourceWindowRange(frame,direction,size);
+    let window=endpointCache[slot];
+    if(!window||window.start!==start||window.channels[0].length!==end-start){
+      window=await windowSlice(frame,direction,"playback",size);
+      if(closed)throw closedFailure();
+      endpointCache[slot]=window;
+    }
+    return {start:window.start,channels:window.channels.map(ch=>ch.slice())};
   };
   const postWindow=({start,channels},pin=null,refillId=null)=>{
     if(closed)return;
@@ -196,8 +214,8 @@ export async function createSourcePCMBridge({
   const primeLoop=async()=>{
     if(!loop)return;
     const endpoints=await Promise.all([
-      windowSlice(A,1,"playback",Math.min(LOOP_ENDPOINT_WINDOW_FRAMES,frames)),
-      windowSlice(B-1,-1,"playback",Math.min(LOOP_ENDPOINT_WINDOW_FRAMES,frames))
+      endpointWindow(A,1,0),
+      endpointWindow(B-1,-1,1)
     ]);
     if(closed)return;
     postWindow(endpoints[0],"A");postWindow(endpoints[1],"B");
@@ -270,10 +288,8 @@ export async function createSourcePCMBridge({
     while(enabled&&!closed&&revision===loopRevision){
       try{
         endpoints=await Promise.all([
-          windowSlice(a,1,"playback",
-            Math.min(LOOP_ENDPOINT_WINDOW_FRAMES,frames)),
-          windowSlice(b-1,-1,"playback",
-            Math.min(LOOP_ENDPOINT_WINDOW_FRAMES,frames))
+          endpointWindow(a,1,0),
+          endpointWindow(b-1,-1,1)
         ]);
         break;
       }catch(error){
