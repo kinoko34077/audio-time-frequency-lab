@@ -24,6 +24,15 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, open
     });
     const page=await browser.newPage(),errors=[];
     page.on("pageerror",err=>errors.push(err.message));
+    await page.evaluateOnNewDocument(()=>{
+      const Native=window.AudioWorkletNode;
+      window.AudioWorkletNode=class extends Native{
+        constructor(ctx,name,options){
+          super(ctx,name,options);
+          if(name==="audio-lab-source-pcm")window.__loopTestPort=this.port;
+        }
+      };
+    });
     await page.goto("http://127.0.0.1:"+port+"/?model=granular",{waitUntil:"domcontentloaded",timeout:20000});
     await page.waitForFunction(()=>document.documentElement.dataset.fwBoot==="ready",{timeout:20000});
     assert.equal(await page.$eval("body",el=>el.dataset.mainTab),"player");
@@ -654,6 +663,37 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, open
     assert.equal(await page.$eval("#player-loop-b",e=>e.validationMessage),"");
     await page.waitForFunction(()=>document.querySelector("#player-loop-hint")
       ?.textContent.includes("反映が完了"),{timeout:15000});
+    // Delay the first enable ACK, not the audio thread. The real Loop
+    // button must still reach the processor with OFF before that ACK returns.
+    await page.evaluate(()=>{
+      const port=window.__loopTestPort,receive=port.onmessage;
+      let held=null;
+      port.onmessage=function(event){
+        if(!held&&event.data?.type==="command-accepted"&&
+           event.data?.op==="configuration"&&event.data?.loopEnabled===true){
+          held=event;window.__loopTestHeld=true;return;
+        }
+        receive.call(port,event);
+      };
+      window.__releaseLoopTestAck=()=>{
+        port.onmessage=receive;
+        if(held)receive.call(port,held);
+      };
+    });
+    try{
+      await page.click("#player-loop-toggle");
+      await page.waitForFunction(()=>window.__loopTestHeld===true,{timeout:3000});
+      await page.click("#player-loop-toggle");
+      await page.waitForFunction(()=>
+        document.querySelector("#granular-optin-status")?.dataset.renderLoopEnabled==="false"&&
+        document.querySelector("#player-loop-hint")?.textContent.includes("反映が完了"),
+        {timeout:3000});
+    }finally{await page.evaluate(()=>window.__releaseLoopTestAck());}
+    await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(
+      ()=>requestAnimationFrame(resolve))));
+    assert.equal(await page.$eval("#granular-optin-status",el=>el.dataset.renderLoopEnabled),"false");
+    assert.equal(await page.$eval("#player-loop-enabled",el=>el.checked),false);
+    assert.match(await page.$eval("#player-loop-hint",el=>el.textContent),/反映が完了/);
     const visibleActions=await page.evaluate(()=>["play-main","stop","play-dry"]
       .filter(id=>document.getElementById(id).getClientRects().length>0));
     assert.deepEqual(visibleActions,["play-main"],
