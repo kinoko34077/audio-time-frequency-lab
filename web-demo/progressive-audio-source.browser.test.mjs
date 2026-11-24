@@ -130,6 +130,84 @@ test('native browser decodes exact requested WAV PCM, loads the app without eage
       assert.ok(probe.loopRms>.02,`${fixture.name}: ${JSON.stringify(probe)}`);
     }
 
+    // Actual compressed local PCM and a real Worklet. Hold an endpoint
+    // read deliberately so ordering is deterministic, not a timing guess
+    // about the speed of the test runner's decoder.
+    const mp3=(await readFile(new URL('./test-fixtures/progressive-probe.mp3',
+      import.meta.url))).toString('base64');
+    const superseded=await page.evaluate(async encoded=>{
+      const bytes=Uint8Array.from(atob(encoded),ch=>ch.charCodeAt(0));
+      const {createProgressiveAudioSource}=await import('./progressive-audio-source.mjs');
+      const {createSourcePCMBridge}=await import('./source-pcm-bridge.mjs');
+      const source=await createProgressiveAudioSource(new File([bytes],
+        'progressive-probe.mp3',{type:'audio/mpeg'}));
+      const ctx=new AudioContext({sampleRate:source.sampleRate});
+      const events=[];
+      let release,entered,bridge,old;
+      const held=new Promise(resolve=>{release=resolve;});
+      const started=new Promise(resolve=>{entered=resolve;});
+      let holdEndpoints=false;
+      const reader={sourceFrames:source.sourceFrames,channelCount:source.channelCount,
+        async read(start,count,options){
+          if(holdEndpoints&&options?.windowFrames===8192&&start>0){
+            entered();
+            await held;
+          }
+          return source.read(start,count,options);
+        }};
+      const waitFor=async predicate=>{
+        const until=performance.now()+3000;
+        while(!predicate()){
+          if(performance.now()>until)throw Error('loop render receipt timed out');
+          await new Promise(resolve=>setTimeout(resolve,10));
+        }
+      };
+      try{
+        bridge=await createSourcePCMBridge({ctx,source:reader,
+          sourceSampleRate:source.sampleRate,startFrame:8192,speed:0,
+          processingMode:'pv',onEvent:event=>events.push(event)});
+        const analyser=ctx.createAnalyser();
+        analyser.fftSize=1024;
+        bridge.connect(analyser);analyser.connect(ctx.destination);
+        await bridge.play();
+        await waitFor(()=>events.some(e=>e.type==='render-applied'&&e.running));
+        const a=0,b=source.sourceFrames;
+        holdEndpoints=true;
+        const began=performance.now();
+        old=bridge.setLoopConfiguration(a,b,true);
+        await Promise.race([started,new Promise((_,reject)=>setTimeout(
+          ()=>reject(Error('endpoint read did not start')),3000))]);
+        const offAt=performance.now();
+        const off=await bridge.setLoopConfiguration(a,b,false);
+        await waitFor(()=>events.some(e=>e.type==='render-applied'&&
+          e.requestId===off.requestId));
+        const offRender=events.find(e=>e.type==='render-applied'&&
+          e.requestId===off.requestId);
+        const offRenderMs=performance.now()-offAt;
+        const pcm=new Float32Array(analyser.fftSize);
+        analyser.getFloatTimeDomainData(pcm);
+        const rms=Math.sqrt(pcm.reduce((sum,x)=>sum+x*x,0)/pcm.length);
+        release();
+        const oldResult=await old;
+        return {a,b,oldResult,offRender,offRenderMs,heldMs:performance.now()-began,
+          rms,enabledReceipts:events.filter(e=>e.type==='command-accepted'&&
+            e.loopEnabled===true).length};
+      }finally{
+        release();
+        if(old)await old.catch(()=>{});
+        bridge?.dispose();source.dispose();await ctx.close();
+      }
+    },mp3);
+    console.log('COMPRESSED_LOOP_SUPERSESSION '+JSON.stringify(superseded));
+    assert.deepEqual(superseded.oldResult,{stale:true});
+    assert.equal(superseded.offRender.loopStartFrame,superseded.a);
+    assert.equal(superseded.offRender.loopEndFrame,superseded.b);
+    assert.equal(superseded.offRender.loopEnabled,false);
+    assert.equal(superseded.offRender.running,true);
+    assert.equal(superseded.offRender.missingFramesInBlock,0);
+    assert.equal(superseded.enabledReceipts,0);
+    assert.ok(superseded.rms>.001,'held obsolete endpoint must not silence current PCM');
+
     await page.evaluate(()=>{
       const input=document.querySelector('#audio-file'),transfer=new DataTransfer();
       transfer.items.add(window.__progressiveTestFile);input.files=transfer.files;
