@@ -153,6 +153,45 @@ test('native browser decodes exact requested WAV PCM, loads the app without eage
       'source duration is shown once in the waveform instead of repeated in file metadata');
     assert.equal(loading.duration,'0:08.0');
 
+    // The whole-track overview has source-coordinate bins independent of
+    // canvas pixels. Rotate while the first scan is still in progress.
+    await page.waitForFunction(()=>{
+      const d=document.querySelector('#wave')?.dataset;
+      return Number(d?.overviewReadyBins)>0&&Number(d?.overviewReadyBins)<Number(d?.overviewBins);
+    },{timeout:10000});
+    const overviewSnapshot=()=>page.$eval('#wave',canvas=>{
+      const {overviewGeneration,overviewBins,overviewReads,overviewReadyBins}=canvas.dataset;
+      const pixels=canvas.getContext('2d').getImageData(0,0,canvas.width,canvas.height).data;
+      let signal=0;
+      for(let i=0;i<pixels.length;i+=4)
+        if(pixels[i+1]>130&&pixels[i+1]>pixels[i]+35&&pixels[i+3]>0)signal++;
+      return {generation:Number(overviewGeneration),bins:Number(overviewBins),
+        reads:Number(overviewReads),ready:Number(overviewReadyBins),width:canvas.width,signal};
+    });
+    const building=await overviewSnapshot();
+    await page.setViewport({width:390,height:844,deviceScaleFactor:1});
+    await page.setViewport({width:844,height:390,deviceScaleFactor:1});
+    await page.waitForFunction(()=>{
+      const d=document.querySelector('#wave')?.dataset;
+      return Number(d?.overviewBins)>0&&d.overviewReadyBins===d.overviewBins;
+    },{timeout:10000});
+    const completed=await overviewSnapshot();
+    assert.equal(completed.generation,building.generation,
+      'rotation must not restart the source-coordinate scan');
+    assert.equal(completed.bins,2048);
+    assert.equal(completed.reads,64,'8-second source scanned once in 32-bin batches');
+    assert.ok(completed.signal>0);
+    await page.setViewport({width:390,height:844,deviceScaleFactor:1});
+    await new Promise(resolve=>setTimeout(resolve,250));
+    const rotated=await overviewSnapshot();
+    assert.notEqual(rotated.width,completed.width);
+    assert.equal(rotated.generation,completed.generation);
+    assert.equal(rotated.reads,completed.reads);
+    assert.equal(rotated.ready,completed.ready);
+    assert.ok(rotated.signal>0,'redrawn overview must retain waveform pixels');
+    await page.setViewport({width:800,height:600,deviceScaleFactor:1});
+    console.log('U02_OVERVIEW_RESIZE '+JSON.stringify({building,completed,rotated}));
+
     await page.evaluate(()=>{
       const input=document.querySelector('#audio-file'),transfer=new DataTransfer();
       transfer.items.add(new File(['not audio'],'broken.wav',{type:'audio/wav'}));
@@ -166,6 +205,14 @@ test('native browser decodes exact requested WAV PCM, loads the app without eage
     await page.click('#play-dry');
     await page.waitForFunction(()=>document.querySelector('#rt-telemetry')
       ?.dataset.pcmTransport==='raw-experimental',{timeout:20000});
+    await page.setViewport({width:390,height:844,deviceScaleFactor:1});
+    await new Promise(resolve=>setTimeout(resolve,250));
+    const playingResize=await overviewSnapshot();
+    assert.equal(playingResize.generation,completed.generation);
+    assert.equal(playingResize.reads,completed.reads);
+    assert.equal(playingResize.ready,completed.ready);
+    assert.equal(await page.$eval('#rt-telemetry',el=>el.dataset.pcmTransport),'raw-experimental');
+    await page.setViewport({width:800,height:600,deviceScaleFactor:1});
     await page.click('#stop');
     await page.evaluate(()=>window.dispatchEvent(
       new PageTransitionEvent('pagehide',{persisted:true})));
