@@ -4,7 +4,7 @@ import {createModelStream} from "./lab-stream.mjs";
 import {createSourcePCMBridge} from "./source-pcm-bridge.mjs";
 import {createProgressiveAudioSource} from "./progressive-audio-source.mjs";
 import {advanceOverviewBuildToken,overviewBinCount,overviewNeedsResample,readOverviewPeaks} from "./waveform-range-peaks.mjs";
-import {returnToPlaySpeed,scrubSpeed,releaseScrubSpeed,scaleScrubInertia} from "./scrub-kinetics.mjs";
+import {returnToPlaySpeed,scrubSpeed,releaseScrubSpeed,scaleScrubInertia,scrubReturnDuration} from "./scrub-kinetics.mjs";
 import {createPlayerWaveEditor} from "./player-wave-editor.mjs";
 import {toggleSourceMarker} from "./player-ab-markers.mjs";
 import {primaryModelCapability,isContinuousPCMModel} from "./model-route.mjs";
@@ -304,7 +304,7 @@ function waveformScrubMotion(speed,phase,sourceFrame=null){
   if(scrubMotionFrame)cancelAnimationFrame(scrubMotionFrame);
   const token=scrubMotionToken,started=performance.now();
   const from=validatePlaybackSpeed(scaleScrubInertia(speed,scrubInertia/100));
-  const duration=1000;
+  const duration=scrubReturnDuration(from,scrubInertia/100);
   // A held finger eases out from 0x; a quick throw continues in its signed
   // direction and smoothly converges to the user's configured playback speed.
   const frame=()=>{

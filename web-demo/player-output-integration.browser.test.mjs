@@ -497,7 +497,11 @@ test(`native Chrome actual ${profile.model} output follows 0×, reverse and sign
     // playing BACKWARD after release before returning toward +1.
     await set("granular-speed-value",1);
     await page.click("#main-tab-player");
-    await page.evaluate(()=>{window.__pvScratch=[];});
+    await page.evaluate(strength=>{
+      const input=document.querySelector("#scrub-inertia");
+      input.value=String(strength);input.dispatchEvent(new Event("input",{bubbles:true}));
+      window.__pvScratch=[];
+    },profile.model==="pv"?300:100);
     const bounds=await page.$eval("#wave-detail",e=>{
       e.scrollIntoView({block:"center"});
       const r=e.getBoundingClientRect();
@@ -532,10 +536,20 @@ test(`native Chrome actual ${profile.model} output follows 0×, reverse and sign
       }));
       throw Error(profile.model+" signed drag not observed: "+JSON.stringify({panStart,...actual})+" / "+error.message);
     }
-    // The release transition is fixed at one second; the user setting scales
-    // throw strength rather than changing this convergence duration.
+    // At 100% the new return lasts 2s; at 300% it lasts 4s.
+    // Observe actual outgoing Worklet commands beyond the old 1s limit.
     await sleep(1120);
+    const beyondOld=await page.evaluate(()=>window.__pvScratch
+      .filter(x=>x.kind==="command"&&Number.isFinite(x.speed)).at(-1)?.speed);
+    assert.ok(Number.isFinite(beyondOld)&&Math.abs(beyondOld-1)>.025,
+      "a moving throw must still differ from saved speed after the old 1s return: "+beyondOld);
+    await page.waitForFunction(()=>window.__pvScratch
+      .filter(x=>x.kind==="command"&&Number.isFinite(x.speed)).at(-1)?.speed===1,
+      {timeout:6500});
     const scratch=await page.evaluate(()=>window.__pvScratch.slice());
+    console.log("U13_SCRUB_RETURN "+JSON.stringify({model:profile.model,
+      strength:profile.model==="pv"?300:100,beyondOld,final:scratch.filter(
+        x=>x.kind==="command"&&Number.isFinite(x.speed)).at(-1)?.speed}));
     const thrown=scratch.filter(x=>x.kind==="scrub"&&x.speed<0);
     const inertia=scratch.filter(x=>x.kind==="command"&&
       Number.isFinite(x.speed));
