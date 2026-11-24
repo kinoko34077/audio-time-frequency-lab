@@ -91,6 +91,7 @@ export async function createSourcePCMBridge({
   // Do not copy entire track to the worklet; these small snapshots are moved.
   let requestId=0,closed=false,closureError=null,latest=null,scratchCached=null;
   let refillRevision=0;
+  let loopPreparing=false,queuedLoop=null;
   const pending=new Map();
   const closedFailure=()=>closureError??Error("PCM bridge disposed");
   let rustReadyResolve=null,rustReadyReject=null;
@@ -100,6 +101,7 @@ export async function createSourcePCMBridge({
       ticket.reject(error);
     }
     pending.clear();
+    if(queuedLoop){queuedLoop.reject(error);queuedLoop=null;}
   };
   const failProcessor=error=>{
     if(closed)return;
@@ -263,39 +265,61 @@ export async function createSourcePCMBridge({
   }
   const command=(op,params={})=>submit({type:"command",op,...params});
   let cursorRevision=0,loopRevision=0;
+  const prepareLoop=async({a,b,enabled,op,revision})=>{
+    let endpoints=[];
+    while(enabled&&!closed&&revision===loopRevision){
+      try{
+        endpoints=await Promise.all([
+          windowSlice(a,1,"playback",
+            Math.min(LOOP_ENDPOINT_WINDOW_FRAMES,frames)),
+          windowSlice(b-1,-1,"playback",
+            Math.min(LOOP_ENDPOINT_WINDOW_FRAMES,frames))
+        ]);
+        break;
+      }catch(error){
+        if(closed)throw closedFailure();
+        if(revision!==loopRevision)return {stale:true};
+        const preempted=error?.name==="AbortError"||
+          error?.message==="PCM window decode aborted";
+        if(!preempted)throw error;
+        await new Promise(resolve=>setTimeout(resolve,0));
+      }
+    }
+    if(closed)throw closedFailure();
+    if(revision!==loopRevision)return {stale:true};
+    const receipt=await submit({type:"loop-config",op,a,b,enabled,endpoints},
+      endpoints.flatMap(w=>w.channels.map(ch=>ch.buffer)));
+    return revision===loopRevision?receipt:{stale:true};
+  };
+  const launchLoop=async job=>{
+    loopPreparing=true;
+    try{job.resolve(await prepareLoop(job));}
+    catch(error){job.reject(error);}
+    finally{
+      loopPreparing=false;
+      const next=queuedLoop;
+      queuedLoop=null;
+      if(next){
+        if(closed)next.reject(closedFailure());
+        else void launchLoop(next);
+      }
+    }
+  };
   const updateLoop=(a,b,enabled,op)=>{
     if(closed)return Promise.reject(Error("PCM bridge disposed"));
     refillRevision++;
-    // Transfer both endpoint PCM windows and target loop configuration as
-    // one message. No render quantum can see new pins with old A/B bounds.
     const revision=++loopRevision;
-    return (async()=>{
-      let endpoints=[];
-      while(enabled&&!closed&&revision===loopRevision){
-        try{
-          endpoints=await Promise.all([
-            windowSlice(a,1,"playback",
-              Math.min(LOOP_ENDPOINT_WINDOW_FRAMES,frames)),
-            windowSlice(b-1,-1,"playback",
-              Math.min(LOOP_ENDPOINT_WINDOW_FRAMES,frames))
-          ]);
-          break;
-        }catch(error){
-          if(closed)throw closedFailure();
-          if(revision!==loopRevision)return {stale:true};
-          const preempted=error?.name==="AbortError"||
-            error?.message==="PCM window decode aborted";
-          if(!preempted)throw error;
-          // Scrubs outrank A/B endpoint reads. Let the aborted decode clean
-          // up, then retry while these bounds are still the current request.
-          await new Promise(resolve=>setTimeout(resolve,0));
-        }
-      }
-      if(closed)throw closedFailure();
-      if(revision!==loopRevision)return {stale:true};
-      return submit({type:"loop-config",op,a,b,enabled,endpoints},
-        endpoints.flatMap(w=>w.channels.map(ch=>ch.buffer)));
-    })();
+    // One active endpoint preparation and one replaceable latest request.
+    // An OFF request requires no endpoint PCM, so never queue it behind a
+    // cold decode. Revision fencing prevents obsolete preparation applying.
+    if(queuedLoop){queuedLoop.resolve({stale:true});queuedLoop=null;}
+    const job={a,b,enabled,op,revision};
+    if(!enabled)return prepareLoop(job);
+    return new Promise((resolve,reject)=>{
+      const request={...job,resolve,reject};
+      if(loopPreparing)queuedLoop=request;
+      else void launchLoop(request);
+    });
   };
   const api={
     node,

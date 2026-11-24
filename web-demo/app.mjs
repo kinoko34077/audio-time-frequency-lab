@@ -455,41 +455,47 @@ function refreshAB(){
 function syncLoopToPlayer(player=state.player){
   if((!player?.pcmBridge&&!player?.labStream)||player.initializing)return;
   const requested={a:ab.a,b:ab.b,enabled:ab.enabled};
-  if(!player.loopBusy&&!player.pendingLoop&&player.acceptedLoop?.a===requested.a&&
-     player.acceptedLoop?.b===requested.b&&
-     player.acceptedLoop?.enabled===requested.enabled)return;
-  player.pendingLoop=requested;
-  if(player.pcmBridge&&!player.labStream){
+  const same=(x,y)=>x?.a===y.a&&x?.b===y.b&&x?.enabled===y.enabled;
+  if(!player.labStream){
+    // The bridge owns bounded endpoint preparation. Publish each new intent
+    // immediately so an obsolete read cannot send its old loop configuration.
+    if(same(player.requestedLoop,requested)||
+       (!player.requestedLoop&&same(player.acceptedLoop,requested)))return;
+    player.requestedLoop=requested;
     player.loopAwaitingRender=null;
     $("#player-loop-hint").textContent="区間設定を準備中です。";
+    void player.pcmBridge.setLoopConfiguration(
+      requested.a,requested.b,requested.enabled
+    ).then(receipt=>{
+      if(state.player!==player||player.requestedLoop!==requested)return;
+      if(receipt?.stale)throw Error("区間設定が別の操作で上書きされました");
+      player.requestedLoop=null;
+      player.acceptedLoop=requested;
+      player.loopAwaitingRender={requested,revision:receipt.revision};
+      $("#player-loop-hint").textContent="区間設定を受理しました。音声ブロックへの反映待ちです。";
+    }).catch(error=>{
+      if(state.player!==player||player.requestedLoop!==requested)return;
+      player.requestedLoop=null;
+      player.acceptedLoop=null;
+      $("#player-loop-hint").textContent="区間変更が反映されません: "+error.message;
+      message("区間ループ設定の反映失敗: "+error.message,"error");
+    });
+    return;
   }
+  // The optional research stream has its own staged Worker activation.
+  if(!player.loopBusy&&!player.pendingLoop&&same(player.acceptedLoop,requested))return;
+  player.pendingLoop=requested;
   if(player.loopBusy)return;
   player.loopBusy=true;
   void (async()=>{
     while(state.player===player&&player.pendingLoop){
       const requested=player.pendingLoop;
       player.pendingLoop=null;
-      let receipt=null;
-      if(player.labStream){
-        await player.stream.updateLoop(requested);
-      }else{
-        receipt=await player.pcmBridge.setLoopConfiguration(
-          requested.a,requested.b,requested.enabled);
-      }
+      await player.stream.updateLoop(requested);
       if(state.player!==player)return;
-      if(receipt?.stale){
-        // A superseded asynchronous request is not an accepted loop state.
-        player.acceptedLoop=null;
-        if(player.pendingLoop)continue;
-        throw Error("区間設定が別の操作で上書きされました");
-      }
       player.acceptedLoop=requested;
-      if(!player.labStream&&!player.pendingLoop){
-        player.loopAwaitingRender={requested,revision:receipt.revision};
-        $("#player-loop-hint").textContent="区間設定を受理しました。音声ブロックへの反映待ちです。";
-      }
     }
-    if(state.player===player&&player.labStream)
+    if(state.player===player)
       $("#player-loop-hint").textContent=
         "A/B区間を研究モデルの共通PCM時計へ反映しました。";
   })().catch(error=>{
