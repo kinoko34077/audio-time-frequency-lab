@@ -3,7 +3,7 @@ import {fullBandPartialOptions} from "./lab-contract.mjs";
 import {createModelStream} from "./lab-stream.mjs";
 import {createSourcePCMBridge} from "./source-pcm-bridge.mjs";
 import {createProgressiveAudioSource} from "./progressive-audio-source.mjs";
-import {advanceOverviewBuildToken,overviewBinCount,overviewNeedsResample,readOverviewPeak} from "./waveform-range-peaks.mjs";
+import {advanceOverviewBuildToken,overviewBinCount,overviewNeedsResample,readOverviewPeaks} from "./waveform-range-peaks.mjs";
 import {returnToPlaySpeed,scrubSpeed,releaseScrubSpeed,scaleScrubInertia} from "./scrub-kinetics.mjs";
 import {createPlayerWaveEditor} from "./player-wave-editor.mjs";
 import {toggleSourceMarker} from "./player-ab-markers.mjs";
@@ -1027,8 +1027,15 @@ function updateEngineInfo(){
 
 function drawAudio(){
   const canvas=$("#wave"),ratio=Math.min(devicePixelRatio||1,2);
-  canvas.width=Math.max(240,Math.round(canvas.getBoundingClientRect().width*ratio));
-  canvas.height=120*ratio;
+  const width=Math.max(240,Math.round(canvas.getBoundingClientRect().width*ratio));
+  const height=Math.round(120*ratio);
+  if(canvas.width!==width)canvas.width=width;
+  if(canvas.height!==height)canvas.height=height;
+  const source=state.source;
+  canvas.dataset.overviewGeneration=String(source?.overviewBuildToken??0);
+  canvas.dataset.overviewBins=String(source?.overviewBinCount??0);
+  canvas.dataset.overviewReads=String(source?.overviewReadCount??0);
+  canvas.dataset.overviewReadyBins=String(source?.overviewPeaks?.filter(Boolean).length??0);
   const ctx=canvas.getContext("2d");
   ctx.clearRect(0,0,canvas.width,canvas.height);
   const summary=state.overviewPeaks;
@@ -1052,44 +1059,49 @@ function drawAudio(){
   ctx.stroke();
 }
 async function sampleSourceOverview(source){
-  const bins=overviewBinCount($("#wave").width);
-  if(source.overviewBinCount===bins&&source.overviewPeaks?.length===bins&&
-     source.overviewPeaks.every(peak=>Array.isArray(peak)&&peak.length===2))return;
+  if(state.source!==source||!overviewNeedsResample(source))return;
+  const frames=source.sourceFrames,bins=overviewBinCount(frames);
+  // Preserve completed bins on retries; geometry is owned by the source,
+  // never by the current canvas. A resize cannot invalidate this grid.
+  if(source.overviewBinCount!==bins||source.overviewPeaks?.length!==bins){
+    source.overviewBinCount=bins;
+    source.overviewPeaks=Array.from({length:bins},()=>null);
+    source.overviewReadCount=0;
+  }
+  const peaks=source.overviewPeaks;
+  state.overviewPeaks=peaks;
   const buildToken=advanceOverviewBuildToken(source);
-  source.overviewBinCount=bins;
   source.overviewBuildComplete=false;
-  const isCurrent=()=>state.source===source&&
-    source.overviewBuildToken===buildToken;
-  const peaks=Array.from({length:bins},()=>null);
-  source.overviewPeaks=peaks;
-  if(state.source===source)state.overviewPeaks=peaks;
-  for(let bin=0;bin<bins;bin++){
+  const isCurrent=()=>state.source===source&&source.overviewBuildToken===buildToken;
+  const batchBins=Math.max(1,Math.min(32,Math.floor(
+    (source.windowFrames??65_536)*bins/frames)));
+  for(let bin=0;bin<bins;){
     if(!isCurrent())return;
-    let peak=null;
-    for(let attempt=0;attempt<4&&!peak;attempt++){
+    if(peaks[bin]){bin++;continue;}
+    let after=bin+1;
+    while(after<bins&&after-bin<batchBins&&!peaks[after])after++;
+    let result=null;
+    for(let attempt=0;attempt<4&&!result;attempt++){
       if(!isCurrent())return;
-      try{peak=await readOverviewPeak(source,bin,bins,{
-        shouldContinue:isCurrent
+      try{result=await readOverviewPeaks(source,bin,after,bins,{
+        shouldContinue:isCurrent,
+        onRead:()=>{source.overviewReadCount++;}
       });}
       catch{
         if(attempt<3)await new Promise(resolve=>setTimeout(resolve,120));
       }
     }
-    if(peak===null){
-      if(!isCurrent())return;
-      continue;
+    if(!isCurrent())return;
+    if(result){
+      for(let i=bin;i<after;i++)peaks[i]=result[i-bin];
+      drawAudio();
+      detailWaveEditor?.refreshOverview(
+        Math.floor(bin*frames/bins),Math.floor(after*frames/bins),bin);
     }
-    peaks[bin]=peak;
-    if(bin%4===3||bin===bins-1){
-      if(isCurrent()){
-        drawAudio();
-        detailWaveEditor?.refreshOverview(
-          Math.floor(bin*frames/bins),Math.floor((bin+1)*frames/bins),bin);
-      }
-      await new Promise(resolve=>setTimeout(resolve,0));
-    }
+    bin=after;
+    await new Promise(resolve=>setTimeout(resolve,0));
   }
-  if(isCurrent())source.overviewBuildComplete=true;
+  if(isCurrent()){source.overviewBuildComplete=true;drawAudio();}
 }
 let activeWavePointer=null;
 function playPosition(){
@@ -2593,11 +2605,9 @@ controls.stop.addEventListener("click",()=>{
 window.addEventListener("resize",()=>{
   drawCurve();drawAudio();detailWaveEditor?.refresh(true);
   const source=state.source;
-  if(source&&overviewNeedsResample(source,$("#wave").width)){
-    if(source.overviewBinCount!==null)advanceOverviewBuildToken(source);
-    source.overviewBinCount=null;
-  }
-  const shouldResample=Boolean(source)&&source.overviewBinCount===null;
+  // Resize only redraws the existing source grid. A completed partial
+  // build may retry missing bins, without discarding any successful peak.
+  const shouldResample=overviewNeedsResample(source);
   if(state.overviewResizeTimer){clearTimeout(state.overviewResizeTimer);state.overviewResizeTimer=null;}
   if(!shouldResample)return;
   state.overviewResizeTimer=setTimeout(()=>{
@@ -2651,7 +2661,7 @@ async function load(file){
     previousSource?.dispose();
     state.offline=null;state.decoded={sampleRate:state.source.sampleRate};
     lab.job++;lab.worker?.terminate();lab.worker=null;lab.processed=null;
-    state.dry=null;state.overviewPeaks=Array.from({length:96},()=>null);
+    state.dry=null;state.overviewPeaks=null;
     state.seek=0;
     ab.a=0;ab.b=state.source.sourceFrames;ab.enabled=true;
     loopMarkers=[];
