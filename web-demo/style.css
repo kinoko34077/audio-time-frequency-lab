@@ -1558,19 +1558,28 @@ body.model-lab:not([data-legacy-tools="1"]) #main-player-panel #play-main{
   .gear{width:40px;height:40px;min-width:40px}
   .wave-detail-wrap>.wave-zoom-actions{top:20px;right:4px}
 }
+/* Reserve the complete inline field, not only its shortest value. The
+   numeric input can grow within its cell without encroaching on the rail. */
 body.model-lab:not([data-legacy-tools="1"]) .player-tune-control{
-  grid-template-columns:80px minmax(0,1fr) var(--player-tune-value-width,52px);
+  --player-tune-input-max:62px;
+  --player-tune-unit-width:30px;
+  --player-tune-value-width:calc(var(--player-tune-input-max) + var(--player-tune-unit-width) + 3px);
+  grid-template-columns:80px minmax(0,1fr) var(--player-tune-value-width);
   column-gap:6px
 }
+body.model-lab .player-tune-control>input[type=range]{
+  display:block;margin:0;box-sizing:border-box;width:100%;min-width:0;max-width:100%
+}
 body.model-lab:not([data-legacy-tools="1"]) .player-tune-control>.inline-number{
-  display:grid;grid-template-columns:max-content 30px;gap:3px;align-items:center;
-  justify-self:end;width:max-content;min-width:0
+  display:grid;grid-template-columns:minmax(0,1fr) var(--player-tune-unit-width);
+  gap:3px;align-items:center;justify-self:stretch;width:100%;min-width:0
 }
 body.model-lab:not([data-legacy-tools="1"]) .player-tune-control .player-tune-unit{
-  width:30px;min-width:30px
+  width:var(--player-tune-unit-width);min-width:0
 }
 body.model-lab:not([data-legacy-tools="1"]) .player-tune-control .inline-number input[type=number]{
-  height:32px;min-height:32px
+  height:32px;min-height:32px;min-width:0;max-width:100%;
+  box-sizing:border-box;justify-self:end
 }
 @media(max-width:650px){
   body.model-lab:not([data-legacy-tools="1"]) #audio-lab .model-extra-grid{

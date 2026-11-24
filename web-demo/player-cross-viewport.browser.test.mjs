@@ -282,12 +282,47 @@ test("real recorded waveform UX across mobile, Android-size, tablet and desktop 
             label+" is covered by another surface on "+profile.name+": "+
             JSON.stringify(hitTargets[label]));
         }
-        await page.evaluate(()=>{
-          const e=document.querySelector("#granular-speed-value");
-          e.value="-1.237";e.dispatchEvent(new Event("change",{bubbles:true}));
-          const p=document.querySelector("#granular-pitch-value");
-          p.value="7.1234";p.dispatchEvent(new Event("change",{bubbles:true}));
-        });
+        // Check the actual full inline group and the native slider hit area,
+        // not merely the centers of the input and aligned slider endpoints.
+        const tuningGeometry=()=>page.evaluate(()=>["speed","pitch"].map(kind=>{
+          const rail=document.querySelector("#granular-"+kind);
+          const input=document.querySelector("#granular-"+kind+"-value");
+          const group=input.closest(".inline-number");
+          const r=rail.getBoundingClientRect(),i=input.getBoundingClientRect();
+          const g=group.getBoundingClientRect(),u=group.querySelector(".player-tune-unit").getBoundingClientRect();
+          const row=rail.parentElement.getBoundingClientRect();
+          const x=r.right-2,y=r.top+r.height/2,hit=document.elementFromPoint(x,y);
+          return {kind,left:r.left,right:r.right,width:r.width,inputLeft:i.left,
+            inputRight:i.right,groupLeft:g.left,groupRight:g.right,unitLeft:u.left,
+            unitRight:u.right,rowRight:row.right,railHit:hit===rail};
+        }));
+        const baselineTuning=await tuningGeometry();
+        const tuningSamples=[];
+        for(const [speed,pitch] of [["8","12"],["-8","-12"],
+          ["-0.001","-0.001"],["1.237","7.1234"],["-1.237","7.1234"]]){
+          await page.evaluate(([speed,pitch])=>{
+            const e=document.querySelector("#granular-speed-value");
+            e.value=speed;e.dispatchEvent(new Event("change",{bubbles:true}));
+            const p=document.querySelector("#granular-pitch-value");
+            p.value=pitch;p.dispatchEvent(new Event("change",{bubbles:true}));
+          },[speed,pitch]);
+          tuningSamples.push(await tuningGeometry());
+        }
+        for(const pair of [baselineTuning,...tuningSamples])
+          for(const [index,g] of pair.entries()){
+            assert.ok(g.width>=24&&g.right+3<=g.groupLeft&&
+              g.groupLeft<=g.inputLeft+.25&&g.inputRight<=g.unitLeft+.25&&
+              g.unitRight<=g.groupRight+.25&&g.groupRight<=g.rowRight+.25,
+              "rail, numeric input and unit must have disjoint in-row boxes on "+
+                profile.name+": "+JSON.stringify(g));
+            assert.ok(g.railHit,"rail right edge must not be covered by the inline group: "+
+              profile.name+" "+JSON.stringify(g));
+            assert.ok(Math.abs(g.left-baselineTuning[index].left)<.25&&
+              Math.abs(g.right-baselineTuning[index].right)<.25,
+              "digits must not move the rail: "+profile.name+" "+JSON.stringify(g));
+          }
+        console.log("U03_TUNING_CLEARANCE "+JSON.stringify({profile:profile.name,
+          baseline:baselineTuning,precise:tuningSamples.at(-1)}));
         const typedWidths=await page.evaluate(()=>["#granular-speed-value",
           "#granular-pitch-value"].map(selector=>{
           const el=document.querySelector(selector),rect=el.getBoundingClientRect();
