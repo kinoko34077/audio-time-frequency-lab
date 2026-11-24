@@ -369,8 +369,32 @@ test("real recorded waveform UX across mobile, Android-size, tablet and desktop 
         await page.keyboard.press("Tab");
         assert.equal(await page.$eval("#granular-pitch-value",el=>el.value),"7.1234");
         assert.equal(await page.$eval("#vr-wheel-overlay",el=>el.hidden),true);
+        // A precise pre-existing value must survive opening the wheel
+        // even when its columns need horizontal scrolling on narrow screens.
+        await page.evaluate(()=>{
+          const p=document.querySelector("#granular-pitch-value");
+          p.value="-7.123456789012";p.dispatchEvent(new Event("change",{bubbles:true}));
+        });
+        await (profile.touch?page.tap("#granular-pitch-value"):page.click("#granular-pitch-value"));
+        await page.waitForSelector("#vr-wheel-overlay:not([hidden])");
+        const precision=await page.$eval(".vr-wheel-columns",el=>{
+          const tracks=[...el.querySelectorAll(".vr-wheel-track")];
+          el.scrollLeft=0;const start=el.getBoundingClientRect();
+          const first=tracks[0].getBoundingClientRect();
+          el.scrollLeft=el.scrollWidth;
+          const last=tracks.at(-1).getBoundingClientRect();
+          return {columns:tracks.length,firstVisible:first.left>=start.left-.5,
+            lastVisible:last.right<=start.right+.5};
+        });
+        assert.deepEqual(precision,{columns:15,firstVisible:true,lastVisible:true});
+        await page.click("[data-wheel-done]");
+        assert.equal(await page.$eval("#granular-pitch-value",el=>el.value),"-7.123456789012");
+        await page.evaluate(()=>{
+          const p=document.querySelector("#granular-pitch-value");
+          p.value="7.1234";p.dispatchEvent(new Event("change",{bubbles:true}));
+        });
         console.log("U04_SHARED_WHEEL "+JSON.stringify({profile:profile.name,
-          speed:"-1.237",pitch:"7.1234",cancel:true,commit:true,exactInput:true}));
+          speed:"-1.237",pitch:"7.1234",cancel:true,commit:true,exactInput:true,precision}));
         await page.evaluate(()=>{
           document.querySelector(".studio")?.scrollTo(0,0);
           window.scrollTo(0,0);
