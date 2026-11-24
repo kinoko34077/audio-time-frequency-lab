@@ -322,6 +322,77 @@ test('native browser decodes exact requested WAV PCM, loads the app without eage
     }
     assert.equal(reuse.reenabled.a,18001);
 
+    // Real browser canvas: force the decoder to wait while zooming, then
+    // inspect actual edge pixels during forward and reverse high-zoom pans.
+    const edgeAudit=await page.evaluate(async()=>{
+      const {createPlayerWaveEditor}=await import('./player-wave-editor.mjs');
+      const root=document.createElement('div');
+      root.style.cssText='position:fixed;left:-10000px;top:0;width:320px';
+      document.body.append(root);
+      const node=tag=>{const el=document.createElement(tag);root.append(el);return el;};
+      const canvas=node('canvas');
+      canvas.style.cssText='display:block;width:320px;height:120px';
+      const zoomIn=node('button'),zoomOut=node('button');
+      let position=30,release,readCount=0;
+      const held=new Promise(resolve=>{release=resolve;});
+      const source={sourceFrames:48000*120,maxReadFrames:32768,
+        overviewPeaks:Array.from({length:96},()=>[-.95,.95]),
+        async read(startFrame,frameCount){
+          readCount++;
+          await held;
+          return {startFrame,channels:[new Float32Array(frameCount).fill(.2)]};
+        }};
+      const editor=createPlayerWaveEditor({canvas,wrap:root,
+        overviewSelection:node('div'),markerA:node('button'),markerB:node('button'),
+        zoomIn,zoomOut,zoomLabel:node('span'),
+        getPosition:()=>position,onPosition:value=>{position=value;},
+        onStart:()=>{},onAB:()=>({a:0,b:source.sourceFrames,enabled:false}),
+        onScrubState:()=>{}});
+      const edgePixels=()=>{
+        const ctx=canvas.getContext('2d'),width=canvas.width,height=canvas.height;
+        return [2,width-3].map(x=>{
+          const data=ctx.getImageData(x,0,1,height).data;
+          let count=0;
+          for(let i=0;i<data.length;i+=4)
+            if(data[i+1]>130&&data[i+2]>120&&data[i+1]>data[i]+35)count++;
+          return count;
+        });
+      };
+      try{
+        editor.setSource(source,48000);
+        for(let i=0;i<10;i++)zoomIn.click();
+        const pending={busy:canvas.getAttribute('aria-busy'),pixels:edgePixels()};
+        release();
+        const until=performance.now()+5000;
+        while(canvas.getAttribute('aria-busy')!=='false'){
+          if(performance.now()>until)throw Error('fine edge read timeout');
+          await new Promise(resolve=>setTimeout(resolve,10));
+        }
+        // Allow the bounded guard read to settle before moving.
+        await new Promise(resolve=>setTimeout(resolve,100));
+        const span=editor.spanFrames,ready=edgePixels();
+        const scrub=[];
+        for(const direction of [1,-1]){
+          position=30+direction*span/4/48000;
+          editor.refresh(true);
+          scrub.push({direction,pixels:edgePixels(),busy:canvas.getAttribute('aria-busy')});
+        }
+        return {pending,ready,scrub,span,readCount};
+      }finally{
+        release();editor.setSource(null,48000);root.remove();
+      }
+    });
+    console.log('U01_REAL_CANVAS_EDGE '+JSON.stringify(edgeAudit));
+    assert.equal(edgeAudit.pending.busy,'true');
+    assert.deepEqual(edgeAudit.pending.pixels,[0,0],
+      'unread high-zoom edges must not draw coarse overview blocks');
+    for(const pixels of [edgeAudit.ready,...edgeAudit.scrub.map(s=>s.pixels)])
+      assert.ok(pixels.every(count=>count>0&&count<10),
+        'fine edge pixels must remain narrow and visible: '+JSON.stringify(pixels));
+    assert.ok(edgeAudit.scrub.every(s=>s.busy==='false'),
+      'short forward/reverse moves must be covered by fine guard data');
+
+
     assert.deepEqual(errors,[]);
   }finally{
     await cleanupTestProcesses(browser,[server],'progressive source test server');
