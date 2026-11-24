@@ -228,3 +228,39 @@ test("an in-flight seek preserves the processor failure after an asynchronous re
     bridge.dispose();
   });
 });
+
+test("latest A/B intent stays bounded and Loop OFF bypasses obsolete cold endpoints",async()=>{
+  await withFakeWorklet(async nodes=>{
+    let release=[];
+    const source=pcmSource((startFrame,frameCount)=>{
+      if(frameCount===8192)return new Promise(resolve=>{
+        release.push(()=>resolve(range(startFrame,frameCount)));
+      });
+      return Promise.resolve(range(startFrame,frameCount));
+    });
+    const bridge=await createSourcePCMBridge({ctx:context(),source,
+      sourceSampleRate:48_000,startFrame:10_000});
+    const node=nodes[0];
+    try{
+      const old=bridge.setLoopConfiguration(70_000,180_000,true);
+      await waitFor(()=>release.length===2);
+      const queued=bridge.setLoopConfiguration(80_000,190_000,true);
+      const latest=bridge.setLoopConfiguration(90_000,200_000,true);
+      assert.deepEqual(await queued,{stale:true});
+      const off=bridge.setLoopConfiguration(90_000,200_000,false);
+      assert.deepEqual(await latest,{stale:true});
+      await waitFor(()=>node.sent.some(m=>m.type==="loop-config"));
+      const sent=node.sent.filter(m=>m.type==="loop-config");
+      assert.equal(sent.length,1);
+      assert.deepEqual({a:sent[0].a,b:sent[0].b,enabled:sent[0].enabled},
+        {a:90_000,b:200_000,enabled:false});
+      assert.equal(release.length,2,"no queued obsolete endpoint reads");
+      node.port.onmessage({data:{type:"command-accepted",requestId:sent[0].requestId}});
+      assert.equal((await off).type,"command-accepted");
+      release.forEach(fn=>fn());
+      assert.deepEqual(await old,{stale:true});
+      assert.equal(node.sent.filter(m=>m.type==="loop-config").length,1,
+        "old cold result must not re-enable the loop");
+    }finally{release.forEach(fn=>fn());bridge.dispose();}
+  });
+});
