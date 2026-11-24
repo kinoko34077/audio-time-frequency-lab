@@ -310,8 +310,8 @@ test("zooming out across peak resolutions shows preview then refreshes from boun
       "zooming out must start a fresh bounded read immediately");
     const leftPreview=waveSegments.filter(segment=>segment.x===0).at(-1);
     const finePreview=waveSegments.filter(segment=>segment.x===160).at(-1);
-    assert.ok(leftPreview&&(leftPreview.y1+leftPreview.y2)/2>53,
-      "the newly exposed edge must remain visible during the refresh");
+    assert.equal(leftPreview,undefined,
+      "an unread edge must not magnify a coarse whole-track peak into a false detail block");
     assert.ok(finePreview&&(finePreview.y1+finePreview.y2)/2<52,
       "the cached fine waveform must remain as an immediate anti-flicker preview");
     const updateStarted=performance.now();
@@ -474,11 +474,8 @@ test("a moving detail viewport redirects the next waveform read to the current p
     created.setPosition(32);
     editor.refresh(true);
     const pendingRightEdge=created.waveSegments.filter(segment=>segment.x===319).at(-1);
-    assert.ok(pendingRightEdge,
-      "a coarse overview peak must remain visible at the unread detailed edge");
-    assert.ok((pendingRightEdge.y1+pendingRightEdge.y2)/2>53,
-      "the pending edge must show the coarse overview, not a false detailed waveform: "+
-        JSON.stringify(pendingRightEdge));
+    assert.equal(pendingRightEdge,undefined,
+      "unread detailed edges must not show an enlarged coarse overview block");
     releaseFirst();
     await waitForReadQuiet(source,reads);
     const newCenter=32*48_000;
@@ -673,6 +670,46 @@ test("source-edge viewports keep one peak resolution and leave out-of-source tim
     editor?.setSource(null,sampleRate);
     await waitForReadQuiet(source,reads);
     if(original)Object.defineProperty(globalThis,"devicePixelRatio",original);
+    else delete globalThis.devicePixelRatio;
+  }
+});
+
+test("high zoom prepares both edges and small forward/reverse scrubs reuse fine PCM",async()=>{
+  const reads=[],sourceFrames=48_000*120;
+  let activeReads=0;
+  const source={sourceFrames,maxReadFrames:32_768,
+    overviewPeaks:Array.from({length:96},()=>[-.95,.95]),
+    async read(startFrame,frameCount){
+      reads.push({startFrame,frameCount});activeReads++;
+      try{return {startFrame,channels:[new Float32Array(frameCount).fill(.2)]};}
+      finally{activeReads--;}
+    }};
+  Object.defineProperty(source,"activeReads",{get:()=>activeReads});
+  const ratio=Object.getOwnPropertyDescriptor(globalThis,"devicePixelRatio");
+  Object.defineProperty(globalThis,"devicePixelRatio",{configurable:true,value:1});
+  let rig;
+  try{
+    rig=makeEditor(source,30);
+    await waitForReadQuiet(source,reads);
+    for(let i=0;i<10;i++)rig.zoomIn.click();
+    await waitForReadQuiet(source,reads);
+    const span=rig.editor.spanFrames;
+    const before=reads.length;
+    for(const direction of [1,-1]){
+      rig.setPosition(30+direction*span/4/48_000);
+      rig.editor.refresh(true);
+      const left=rig.waveSegments.find(segment=>segment.x===0);
+      const right=rig.waveSegments.find(segment=>segment.x===319);
+      assert.ok(left&&right,"guarded detail must cover both edges");
+      assert.ok([left,right].every(segment=>segment.y2-segment.y1<4),
+        "do not paint coarse overview peaks at scrub edges");
+    }
+    await waitForReadQuiet(source,reads);
+    assert.ok(reads.slice(before).every(read=>read.frameCount<=32768));
+  }finally{
+    rig?.editor.setSource(null,48000);
+    await waitForReadQuiet(source,reads);
+    if(ratio)Object.defineProperty(globalThis,"devicePixelRatio",ratio);
     else delete globalThis.devicePixelRatio;
   }
 });
