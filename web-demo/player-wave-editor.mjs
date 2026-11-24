@@ -48,6 +48,7 @@ export function createPlayerWaveEditor({
   let channels=null,source=null,detailBuckets=new Map(),detailLevels=new Map(),
     detailBlockFrames=0;
   let detailPending=null,desiredDetailRange=null;
+  let detailUsesOverview=false;
   let detailFailedKey=null,detailRetriedKey=null;
   let detailRetryTimer=null,detailRevision=0;
   let contentRevision=0,renderedContentRevision=-1,scheduledRefresh=0;
@@ -123,7 +124,7 @@ export function createPlayerWaveEditor({
     if(detailRetryTimer!==null)clearTimeout(detailRetryTimer);
     detailRetryTimer=null;
     detailBuckets.clear();detailLevels.clear();detailBuckets=new Map();
-    detailBlockFrames=0;desiredDetailRange=null;
+    detailBlockFrames=0;desiredDetailRange=null;detailUsesOverview=false;
     detailPending=null;
     detailFailedKey=null;detailRetriedKey=null;detailRevision++;
     contentRevision++;
@@ -142,7 +143,7 @@ export function createPlayerWaveEditor({
   function boundsToX(frame,c,w){
     return w*(.5+(frame-c)/spanFrames);
   }
-  function sampledPeak(from,to,level){
+  function sampledPeak(from,to,level,detailCandidates){
     if(to<=from)return null;
     let low=1,high=-1;
     if(source){
@@ -151,10 +152,7 @@ export function createPlayerWaveEditor({
         // many bins per output pixel after zooming out. Try nearby cached
         // resolutions, but bound aggregation and fall back to the overview
         // instead of scanning an unbounded cache range on every paint.
-        const candidates=[...detailLevels.keys()].sort((a,b)=>
-          Math.abs(Math.log2(a/detailBlockFrames))-
-          Math.abs(Math.log2(b/detailBlockFrames)));
-        for(const blockFrames of candidates){
+        for(const blockFrames of detailCandidates){
           const buckets=detailLevels.get(blockFrames);
           const begin=Math.floor(from/blockFrames);
           const end=Math.floor((to-1)/blockFrames);
@@ -168,11 +166,13 @@ export function createPlayerWaveEditor({
           }
           if(complete)return [levelLow,levelHigh];
         }
-        // Keep an existing absolute-source raster/overview visible while the
-        // active-resolution detail read fills its cache.
       }
       if(source.overviewPeaks?.length){
         const peaks=source.overviewPeaks;
+        // A whole-track peak is not a detailed sample. Never magnify a
+        // coarse envelope into a block at a missing high-resolution edge.
+        if(!detailUsesOverview&&Math.ceil(frames/peaks.length)>detailBlockFrames)
+          return null;
         const begin=clamp(Math.floor(from*peaks.length/frames),0,peaks.length-1);
         const end=clamp(Math.floor((to-1)*peaks.length/frames),begin,peaks.length-1);
         let hasPeak=false;
@@ -236,29 +236,20 @@ export function createPlayerWaveEditor({
       }
       detailBlockFrames=requestedBlockFrames;detailBuckets=buckets;
       signalDirtyRanges.clear();
-      // updateSignalBuffer stretches the previous raster while a new zoom
-      // level is loading. If this resolution is already cached, repaint its
-      // visible absolute-source buckets immediately so the preview does not
-      // remain stretched after requestDetail's complete-cache fast path.
-      const visibleStart=Math.max(0,Math.floor(center()-spanFrames/2));
-      const visibleEnd=Math.min(frames,Math.ceil(center()+spanFrames/2));
-      const firstVisibleBucket=Math.floor(visibleStart/requestedBlockFrames);
-      const afterVisibleBucket=Math.ceil(visibleEnd/requestedBlockFrames);
-      for(let bucket=firstVisibleBucket;bucket<afterVisibleBucket;bucket++){
-        if(!detailBuckets.has(bucket))continue;
-        const bucketStart=bucket*requestedBlockFrames;
-        markSignalDirty("cached-resolution:"+requestedBlockFrames+":"+bucket,
-          bucketStart,Math.min(frames,bucketStart+requestedBlockFrames));
-      }
+      // The prior raster may contain a coarser level. Repaint at the
+      // current scale rather than stretch those pixels into visible blocks.
+      signalNeedsFullPaint=true;
       detailFailedKey=null;detailRetriedKey=null;
     }else if(!detailLevels.has(detailBlockFrames)){
       detailBuckets=new Map();detailLevels.set(detailBlockFrames,detailBuckets);
     }
     const blockFrames=detailBlockFrames;
-    const summaryStart=Math.floor(from/blockFrames)*blockFrames;
-    const summaryEnd=Math.min(frames,
-      Math.ceil(to/blockFrames)*blockFrames);
-    if(summaryEnd-summaryStart>readFrames*DETAIL_MAX_READS){
+    const visibleStart=Math.floor(from/blockFrames)*blockFrames;
+    const visibleEnd=Math.min(frames,Math.ceil(to/blockFrames)*blockFrames);
+    const overviewOnly=visibleEnd-visibleStart>readFrames*DETAIL_MAX_READS;
+    if(overviewOnly!==detailUsesOverview)signalNeedsFullPaint=true;
+    detailUsesOverview=overviewOnly;
+    if(overviewOnly){
       // Wide zoom uses the whole-track overview. Stop the old bounded read
       // after its current chunk and keep cached detail available for a later
       // zoom-in. sampledPeak falls back to overview for wide pixels.
@@ -267,6 +258,13 @@ export function createPlayerWaveEditor({
       detailFailedKey=null;detailRetriedKey=null;
       return;
     }
+    // At high zoom, decode a bounded guard on both sides before it enters
+    // the viewport. Center-first tile selection still favors visible pixels.
+    const guard=spanFrames<=2*readFrames?Math.min(readFrames,
+      Math.max(64,Math.min(maxSummaryBins,
+        Math.ceil((visibleEnd-visibleStart)/blockFrames/2)))*blockFrames):0;
+    const summaryStart=Math.max(0,visibleStart-guard);
+    const summaryEnd=Math.min(frames,visibleEnd+guard);
     if(detailFailedKey&&detailFailedKey!==key){
       detailFailedKey=null;detailRetriedKey=null;
     }
@@ -452,6 +450,10 @@ export function createPlayerWaveEditor({
     const start=c-spanFrames/2,samplesPerPixel=spanFrames/width;
     const level=levels&&samplesPerPixel>=256?
       levels.slice().reverse().find(x=>x.block<=samplesPerPixel*1.6)||levels[0]:null;
+    const detailCandidates=source?[...detailLevels.keys()]
+      .filter(block=>detailUsesOverview||block<=detailBlockFrames)
+      .sort((a,b)=>Math.abs(Math.log2(a/detailBlockFrames))-
+        Math.abs(Math.log2(b/detailBlockFrames))):[];
     context.strokeStyle="#75d9c5";context.lineWidth=Math.max(1,ratio);
     context.beginPath();
     for(let x=fromX;x<toX;x++){
@@ -462,7 +464,7 @@ export function createPlayerWaveEditor({
       if(pixelEnd<=0||pixelStart>=frames)continue;
       const from=clamp(Math.floor(pixelStart),0,frames-1);
       const to=clamp(Math.ceil(pixelEnd),from+1,frames);
-      const peak=sampledPeak(from,to,level);
+      const peak=sampledPeak(from,to,level,detailCandidates);
       if(!peak||(peak[0]===0&&peak[1]===0))continue;
       const [lo,hi]=peak;
       const y1=height/2-hi*height*.40,y2=height/2-lo*height*.40;
@@ -492,7 +494,9 @@ export function createPlayerWaveEditor({
     const {signal,shift}=buffers;
     const dimensionsChanged=signalWidth!==width||signalHeight!==height;
     const spanChanged=signalSpan!==spanFrames;
-    const canZoomPreview=spanChanged&&!dimensionsChanged&&
+    // Zooming in must not stretch a lower-resolution raster. Zoom-out
+    // may reuse it only where the same cached detail grid remains valid.
+    const canZoomPreview=spanChanged&&spanFrames>signalSpan&&!dimensionsChanged&&
       Number.isFinite(signalFrame)&&signalSpan>0&&!signalNeedsFullPaint;
     if(canZoomPreview){
       shift.clearRect(0,0,width,height);
@@ -510,7 +514,7 @@ export function createPlayerWaveEditor({
         drawSignal(signal,width,height,c,ratio,rightStart,width);
       }else drawSignal(signal,width,height,c,ratio);
       signalFrame=c;signalSpan=spanFrames;
-    }else if(baseChanged||dimensionsChanged||!Number.isFinite(signalFrame)){
+    }else if(baseChanged||spanChanged||dimensionsChanged||!Number.isFinite(signalFrame)){
       signal.clearRect(0,0,width,height);
       drawSignal(signal,width,height,c,ratio);
       signalFrame=c;signalWidth=width;signalHeight=height;
@@ -584,6 +588,17 @@ export function createPlayerWaveEditor({
       const start=c-spanFrames/2;
       const visibleStart=Math.max(0,start),visibleEnd=Math.min(frames,start+spanFrames);
       if(visibleEnd>visibleStart)requestDetail(visibleStart,visibleEnd);
+      // Missing high-resolution PCM is loading, not silence or a fabricated
+      // coarse envelope. Keep the true time coordinates while it arrives.
+      let detailReady=true;
+      if(source&&!detailUsesOverview&&detailBlockFrames>0){
+        const first=Math.floor(visibleStart/detailBlockFrames);
+        const after=Math.ceil(visibleEnd/detailBlockFrames);
+        for(let bucket=first;bucket<after;bucket++){
+          if(!detailBuckets.has(bucket)){detailReady=false;break;}
+        }
+      }
+      canvas.setAttribute("aria-busy",String(!detailReady));
       const buffers=ensureSignalCanvases(width,height);
       if(contentChanged&&!signalNeedsFullPaint&&!signalDirtyRanges.size)
         signalNeedsFullPaint=true;
