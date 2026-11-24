@@ -1874,8 +1874,8 @@ async function play(mode="wet",offset=null){
                ab.enabled===waiting.requested.enabled){
               player.loopAwaitingRender=null;
               $("#player-loop-hint").textContent=data.running?
-                "区間設定を音声ブロックに反映しました。":
-                "区間設定を音声ブロックに反映しました（停止中）。";
+                "区間設定の音声ブロックへの反映が完了しました。":
+                "区間設定の音声ブロックへの反映が完了しました（停止中）。";
             }
           }
           if(granularActive&&state.player?.pcmBridge===bridge){
@@ -1890,6 +1890,9 @@ async function play(mode="wet",offset=null){
               status.dataset.renderSpeed=String(data.speed);
               status.dataset.renderFrame=String(data.sourceFrame);
               status.dataset.renderRunning=String(data.running);
+              status.dataset.renderLoopStart=String(data.loopStartFrame);
+              status.dataset.renderLoopEnd=String(data.loopEndFrame);
+              status.dataset.renderLoopEnabled=String(data.loopEnabled);
               const matchesSelection=rendererMatchesSelection({
                 processingMode:data.processingMode,
                 selectedMode:mode==="player"?lab.mode:activeSynthMode,
