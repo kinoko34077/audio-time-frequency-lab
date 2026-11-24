@@ -6,6 +6,7 @@ import {createProgressiveAudioSource} from "./progressive-audio-source.mjs";
 import {advanceOverviewBuildToken,overviewBinCount,overviewNeedsResample,readOverviewPeaks} from "./waveform-range-peaks.mjs";
 import {returnToPlaySpeed,scrubSpeed,releaseScrubSpeed,scaleScrubInertia,scrubReturnDuration} from "./scrub-kinetics.mjs";
 import {createPlayerWaveEditor} from "./player-wave-editor.mjs";
+import {createDigitWheelPicker} from "./vendor/frequency-warp-ui/digit-wheel-picker.mjs";
 import {toggleSourceMarker} from "./player-ab-markers.mjs";
 import {primaryModelCapability,isContinuousPCMModel} from "./model-route.mjs";
 import {validatePlaybackSpeed,validateSpeedRailRange,speedOnRail,formatPlaybackSpeed} from "./source-timeline.mjs";
@@ -373,11 +374,48 @@ if(PLAYER_GRANULAR_AVAILABLE){
     controls.dry.textContent="▶ 粒状音程（実験）";
     controls.dry.title="以前の実験ルートと同一の独立音程再生。";
   }
+  // The Frequency Warp wheel owns the entire digit/scroll/cancel lifecycle.
+  // This adapter only supplies Audio Lab's existing parameter meaning.
+  const wheel=createDigitWheelPicker({onValue:(kind,value)=>{
+    if(!Number.isFinite(value)||Math.abs(value)>(kind==="speed"?8:12))return false;
+    editGranular(kind,String(value));return true;
+  }});
+  const wheelPlaces=(kind,value)=>{
+    const [mantissa,exponent="0"]=String(Math.abs(value)).split("e");
+    const decimalPlaces=(mantissa.split(".")[1]?.length??0)-Number(exponent);
+    const precision=Math.min(12,Math.max(4,decimalPlaces));
+    return [...(kind==="pitch"?[1,0]:[0]),
+      ...Array.from({length:precision},(_,i)=>-i-1)];
+  };
   for(const k of ["speed","pitch"]){
     const slider=$("#granular-"+k),input=$("#granular-"+k+"-value");
     slider.addEventListener("input",()=>editGranular(k,slider.value));
     input.addEventListener("input",()=>{input.setCustomValidity("");fitInlineNumber(input);});
     input.addEventListener("change",()=>editGranular(k,input.value));
+    if(document.body.dataset.legacyTools==="1")continue;
+    input.setAttribute("aria-haspopup","dialog");
+    input.setAttribute("aria-controls","vr-wheel-overlay");
+    input.setAttribute("aria-expanded","false");
+    input.title="タップ・クリックで桁ロール。Tabで数値入力、Alt+↓で桁ロール";
+    const openWheel=()=>{
+      if(input.disabled||wheel.isOpen())return;
+      wheel.open({key:k,label:k==="speed"?"速度":"音程",
+        value:granular[k],places:wheelPlaces(k,granular[k]),
+        signed:true,trigger:input});
+    };
+    // Pointer input opens the wheel, not the native on-screen keyboard.
+    // Keyboard focus/typing remains an exact-value route (no rounding).
+    input.addEventListener("pointerdown",event=>{
+      if(event.button===0&&!event.shiftKey)event.preventDefault();
+    });
+    input.addEventListener("click",event=>{
+      if(!event.shiftKey){event.preventDefault();openWheel();}
+    });
+    input.addEventListener("keydown",event=>{
+      if(event.altKey&&event.key==="ArrowDown"){
+        event.preventDefault();openWheel();
+      }
+    });
   }
   $("#granular-range").addEventListener("change",e=>{
     granular.railMax=validateSpeedRailRange(Number(e.target.value));
