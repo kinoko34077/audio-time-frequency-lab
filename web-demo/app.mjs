@@ -455,29 +455,43 @@ function refreshAB(){
 function syncLoopToPlayer(player=state.player){
   if((!player?.pcmBridge&&!player?.labStream)||player.initializing)return;
   const requested={a:ab.a,b:ab.b,enabled:ab.enabled};
-  if(!player.loopBusy&&!player.pendingLoop&&player.appliedLoop?.a===requested.a&&
-     player.appliedLoop?.b===requested.b&&
-     player.appliedLoop?.enabled===requested.enabled)return;
+  if(!player.loopBusy&&!player.pendingLoop&&player.acceptedLoop?.a===requested.a&&
+     player.acceptedLoop?.b===requested.b&&
+     player.acceptedLoop?.enabled===requested.enabled)return;
   player.pendingLoop=requested;
+  if(player.pcmBridge&&!player.labStream){
+    player.loopAwaitingRender=null;
+    $("#player-loop-hint").textContent="区間設定を準備中です。";
+  }
   if(player.loopBusy)return;
   player.loopBusy=true;
   void (async()=>{
     while(state.player===player&&player.pendingLoop){
       const requested=player.pendingLoop;
       player.pendingLoop=null;
+      let receipt=null;
       if(player.labStream){
         await player.stream.updateLoop(requested);
       }else{
-        await player.pcmBridge.setLoopConfiguration(
+        receipt=await player.pcmBridge.setLoopConfiguration(
           requested.a,requested.b,requested.enabled);
       }
       if(state.player!==player)return;
-      player.appliedLoop=requested;
+      if(receipt?.stale){
+        // A superseded asynchronous request is not an accepted loop state.
+        player.acceptedLoop=null;
+        if(player.pendingLoop)continue;
+        throw Error("区間設定が別の操作で上書きされました");
+      }
+      player.acceptedLoop=requested;
+      if(!player.labStream&&!player.pendingLoop){
+        player.loopAwaitingRender={requested,revision:receipt.revision};
+        $("#player-loop-hint").textContent="区間設定を受理しました。音声ブロックへの反映待ちです。";
+      }
     }
-    if(state.player===player)
-      $("#player-loop-hint").textContent=player.labStream?
-        "A/B区間を研究モデルの共通PCM時計へ反映しました。":
-        "区間の音声処理への反映が完了しました。";
+    if(state.player===player&&player.labStream)
+      $("#player-loop-hint").textContent=
+        "A/B区間を研究モデルの共通PCM時計へ反映しました。";
   })().catch(error=>{
     if(state.player===player){
       $("#player-loop-hint").textContent="区間変更が反映されません: "+error.message;
@@ -1848,6 +1862,21 @@ async function play(mode="wet",offset=null){
             const player=state.player;
             if(!player.lastAppliedFrame||data.revision>=player.lastAppliedFrame.revision)
               player.lastAppliedFrame={revision:data.revision,frame:data.sourceFrame};
+            // A later speed/pitch command can supersede the loop-specific
+            // receipt while retaining its bounds. Observe the actual loop
+            // snapshot in the rendered block, not just a command identifier.
+            const waiting=player.loopAwaitingRender;
+            if(waiting&&data.revision>=waiting.revision&&
+               data.loopStartFrame===waiting.requested.a&&
+               data.loopEndFrame===waiting.requested.b&&
+               data.loopEnabled===waiting.requested.enabled&&
+               ab.a===waiting.requested.a&&ab.b===waiting.requested.b&&
+               ab.enabled===waiting.requested.enabled){
+              player.loopAwaitingRender=null;
+              $("#player-loop-hint").textContent=data.running?
+                "区間設定の音声ブロックへの反映が完了しました。":
+                "区間設定の音声ブロックへの反映が完了しました（停止中）。";
+            }
           }
           if(granularActive&&state.player?.pcmBridge===bridge){
             const status=$("#granular-optin-status");
@@ -1861,6 +1890,9 @@ async function play(mode="wet",offset=null){
               status.dataset.renderSpeed=String(data.speed);
               status.dataset.renderFrame=String(data.sourceFrame);
               status.dataset.renderRunning=String(data.running);
+              status.dataset.renderLoopStart=String(data.loopStartFrame);
+              status.dataset.renderLoopEnd=String(data.loopEndFrame);
+              status.dataset.renderLoopEnabled=String(data.loopEnabled);
               const matchesSelection=rendererMatchesSelection({
                 processingMode:data.processingMode,
                 selectedMode:mode==="player"?lab.mode:activeSynthMode,
@@ -1926,17 +1958,17 @@ async function play(mode="wet",offset=null){
       const sameLoop=(x,y)=>x.a===y.a&&x.b===y.b&&x.enabled===y.enabled;
       for(let pass=0;granularActive&&pass<8&&!sameLoop(installedLoop,ab);pass++){
         const requested={...ab};
-        await bridge.setLoopBounds(requested.a,requested.b);
+        const receipt=await bridge.setLoopConfiguration(
+          requested.a,requested.b,requested.enabled);
         if(launchEpoch!==state.transportEpoch||state.player!==player)return;
-        await bridge.setLoopEnabled(requested.enabled);
-        if(launchEpoch!==state.transportEpoch||state.player!==player)return;
+        if(receipt?.stale)continue;
         installedLoop=requested;
       }
       // UI text edits are finite events. If repeatedly interrupted, stop
       // rather than falsely claiming the first audible quantum uses latest A/B.
       if(granularActive&&!sameLoop(installedLoop,ab))
         throw Error("区間変更が連続したため開始位置を確定できません。操作後に再生してください。");
-      player.appliedLoop=installedLoop;
+      player.acceptedLoop=installedLoop;
       // If the user scrubbed while the AudioWorklet was registering, the
       // latest source location must be in the Worklet BEFORE audio starts.
       // No outdated grain may be emitted as the first audible quantum.
@@ -3227,7 +3259,7 @@ async function startModelPlayback(offset=null,appliedOverride=null){
     player={labStream:true,stream,mode:"wet",appliedLabMode:applied.mode,
       appliedConfig:applied,offset:where,at:ctx.currentTime,
       sourceTimeRate:applied.speed,master:stream.master,
-      appliedLoop:{a:ab.a,b:ab.b||sourceFrames(),
+      acceptedLoop:{a:ab.a,b:ab.b||sourceFrames(),
         enabled:ab.enabled}};
     state.player=player;controls.stop.disabled=false;
     refreshAB();

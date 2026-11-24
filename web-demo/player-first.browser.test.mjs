@@ -324,6 +324,12 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, open
       ?.textContent.includes("反映が完了"),{timeout:20000});
     assert.equal(await page.$eval("#player-loop-a",el=>el.value),"8000");
     assert.equal(await page.$eval("#player-loop-b",el=>el.value),"12000");
+    const renderedLoop=await page.$eval("#granular-optin-status",el=>({
+      a:Number(el.dataset.renderLoopStart),b:Number(el.dataset.renderLoopEnd),
+      enabled:el.dataset.renderLoopEnabled
+    }));
+    assert.deepEqual(renderedLoop,{a:8000,b:12000,enabled:"true"},
+      "completion must describe the latest interval in a real output block");
     // Voice Memos / AudioStretch interaction: a stationary central head,
     // a separately navigable overview, and zoomed sound under the finger.
     const centerAlignment=await page.$eval(".wave-center-head",el=>{
@@ -607,6 +613,8 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, open
     }
     assert.equal(await page.$eval("#granular-speed-value",el=>el.value),"-1.125");
     assert.equal(await page.$eval("#player-loop-enabled",el=>el.checked),false);
+    assert.equal(await page.$eval("#granular-optin-status",el=>el.dataset.renderLoopEnabled),
+      "false","loop-off completion must match an actual rendered block");
     assert.equal(await page.$eval("#rt-telemetry",el=>Number(el.dataset.pcmNodeStarts)),starts);
     // R4 sample-accurate range: the detailed editor must reach the very
     // last decoded source frame, not the old 1ms legacy seek cutoff.
