@@ -1,28 +1,31 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {overviewBinCount,overviewNeedsResample,readOverviewPeak} from "./waveform-range-peaks.mjs";
+import {overviewBinCount,overviewNeedsResample,readOverviewPeak,readOverviewPeaks} from "./waveform-range-peaks.mjs";
 
-test("overview resolution follows physical display pixels within a bounded range",()=>{
+test("overview grid belongs to source length, not display size",()=>{
   assert.equal(overviewBinCount(740),740);
   assert.equal(overviewBinCount(240),240);
   assert.equal(overviewBinCount(4096),2048);
+  assert.equal(overviewBinCount(48_000*3600),2048);
 });
 
-test("same-resolution resize leaves an incomplete overview scan running",async()=>{
-  const source={overviewBinCount:740,overviewPeaks:Array(740).fill(null)};
-  assert.equal(overviewNeedsResample(source,740),false);
-  assert.equal(overviewNeedsResample(source,741),true);
+test("resize does not restart an incomplete overview scan",()=>{
+  const source={sourceFrames:4096,overviewBinCount:2048,
+    overviewPeaks:Array(2048).fill(null),overviewBuildComplete:false};
+  assert.equal(overviewNeedsResample(source,390),false);
+  assert.equal(overviewNeedsResample(source,844),false);
 });
 
-test("same-resolution resize retries bins left blank by completed read failures",()=>{
-  const source={overviewBinCount:740,overviewBuildComplete:true,
-    overviewPeaks:Array(740).fill(null)};
+test("completed partial overview retries only if bins remain missing",()=>{
+  const source={sourceFrames:4096,overviewBinCount:2048,overviewBuildComplete:true,
+    overviewPeaks:Array(2048).fill(null)};
   source.overviewPeaks[12]=[-.5,.5];
-  assert.equal(overviewNeedsResample(source,740),true);
-  source.overviewPeaks[13]=[-.25,.25];
-  assert.equal(overviewNeedsResample(source,740),true);
-  source.overviewPeaks=Array(740).fill(null).map(()=>[-.1,.1]);
-  assert.equal(overviewNeedsResample(source,740),false);
+  assert.equal(overviewNeedsResample(source,390),true);
+  assert.equal(overviewNeedsResample(source,844),true);
+  source.overviewPeaks=Array.from({length:2048},()=>[-.1,.1]);
+  assert.equal(overviewNeedsResample(source,390),false);
+  assert.equal(overviewNeedsResample(source,844),false);
+  assert.equal(overviewNeedsResample({sourceFrames:4096},390),true);
 });
 
 test("advancing the overview generation cancels a pending bounded read immediately",async()=>{
@@ -43,7 +46,7 @@ test("advancing the overview generation cancels a pending bounded read immediate
   await readStarted;
   advanceOverviewBuildToken(source);
   releaseRead();
-  assert.equal(await peak,null,"a resized overview must abandon the previous pixel range");
+  assert.equal(await peak,null,"a replaced source generation must abandon the previous read");
   assert.equal(readCount,1,"cancellation must stop before requesting the next PCM chunk");
 });
 
@@ -70,4 +73,21 @@ test("overview peak contains only the source frames assigned to its display bin"
     {startFrame:140,frameCount:40,priority:"waveform"},
     {startFrame:180,frameCount:20,priority:"waveform"}
   ],"the complete half-open source bin must be read in bounded contiguous ranges");
+});
+
+test("batched overview reads exact uneven bins in one bounded contiguous scan",async()=>{
+  const samples=Float32Array.from([.1,.2,.3,-.4,.5,.6,-.7,.8,.9,-1,.25]);
+  const reads=[];
+  const source={sourceFrames:samples.length,maxReadFrames:4,
+    async read(startFrame,frameCount){
+      reads.push([startFrame,frameCount]);
+      return {startFrame,channels:[samples.slice(startFrame,startFrame+frameCount)]};
+    }};
+  const expected=[];
+  for(let bin=0;bin<4;bin++){
+    expected.push(await readOverviewPeak(source,bin,4));
+  }
+  reads.length=0;
+  assert.deepEqual(await readOverviewPeaks(source,0,4,4),expected);
+  assert.deepEqual(reads,[[0,4],[4,4],[8,3]]);
 });
