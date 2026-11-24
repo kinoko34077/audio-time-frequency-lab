@@ -261,6 +261,67 @@ test('native browser decodes exact requested WAV PCM, loads the app without eage
     assert.equal(superseded.enabledReceipts,0);
     assert.ok(superseded.rms>.001,'held obsolete endpoint must not silence current PCM');
 
+    // Measure the actual decoder+bridge path without artificial delays.
+    const reuse=await page.evaluate(async encoded=>{
+      const bytes=Uint8Array.from(atob(encoded),ch=>ch.charCodeAt(0));
+      const {createProgressiveAudioSource}=await import('./progressive-audio-source.mjs');
+      const {createSourcePCMBridge}=await import('./source-pcm-bridge.mjs');
+      const source=await createProgressiveAudioSource(new File([bytes],
+        'progressive-probe.mp3',{type:'audio/mpeg'}));
+      const ctx=new AudioContext({sampleRate:source.sampleRate});
+      let bridge;
+      const reads=[],receipts=new Map();
+      const reader={sourceFrames:source.sourceFrames,channelCount:source.channelCount,
+        async read(start,count,options){
+          if(options?.windowFrames===8192)reads.push({start,count});
+          return source.read(start,count,options);
+        }};
+      try{
+        bridge=await createSourcePCMBridge({ctx,source:reader,
+          sourceSampleRate:source.sampleRate,startFrame:30000,speed:0,
+          processingMode:'pv',onEvent:e=>{
+            if(e.type==='render-applied')receipts.set(e.requestId,e);
+          }});
+        const analyser=ctx.createAnalyser();
+        analyser.fftSize=1024;
+        bridge.connect(analyser);analyser.connect(ctx.destination);
+        await bridge.play();
+        const measure=async(a,b,enabled=true)=>{
+          const count=reads.length,t=performance.now();
+          const ack=await bridge.setLoopConfiguration(a,b,enabled);
+          const acceptedMs=performance.now()-t;
+          const deadline=performance.now()+3000;
+          while(!receipts.has(ack.requestId)){
+            if(performance.now()>deadline)throw Error('loop render receipt timed out');
+            await new Promise(resolve=>setTimeout(resolve,1));
+          }
+          const render=receipts.get(ack.requestId);
+          return {reads:reads.slice(count),acceptedMs,renderMs:performance.now()-t,
+            missing:render.missingFramesInBlock,a:render.loopStartFrame,
+            b:render.loopEndFrame,enabled:render.loopEnabled,running:render.running};
+        };
+        const b=source.sourceFrames;
+        const initial=await measure(0,b);
+        const changed=await measure(18000,b);
+        const nearby=await measure(18001,b);
+        await measure(18001,b,false);
+        const reenabled=await measure(18001,b);
+        return {initial,changed,nearby,reenabled,b};
+      }finally{bridge?.dispose();source.dispose();await ctx.close();}
+    },mp3);
+    console.log('COMPRESSED_ENDPOINT_REUSE '+JSON.stringify(reuse));
+    assert.equal(reuse.initial.reads.length,2);
+    assert.equal(reuse.changed.reads.length,1);
+    assert.equal(reuse.nearby.reads.length,0);
+    assert.equal(reuse.reenabled.reads.length,0);
+    for(const result of [reuse.initial,reuse.changed,reuse.nearby,reuse.reenabled]){
+      assert.equal(result.b,reuse.b);
+      assert.equal(result.enabled,true);
+      assert.equal(result.running,true);
+      assert.equal(result.missing,0);
+    }
+    assert.equal(reuse.reenabled.a,18001);
+
     assert.deepEqual(errors,[]);
   }finally{
     await cleanupTestProcesses(browser,[server],'progressive source test server');
