@@ -130,7 +130,7 @@ test("native Chrome experimental source-PCM AudioWorklet renders and loops witho
       // The standard PV player uses a progressive PCM reader. An A/B edit
       // should decode only small endpoint windows, not two full playback
       // windows (65,536 frames each).
-      const loopReads=[];
+      const loopReads=[],loopRenderReceipts=[];
       const progressive={sourceFrames:48000*20,channelCount:1,
         async read(startFrame,frameCount,options={}){
           loopReads.push({startFrame,frameCount,windowFrames:options.windowFrames});
@@ -140,7 +140,9 @@ test("native Chrome experimental source-PCM AudioWorklet renders and loops witho
         }};
       const pvLoop=await createSourcePCMBridge({ctx,source:progressive,
         sourceSampleRate:48000,startFrame:200000,speed:1,
-        processingMode:"pv"});
+        processingMode:"pv",onEvent:event=>{
+          if(event.type==="render-applied")loopRenderReceipts.push(event);
+        }});
       pvLoop.connect(analyser);
       await pvLoop.play();
       await new Promise(resolve=>setTimeout(resolve,35));
@@ -151,6 +153,8 @@ test("native Chrome experimental source-PCM AudioWorklet renders and loops witho
       const endpointReads=loopReads.slice(loopReadStart,loopReadStart+2);
       await new Promise(resolve=>setTimeout(resolve,80));
       const pvLoopState=pvLoop.latest;
+      const pvLoopRender=loopRenderReceipts.find(event=>
+        event.requestId===loopEdit.requestId);
       await pvLoop.pause();
       pvLoop.dispose();
       await player.pause();
@@ -241,7 +245,7 @@ test("native Chrome experimental source-PCM AudioWorklet renders and loops witho
       return {
         first,loop,rms,stable,loopMissing,transitions,afterDispose,
         progressiveLoop:{endpointReads,latencyMs:loopEditLatencyMs,
-          command:loopEdit,state:pvLoopState},
+          command:loopEdit,state:pvLoopState,render:pvLoopRender},
         rust:{freeze:rustFreeze,freezePCM:rustFreezePCM,rms:rustFreezePCM.rms,loop:rustLoop,
           frequency:rustFreezePCM.frequency,freezeRms:rustFreezePCM.rms,
           forwardPCM:rustForwardPCM,reverse:rustReverse,
@@ -309,6 +313,14 @@ test("native Chrome experimental source-PCM AudioWorklet renders and loops witho
     assert.equal(evidence.progressiveLoop.command.loopStartFrame,48000,
       evidence.progressiveLoop);
     assert.equal(evidence.progressiveLoop.command.loopEndFrame,96000,
+      evidence.progressiveLoop);
+    assert.equal(evidence.progressiveLoop.render?.loopStartFrame,48000,
+      evidence.progressiveLoop);
+    assert.equal(evidence.progressiveLoop.render?.loopEndFrame,96000,
+      evidence.progressiveLoop);
+    assert.equal(evidence.progressiveLoop.render?.loopEnabled,true,
+      evidence.progressiveLoop);
+    assert.equal(evidence.progressiveLoop.render?.running,true,
       evidence.progressiveLoop);
     assert.equal(evidence.progressiveLoop.state?.loopEnabled,true,
       evidence.progressiveLoop);
