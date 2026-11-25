@@ -180,7 +180,7 @@ test("real recorded waveform UX across mobile, Android-size, tablet and desktop 
                 getComputedStyle(icon).visibility!=="hidden"&&
                 getComputedStyle(stroke).stroke!=="none");
             })(),
-            speedLabel:box(".player-tune-control:first-child .player-tune-labels > label:first-child"),
+            speedLabel:box("#granular-speed-label"),
             pitchLabel:box(".player-tune-control:nth-child(2) > label"),
             play:box("#play-main"),speed:box("#granular-speed-value"),
             pitch:box("#granular-pitch-value"),
@@ -397,6 +397,49 @@ test("real recorded waveform UX across mobile, Android-size, tablet and desktop 
         });
         console.log("U04_SHARED_WHEEL "+JSON.stringify({profile:profile.name,
           speed:"-1.237",pitch:"7.1234",cancel:true,commit:true,exactInput:true,precision}));
+        // The old visible range select is gone; the speed label and exact
+        // value use the same menu as inherited snap controls.
+        assert.ok(geometry.speedLabel.width<=34,"range selector must not reserve label width");
+        assert.equal(await page.evaluate(()=>document.querySelector("#granular-range")),null);
+        await page.click("#granular-speed-label",{button:"right"});
+        assert.deepEqual(await page.evaluate(()=>[...document.querySelectorAll("#fw-unit-snap-menu button")].map(e=>[e.textContent,e.getAttribute("aria-checked")])),
+          [["±1倍","false"],["±2倍","true"],["±4倍","false"],["±8倍","false"]]);
+        await page.click("#fw-unit-snap-menu button:nth-child(1)");
+        assert.equal(await page.$eval("#granular-speed",el=>el.max),"1");
+        assert.equal(await page.$eval("#granular-speed",el=>el.value),"-1");
+        assert.equal(await page.$eval("#granular-speed-value",el=>el.value),"-1.237");
+        if(profile.touch){
+          await page.$eval("#granular-speed-value",el=>el.scrollIntoView({block:"center"}));
+          const point=await page.$eval("#granular-speed-value",el=>{
+            const r=el.getBoundingClientRect();return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)};
+          });
+          const touch=await page.createCDPSession();
+          try{
+            await touch.send("Input.dispatchTouchEvent",{type:"touchStart",touchPoints:[{...point,id:1}]});
+            await page.waitForSelector("#fw-unit-snap-menu:not([hidden])",{timeout:2500});
+            await touch.send("Input.dispatchTouchEvent",{type:"touchEnd",touchPoints:[]});
+            await new Promise(resolve=>setTimeout(resolve,80));
+          }finally{await touch.detach();}
+        }else{
+          await page.focus("#granular-speed-value");
+          await page.keyboard.down("Shift");await page.keyboard.press("F10");await page.keyboard.up("Shift");
+        }
+        assert.equal(await page.$eval("#fw-unit-snap-menu",el=>el.hidden),false);
+        assert.equal(await page.$eval("#vr-wheel-overlay",el=>el.hidden),true,"long hold must not open the tap wheel");
+        assert.equal(await page.$eval('#fw-unit-snap-menu [aria-checked="true"]',el=>el.textContent),"±1倍");
+        await page.click("#fw-unit-snap-menu button:nth-child(4)");
+        assert.equal(await page.$eval("#granular-speed",el=>el.max),"8");
+        assert.equal(await page.$eval("#granular-speed-value",el=>el.value),"-1.237");
+        await page.click("#granular-speed-label",{button:"right"});
+        await page.click("#fw-unit-snap-menu button:nth-child(2)");
+        assert.equal(await page.$eval("#granular-speed",el=>el.max),"2");
+        assert.equal(await page.$eval("#granular-speed-value",el=>el.value),"-1.237");
+        assert.equal(await page.$eval("#granular-pitch-value",el=>el.value),"7.1234");
+        assert.equal(await page.evaluate(()=>document.querySelectorAll("#fw-unit-snap-menu").length),1);
+        console.log("U05_SPEED_RANGE "+JSON.stringify({profile:profile.name,railWidth:geometry.speedSlider.width,
+          labelWidth:geometry.speedLabel.width,canonicalSpeed:"-1.237",rangeRestored:2,
+          hold:profile.touch,keyboard:!profile.touch,singleton:true}));
+
         await page.evaluate(()=>{
           document.querySelector(".studio")?.scrollTo(0,0);
           window.scrollTo(0,0);
