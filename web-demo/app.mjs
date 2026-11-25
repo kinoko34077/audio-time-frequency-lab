@@ -8,6 +8,7 @@ import {returnToPlaySpeed,scrubSpeed,releaseScrubSpeed,scaleScrubInertia,scrubRe
 import {createPlayerWaveEditor} from "./player-wave-editor.mjs";
 import {createDigitWheelPicker} from "./vendor/frequency-warp-ui/digit-wheel-picker.mjs";
 import {attachParameterContextMenu} from "./vendor/frequency-warp-ui/parameter-context-menu.mjs";
+import {mountRangeStepButtons,incrementCanonical} from "./range-stepper.mjs";
 import {toggleSourceMarker} from "./player-ab-markers.mjs";
 import {primaryModelCapability,isContinuousPCMModel} from "./model-route.mjs";
 import {SPEED_RAIL_PRESETS,validatePlaybackSpeed,validateSpeedRailRange,speedOnRail,formatPlaybackSpeed} from "./source-timeline.mjs";
@@ -394,6 +395,15 @@ if(PLAYER_GRANULAR_AVAILABLE){
   for(const k of ["speed","pitch"]){
     const slider=$("#granular-"+k),input=$("#granular-"+k+"-value");
     slider.addEventListener("input",()=>editGranular(k,slider.value));
+    mountRangeStepButtons(slider,{onStep:direction=>{
+      // Fine steps operate on the accepted precise value, not the clamped
+      // rail proxy. The visible range is presentation-only (U05).
+      if(document.activeElement===input)input.blur();
+      const before=granular[k],limit=k==="speed"?8:12;
+      const next=incrementCanonical(before,Number(slider.step),direction,-limit,limit);
+      if(Object.is(before,next))return false;
+      editGranular(k,String(next));return true;
+    }});
     input.addEventListener("input",()=>{input.setCustomValidity("");fitInlineNumber(input);});
     input.addEventListener("change",()=>editGranular(k,input.value));
     if(document.body.dataset.legacyTools==="1")continue;
@@ -2636,6 +2646,7 @@ function updateScrubInertia(raw=scrubInertiaInput.value){
 scrubInertiaInput.value=String(scrubInertia);
 updateScrubInertia(scrubInertia);
 scrubInertiaInput.addEventListener("input",()=>updateScrubInertia());
+mountRangeStepButtons(scrubInertiaInput);
 controls.dry.addEventListener("click",()=>{
   state.processingRecovery=null;
   void play("dry");
@@ -3233,6 +3244,7 @@ function liveSliderValue(){
     if(document.activeElement!==field)field.value=String(value);
 }
 [labShort,labLong,labWindows,labPeriod].forEach(node=>node.addEventListener("input",liveSliderValue));
+[labShort,labLong,labWindows,labPeriod].forEach(node=>mountRangeStepButtons(node));
 for(const [input,slider,allowed,toSlider] of [
   [labShortValue,labShort,[256,512,1024,2048],value=>Math.log2(value)],
   [labLongValue,labLong,[1024,2048,4096,8192],value=>Math.log2(value)],
