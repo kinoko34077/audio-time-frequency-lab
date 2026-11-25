@@ -606,6 +606,107 @@ test('native browser decodes exact requested WAV PCM, loads the app without eage
       assert.ok(result.rms>.001,result.processingMode+' output must remain audible PCM');
     }
 
+
+    // Real tiny WAV files through the actual progressive reader AND default
+    // player, rather than selecting a tiny interval from a long source.
+    const shortPage=await browser.newPage(),shortErrors=[];
+    await installTestAudioSilenceGuardForPage(shortPage);
+    shortPage.on('pageerror',e=>shortErrors.push(e.message));
+    await shortPage.evaluateOnNewDocument(()=>{
+      window.__shortSourceEvents=[];
+      const Native=window.AudioWorkletNode;
+      window.AudioWorkletNode=class extends Native{
+        constructor(ctx,name,options){
+          super(ctx,name,options);
+          if(name!=='audio-lab-source-pcm')return;
+          const frames=options.processorOptions.sourceFrames;
+          this.port.addEventListener('message',({data})=>{
+            window.__shortSourceEvents.push({frames,...data});
+          });
+          this.port.start();
+          this.addEventListener('processorerror',()=>{
+            window.__shortSourceEvents.push({frames,type:'processorerror'});
+          });
+        }
+      };
+    });
+    await shortPage.goto(`http://127.0.0.1:${port}/`,{
+      waitUntil:'domcontentloaded',timeout:20000
+    });
+    await shortPage.waitForFunction(()=>document.documentElement.dataset.fwBoot==='ready',
+      {timeout:20000});
+    const shortResults=[];
+    for(const frames of [1,64,4095,4096]){
+      const name='short-'+frames+'.wav';
+      const decoded=await shortPage.evaluate(async({frames,name})=>{
+        const rate=48000,bytes=new ArrayBuffer(44+frames*4),v=new DataView(bytes);
+        const str=(offset,s)=>{for(let i=0;i<s.length;i++)v.setUint8(offset+i,s.charCodeAt(i));};
+        str(0,'RIFF');v.setUint32(4,bytes.byteLength-8,true);str(8,'WAVE');
+        str(12,'fmt ');v.setUint32(16,16,true);v.setUint16(20,1,true);
+        v.setUint16(22,2,true);v.setUint32(24,rate,true);v.setUint32(28,rate*4,true);
+        v.setUint16(32,4,true);v.setUint16(34,16,true);
+        str(36,'data');v.setUint32(40,frames*4,true);
+        for(let i=0;i<frames;i++){
+          v.setInt16(44+i*4,8192+i%1024,true);
+          v.setInt16(46+i*4,-4096-i%512,true);
+        }
+        const file=new File([bytes],name,{type:'audio/wav'});
+        const {createProgressiveAudioSource}=await import('./progressive-audio-source.mjs');
+        const source=await createProgressiveAudioSource(file);
+        try{
+          const range=await source.read(0,frames,{priority:'playback'});
+          const exact=range.channels.every((channel,c)=>channel.length===frames&&
+            channel.every((sample,i)=>sample===(c?(-4096-i%512)/32768:
+              (8192+i%1024)/32768)));
+          const transfer=new DataTransfer();transfer.items.add(file);
+          const input=document.querySelector('#audio-file');
+          input.files=transfer.files;input.dispatchEvent(new Event('change',{bubbles:true}));
+          return {frames:source.sourceFrames,channels:source.channelCount,
+            rate:source.sampleRate,exact};
+        }finally{source.dispose();}
+      },{frames,name});
+      assert.deepEqual(decoded,{frames,channels:2,rate:48000,exact:true});
+      await shortPage.waitForFunction(name=>document.querySelector('#file-meta')?.textContent
+        .includes(name)&&!document.querySelector('#play-main')?.disabled,
+        {timeout:10000},name);
+      await shortPage.waitForFunction(frames=>
+        Number(document.querySelector('#player-loop-a').value)===0&&
+        Number(document.querySelector('#player-loop-b').value)===frames&&
+        Number(document.querySelector('#wave').dataset.overviewBins)===Math.min(2048,frames),
+        {timeout:10000},frames);
+      await shortPage.click('#play-main');
+      await shortPage.waitForFunction(frames=>window.__shortSourceEvents.some(e=>
+        e.frames===frames&&e.type==='progress'&&e.processingMode==='pv'&&
+        e.running&&e.renderedFrames>=4096),{timeout:15000},frames);
+      const result=await shortPage.evaluate(frames=>{
+        const events=window.__shortSourceEvents.filter(e=>e.frames===frames);
+        const progress=events.filter(e=>e.type==='progress').at(-1);
+        return {frames,progress,errors:events.filter(e=>
+          ['error','fatal-error','processorerror','underrun'].includes(e.type)),
+          muted:window.__audioSilenceAudit.audioOutputMuteGains,
+          overviewBins:Number(document.querySelector('#wave').dataset.overviewBins)};
+      },frames);
+      assert.equal(result.progress.loopStartFrame,0);
+      assert.equal(result.progress.loopEndFrame,frames);
+      assert.equal(result.progress.loopEnabled,true);
+      assert.ok(result.progress.sourceFrame>=0&&result.progress.sourceFrame<frames);
+      assert.equal(result.progress.missingFrames,0);
+      assert.deepEqual(result.errors,[]);
+      assert.ok(result.muted.length>0&&result.muted.every(v=>v===0));
+      shortResults.push(result);
+      await shortPage.click('#play-main');
+      await shortPage.waitForFunction(()=>document.querySelector('#granular-optin-status')
+        ?.dataset.renderRunning==='false',{timeout:10000});
+    }
+    console.log('SHORT_SOURCE_REAL_FILE_PV '+JSON.stringify(shortResults.map(r=>({
+      frames:r.frames,range:[r.progress.loopStartFrame,r.progress.loopEndFrame],
+      position:r.progress.sourceFrame,rendered:r.progress.renderedFrames,
+      missing:r.progress.missingFrames,overviewBins:r.overviewBins,muted:r.muted,
+      errors:r.errors
+    }))));
+    assert.deepEqual(shortErrors,[]);
+    await shortPage.close();
+
     assert.deepEqual(errors,[]);
   }finally{
     await cleanupTestProcesses(browser,[server],'progressive source test server');
