@@ -911,7 +911,8 @@ body.model-lab:not([data-legacy-tools="1"])[data-main-tab="player"] footer{
   border:0;font-size:11px;line-height:16px
 }
 body.model-lab:not([data-legacy-tools="1"])[data-main-tab="player"] footer>a{
-  display:inline-block;line-height:16px
+  display:inline-block;line-height:16px;
+  scroll-margin-bottom:calc(4px + env(safe-area-inset-bottom,0px))
 }
 body.model-lab:not([data-legacy-tools="1"])[data-main-tab="player"] .studio{
   padding-bottom:calc(4px + env(safe-area-inset-bottom,0px))
