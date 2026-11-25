@@ -3106,7 +3106,7 @@ function labRefresh(){
 }
 function labInvalidate(){lab.job++;lab.worker?.terminate();lab.worker=null;lab.processed=null;}
 let modelSelectionEpoch=0;
-async function labSettingsChanged(){
+async function labSettingsChanged(changedControl=null){
   const ticket=++modelSelectionEpoch;
   const previous=lab.mode,previousIndividual=lab.individual;
   const previousSpeed=lab.speed,previousSemi=lab.semitones;
@@ -3122,7 +3122,7 @@ async function labSettingsChanged(){
   let nextShort=2**Number(labShort.value),nextLong=2**Number(labLong.value);
   const nextWindows=Number(labWindows.value),nextCycles=selectedPeriodCycles();
   if(nextMode==="dual"&&nextShort>=nextLong){
-    if(document.activeElement===labShort||document.activeElement===labShortValue)nextLong=Math.min(8192,nextShort*2);
+    if(changedControl===labShort||document.activeElement===labShort||document.activeElement===labShortValue)nextLong=Math.min(8192,nextShort*2);
     else nextShort=Math.max(256,nextLong/2);
     labShort.value=String(Math.log2(nextShort));
     labLong.value=String(Math.log2(nextLong));
@@ -3231,7 +3231,7 @@ async function labSettingsChanged(){
   if(hasAudioSource()&&lab.mode==="live"&&!state.player)updateParams("lab");
 }
 [labModel,labShort,labLong,labWindows,labIndividual,labPeriod]
-  .forEach(node=>node.addEventListener("change",()=>void labSettingsChanged()));
+  .forEach(node=>node.addEventListener("change",()=>void labSettingsChanged(node)));
 function liveSliderValue(){
   const short=2**Number(labShort.value),long=2**Number(labLong.value),
     windows=Number(labWindows.value),period=selectedPeriodCycles();
@@ -3261,7 +3261,7 @@ for(const [input,slider,allowed,toSlider] of [
     input.setCustomValidity("");
     slider.value=String(toSlider(value));
     liveSliderValue();
-    void labSettingsChanged();
+    void labSettingsChanged(slider);
   });
   input.addEventListener("input",()=>input.setCustomValidity(""));
 }
