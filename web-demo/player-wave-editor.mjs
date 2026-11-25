@@ -4,6 +4,7 @@
 // Interaction patterns reference AudioStretch / Apple Voice Memos; no assets
 // or proprietary UI imagery are copied.
 import {scrubSpeed,releaseScrubSpeed} from "./scrub-kinetics.mjs";
+import {bindPressRepeat} from "./press-repeat.mjs";
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 const DETAIL_READ_FRAMES=32_768;
 const DETAIL_MAX_READS=64;
@@ -869,71 +870,10 @@ export function createPlayerWaveEditor({
     refresh(true);
   });
   function bindZoomButton(button,direction){
-    let pointerId=null,startTimer=0,animation=0,held=false,lastTime=0;
-    const singleStep=()=>{
-      onScrubMotion(0,"cancel");
-      zoom(direction>0?.5:2);
-    };
-    const repeat=time=>{
-      const elapsed=Math.max(0,Math.min(40,time-lastTime));
-      lastTime=time;
-      // A timer may start RAF in the same frame timestamp. Ignore that zero
-      // interval instead of mistaking it for a clamped zoom bound.
-      if(elapsed<1){animation=requestAnimationFrame(repeat);return;}
-      if(!zoom(Math.exp(-direction*Math.LN2*elapsed/550))){
-        animation=0;return;
-      }
-      animation=requestAnimationFrame(repeat);
-    };
-    const stopGlobalTracking=()=>{
-      if(typeof window!="undefined"){
-        window.removeEventListener("pointerup",finishPointer);
-        window.removeEventListener("pointercancel",finishPointer);
-        window.removeEventListener("blur",finishBlur);
-      }
-      if(typeof document!="undefined")
-        document.removeEventListener("visibilitychange",finishVisibility);
-    };
-    const finish=(event,applyTap)=>{
-      if(pointerId===null||
-        (event&&event.pointerId!==pointerId))return;
-      clearTimeout(startTimer);startTimer=0;
-      if(animation)cancelAnimationFrame(animation);
-      animation=0;
-      stopGlobalTracking();
-      if(applyTap&&!held)singleStep();
-      pointerId=null;held=false;
-    };
-    const finishPointer=event=>finish(event,false);
-    const finishBlur=()=>finish(null,false);
-    const finishVisibility=()=>{
-      if(document.hidden)finish(null,false);
-    };
-    button.addEventListener("pointerdown",event=>{
-      if(pointerId!==null||
-        (event.pointerType==="mouse"&&event.button!==0))return;
-      pointerId=event.pointerId;held=false;
-      onScrubMotion(0,"cancel");
-      try{button.setPointerCapture(event.pointerId);}catch{}
-      if(typeof window!="undefined"){
-        window.addEventListener("pointerup",finishPointer);
-        window.addEventListener("pointercancel",finishPointer);
-        window.addEventListener("blur",finishBlur);
-      }
-      if(typeof document!="undefined")
-        document.addEventListener("visibilitychange",finishVisibility);
-      startTimer=setTimeout(()=>{
-        held=true;lastTime=performance.now();
-        animation=requestAnimationFrame(repeat);
-      },220);
-      event.preventDefault();
-    });
-    button.addEventListener("pointerup",event=>finish(event,true));
-    button.addEventListener("pointercancel",event=>finish(event,false));
-    button.addEventListener("lostpointercapture",event=>finish(event,false));
-    // Native keyboard activation dispatches click with detail=0.
-    button.addEventListener("click",event=>{
-      if(event.detail===0)singleStep();
+    bindPressRepeat(button,{
+      onPress:()=>onScrubMotion(0,"cancel"),
+      onTap:()=>{onScrubMotion(0,"cancel");zoom(direction>0?.5:2);},
+      onHoldFrame:elapsed=>zoom(Math.exp(-direction*Math.LN2*elapsed/550))
     });
   }
   bindZoomButton(zoomIn,1);bindZoomButton(zoomOut,-1);
