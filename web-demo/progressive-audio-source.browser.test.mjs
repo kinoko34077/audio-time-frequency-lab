@@ -308,6 +308,92 @@ test('native browser decodes exact requested WAV PCM, loads the app without eage
     assert.equal(superseded.enabledReceipts,0);
     assert.ok(superseded.rms>.001,'held obsolete endpoint must not silence current PCM');
 
+    // Real compressed PCM, real Worklet prefetch, controlled abort and held
+    // endpoints. A warm decoded tail removes decoder duration from the
+    // protocol assertion; this is not a natural cold-decoder latency test.
+    const refillDuringPreparation=await page.evaluate(async encoded=>{
+      const bytes=Uint8Array.from(atob(encoded),ch=>ch.charCodeAt(0));
+      const {createProgressiveAudioSource}=await import('./progressive-audio-source.mjs');
+      const {createSourcePCMBridge}=await import('./source-pcm-bridge.mjs');
+      const source=await createProgressiveAudioSource(new File([bytes],
+        'progressive-probe.mp3',{type:'audio/mpeg'}));
+      const ctx=new AudioContext({sampleRate:source.sampleRate});
+      const events=[];
+      let bridge,operation,prime=true,firstRefill=null,abortRefill,tail,
+        releaseEndpoints,heldEndpoints=0,refillReads=0;
+      const gate=new Promise(resolve=>{releaseEndpoints=resolve;});
+      const reader={sourceFrames:source.sourceFrames,channelCount:source.channelCount,
+        async read(start,count,options){
+          if(options?.windowFrames===8192){
+            heldEndpoints++;
+            await gate;
+            return source.read(start,count,options);
+          }
+          if(prime){prime=false;return source.read(start,count,options);}
+          refillReads++;
+          if(!firstRefill){
+            firstRefill={start,count};
+            return new Promise((_,reject)=>{
+              abortRefill=()=>reject(new DOMException('PCM window decode aborted','AbortError'));
+            });
+          }
+          if(tail&&start>=tail.startFrame&&start+count<=tail.startFrame+tail.channels[0].length)
+            return {startFrame:start,channels:tail.channels.map(ch=>
+              ch.slice(start-tail.startFrame,start-tail.startFrame+count))};
+          return source.read(start,count,options);
+        }};
+      const waitFor=async(predicate,label)=>{
+        const until=performance.now()+4000;
+        while(!predicate()){
+          if(performance.now()>until)throw Error('refill protocol timeout: '+label);
+          await new Promise(resolve=>setTimeout(resolve,1));
+        }
+      };
+      try{
+        bridge=await createSourcePCMBridge({ctx,source:reader,
+          sourceSampleRate:source.sampleRate,startFrame:10000,speed:1,
+          processingMode:'raw',onEvent:event=>events.push(event)});
+        const tailStart=Math.max(0,source.sourceFrames-65536);
+        tail=await source.read(tailStart,source.sourceFrames-tailStart,
+          {priority:'playback',windowFrames:65536});
+        const analyser=ctx.createAnalyser();analyser.fftSize=1024;
+        bridge.connect(analyser);analyser.connect(ctx.destination);
+        await bridge.play();
+        await waitFor(()=>abortRefill,'actual Worklet prefetch');
+        const before=bridge.latest;
+        const eventStart=events.length;
+        operation=bridge.setLoopConfiguration(0,source.sourceFrames,true);
+        await waitFor(()=>heldEndpoints===2,'both endpoint reads held');
+        abortRefill();
+        await waitFor(()=>events.slice(eventStart).some(e=>
+          e.type==='window-accepted'&&e.start===firstRefill.start),'old refill accepted before loop');
+        const preCommit={refillReads,heldEndpoints,
+          loopAccepted:events.slice(eventStart).some(e=>e.type==='command-accepted'&&e.loopEnabled===true),
+          fatal:events.filter(e=>e.type==='fatal-error').length,
+          missingBefore:before?.missingFrames??null,
+          missingAfter:bridge.latest?.missingFrames??null};
+        releaseEndpoints();
+        const ack=await operation;
+        await waitFor(()=>events.some(e=>e.type==='render-applied'&&e.requestId===ack.requestId),
+          'actual loop render');
+        const applied=events.find(e=>e.type==='render-applied'&&e.requestId===ack.requestId);
+        return {preCommit,applied,firstRefill};
+      }finally{
+        releaseEndpoints();
+        abortRefill?.();
+        bridge?.dispose();
+        await operation?.catch(()=>{});
+        source.dispose();await ctx.close();
+      }
+    },mp3);
+    console.log('COMPRESSED_REFILL_DURING_PREPARATION '+JSON.stringify(refillDuringPreparation));
+    assert.ok(refillDuringPreparation.preCommit.refillReads>=2);
+    assert.equal(refillDuringPreparation.preCommit.heldEndpoints,2);
+    assert.equal(refillDuringPreparation.preCommit.loopAccepted,false);
+    assert.equal(refillDuringPreparation.preCommit.fatal,0);
+    assert.equal(refillDuringPreparation.applied.loopEnabled,true);
+    assert.equal(refillDuringPreparation.applied.running,true);
+
     // Measure the actual decoder+bridge path without artificial delays.
     const reuse=await page.evaluate(async encoded=>{
       const bytes=Uint8Array.from(atob(encoded),ch=>ch.charCodeAt(0));
