@@ -435,7 +435,7 @@ test("R4 usability visual captures: desktop and mobile player and folded researc
       return {columns:getComputedStyle(grid).gridTemplateColumns.trim().split(/\s+/).length,
         controls:controls.map(control=>{
           const label=control.querySelector(":scope > label").getBoundingClientRect();
-          const slider=control.querySelector(":scope > input[type=range]").getBoundingClientRect();
+          const slider=control.querySelector(":scope > .range-stepper").getBoundingClientRect();
           const value=control.querySelector(":scope > .inline-number").getBoundingClientRect();
           return {sliderWidth:slider.width,labelBeforeSlider:label.right<=slider.left,
             sliderBeforeValue:slider.right<=value.left};
