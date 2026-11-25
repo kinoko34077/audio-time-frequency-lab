@@ -352,7 +352,8 @@ test("real recorded waveform UX across mobile, Android-size, tablet and desktop 
         await page.$eval('.vr-wheel-track[data-wheel-place="-4"]',el=>el.focus());
         await page.keyboard.press("ArrowDown");
         assert.equal(await page.$eval("#granular-pitch-value",el=>el.value),"7.1235");
-        await page.click("[data-wheel-cancel]");
+        await page.click("button[data-wheel-cancel]");
+        await page.waitForFunction(()=>document.querySelector("#vr-wheel-overlay").hidden);
         assert.equal(await page.$eval("#granular-pitch-value",el=>el.value),"7.1234");
         await (profile.touch?page.tap("#granular-pitch-value"):page.click("#granular-pitch-value"));
         await page.waitForSelector("#vr-wheel-overlay:not([hidden])");
