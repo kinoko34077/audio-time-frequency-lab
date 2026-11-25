@@ -224,8 +224,8 @@ export function createPlayerWaveEditor({
     const requestedBlockFrames=Math.max(1,Math.min(readFrames,
       2**Math.ceil(Math.log2(wantedBlock))));
     // Keep each quantized grid separately. A zoom-out can reuse matching
-    // coarse bins, or request bounded coarse PCM while a finer grid continues
-    // to serve as the instant raster preview.
+    // coarse bins, or request bounded coarse PCM while a finer grid serves
+    // as the immediate source-coordinate peak preview.
     if(requestedBlockFrames!==detailBlockFrames){
       let buckets=detailLevels.get(requestedBlockFrames);
       if(!buckets)buckets=new Map();
@@ -474,49 +474,16 @@ export function createPlayerWaveEditor({
     }
     context.stroke();context.restore();
   }
-  function drawZoomPreview(context,width,height,c){
-    const oldStart=signalFrame-signalSpan/2,oldEnd=signalFrame+signalSpan/2;
-    const nextStart=c-spanFrames/2,nextEnd=c+spanFrames/2;
-    // Only reuse pixels whose time belongs to the source. A previous raster
-    // may contain stale edge pixels while a zoom is being coalesced; carrying
-    // those past frame 0 or EOF makes the blank margin visibly flicker.
-    const from=Math.max(oldStart,nextStart,0);
-    const to=Math.min(oldEnd,nextEnd,frames);
-    if(to<=from)return;
-    const sourceX=(from-oldStart)/signalSpan*width;
-    const sourceWidth=(to-from)/signalSpan*width;
-    const targetX=(from-nextStart)/spanFrames*width;
-    const targetWidth=(to-from)/spanFrames*width;
-    context.drawImage(signalShiftCanvas,sourceX,0,sourceWidth,height,
-      targetX,0,targetWidth,height);
-  }
   function updateSignalBuffer(buffers,c,width,height,ratio,baseChanged,positionChanged){
     if(!buffers)return false;
     const {signal,shift}=buffers;
     const dimensionsChanged=signalWidth!==width||signalHeight!==height;
     const spanChanged=signalSpan!==spanFrames;
-    // Zooming in must not stretch a lower-resolution raster. Zoom-out
-    // may reuse it only where the same cached detail grid remains valid.
-    const canZoomPreview=spanChanged&&spanFrames>signalSpan&&!dimensionsChanged&&
-      Number.isFinite(signalFrame)&&signalSpan>0&&!signalNeedsFullPaint;
-    if(canZoomPreview){
-      shift.clearRect(0,0,width,height);
-      shift.drawImage(signalCanvas,0,0);
-      signal.clearRect(0,0,width,height);
-      drawZoomPreview(signal,width,height,c);
-      const oldStart=signalFrame-signalSpan/2,oldEnd=signalFrame+signalSpan/2;
-      const nextStart=c-spanFrames/2,nextEnd=c+spanFrames/2;
-      const overlapStart=Math.max(oldStart,nextStart);
-      const overlapEnd=Math.min(oldEnd,nextEnd);
-      if(overlapEnd>overlapStart){
-        const leftEnd=(overlapStart-nextStart)/spanFrames*width;
-        const rightStart=(overlapEnd-nextStart)/spanFrames*width;
-        drawSignal(signal,width,height,c,ratio,0,leftEnd);
-        drawSignal(signal,width,height,c,ratio,rightStart,width);
-      }else drawSignal(signal,width,height,c,ratio);
-      signalFrame=c;signalSpan=spanFrames;
-    }else if(baseChanged||spanChanged||dimensionsChanged||!Number.isFinite(signalFrame)){
-      signal.clearRect(0,0,width,height);
+    // A changed span must be rasterized from source-coordinate peak bins.
+    // Resampling the immediately previous raster on every zoom-out frame
+    // compounds interpolation blur, even when the cached PCM grid is valid.
+    // Keep whole-pixel shifts below for unchanged-span playback only.
+    if(baseChanged||spanChanged||dimensionsChanged||!Number.isFinite(signalFrame)){
       drawSignal(signal,width,height,c,ratio);
       signalFrame=c;signalWidth=width;signalHeight=height;
       signalSpan=spanFrames;signalNeedsFullPaint=false;signalDirtyRanges.clear();
