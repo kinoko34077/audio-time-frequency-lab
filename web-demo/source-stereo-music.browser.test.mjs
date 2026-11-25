@@ -1,11 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {readFile,stat} from "node:fs/promises";
+import {readFile,stat,mkdtemp,rm} from "node:fs/promises";
 import {createHash} from "node:crypto";
-import {spawn} from "node:child_process";
+import {spawn,execFileSync} from "node:child_process";
+import {tmpdir} from "node:os";
 import path from "node:path";
 import puppeteer from "puppeteer-core";
 import {cleanupTestProcesses} from "./test-process-cleanup.mjs";
+import {installTestAudioSilenceGuard} from "./test-audio-silence-guard.mjs";
 
 // #36 R2: a COMPLETE, CC0, originally released stereo orchestral music
 // recording, not a mono isolated note or a generated music-like test tone.
@@ -462,5 +464,250 @@ test("full real CC0 stereo orchestral song: three musical sections, L/R output, 
   }finally{
     await cleanupTestProcesses(browser,[sourceServer,appServer],
       "stereo music HTTP server");
+  }
+});
+
+/* #113/#36: a finite normal-use audit, not a synthetic scheduler fault injection.
+ * Reuse the complete verified CC0 song and real staged default player.
+ * Keep the encoded derivative outside _site and do not publish it.
+ * Report deficits rather than making an arbitrary performance threshold a gate.
+ */
+test("normal player PV: continuous controls, distant seek and A/B with a full compressed stereo song",{
+  timeout:90000
+},async()=>{
+  assert.equal(createHash("sha256").update(await readFile(FILE)).digest("hex"),PINNED_SHA);
+  const dir=await mkdtemp(path.join(tmpdir(),"audio-lab-normal-use-"));
+  const mp3=path.join(dir,"determined-pursuit-normal-use.mp3");
+  let server,browser,cdp;
+  try{
+    execFileSync("ffmpeg",["-nostdin","-v","error","-i",FILE,"-codec:a","libmp3lame",
+      "-b:a","192k",mp3],{timeout:30000,stdio:"pipe"});
+    const encoded=await readFile(mp3);
+    server=spawn("python3",["-m","http.server","18829","--bind","127.0.0.1"],{
+      cwd:path.resolve("_site"),stdio:"ignore"
+    });
+    browser=await puppeteer.launch({
+      executablePath:process.env.CHROME_BIN||"/usr/bin/google-chrome",
+      headless:true,args:["--no-sandbox","--disable-dev-shm-usage",
+        "--autoplay-policy=no-user-gesture-required","--mute-audio"]
+    });
+    const page=await browser.newPage(),errors=[],contexts=[];
+    await page.setViewport({width:412,height:915,deviceScaleFactor:2,
+      isMobile:true,hasTouch:true});
+    page.on("pageerror",e=>errors.push(e.message));
+    cdp=await page.createCDPSession();
+    cdp.on("WebAudio.contextCreated",({context})=>contexts.push(context));
+    await cdp.send("WebAudio.enable");
+    await page.evaluateOnNewDocument(guard=>{
+      const audit={mutedOutputRoutes:0,audioOutputMuteGains:[]};
+      (0,eval)(`(${guard})`)(window,audit);
+      window.__useAudit={audit,events:[],paths:[],ui:[],audio:[],phase:"load",nodeCount:0};
+      const a=window.__useAudit;
+      const nativeConnect=AudioNode.prototype.connect;
+      AudioNode.prototype.connect=function(dest,...args){
+        const media=typeof MediaStreamAudioDestinationNode!=="undefined"&&
+          dest instanceof MediaStreamAudioDestinationNode;
+        if(dest===this.context.destination||media){
+          const analyser=this.context.createAnalyser();analyser.fftSize=2048;
+          nativeConnect.call(this,analyser,...args);nativeConnect.call(analyser,dest);
+          a.paths.push({kind:media?"media":"direct",analyser});
+          return dest;
+        }
+        return nativeConnect.call(this,dest,...args);
+      };
+      const Native=window.AudioWorkletNode;
+      window.AudioWorkletNode=class extends Native{
+        constructor(ctx,name,options){
+          super(ctx,name,options);
+          if(name!=="audio-lab-source-pcm")return;
+          const node=++a.nodeCount,port=this.port,post=port.postMessage.bind(port);
+          const append=(dir,m)=>{
+            // Retain identifiers, clocks and counts, never source PCM buffers.
+            const {channels,endpoints,...rest}=m;
+            a.events.push({at:performance.now(),phase:a.phase,node,dir,...rest,
+              bytes:channels?.reduce((n,c)=>n+c.byteLength,0)||0,
+              endpointCount:endpoints?.length??0});
+          };
+          port.postMessage=(m,...args)=>{append("tx",m);return post(m,...args);};
+          port.addEventListener("message",({data})=>append("rx",data));
+          port.start();
+          this.addEventListener("processorerror",()=>append("rx",{type:"processorerror"}));
+        }
+      };
+      for(const kind of ["input","change","click","pointerdown","pointerup"]){
+        document.addEventListener(kind,e=>{
+          const id=e.target.closest?.("[id]")?.id;
+          if(id&&/granular-(pitch|speed)|player-loop|wave|play-main/.test(id))
+            a.ui.push({at:performance.now(),phase:a.phase,kind,id,
+              value:e.target.value??null});
+        },true);
+      }
+      // Independent sparse observation of actual output before the mute sink.
+      // Not a sample-complete capture: missingFrames is measured by Worklet.
+      a.timer=setInterval(()=>{
+        if(!a.paths.length)return;
+        const values=a.paths.map(({kind,analyser})=>{
+          const pcm=new Float32Array(analyser.fftSize);
+          analyser.getFloatTimeDomainData(pcm);
+          return {kind,rms:Math.sqrt(pcm.reduce((n,x)=>n+x*x,0)/pcm.length),
+            finite:pcm.every(Number.isFinite)};
+        });
+        a.audio.push({at:performance.now(),phase:a.phase,values});
+      },60);
+    },installTestAudioSilenceGuard.toString());
+    await page.goto("http://127.0.0.1:18829/",{waitUntil:"domcontentloaded",timeout:20000});
+    await page.waitForFunction(()=>document.documentElement.dataset.fwBoot==="ready",
+      {timeout:20000});
+    await (await page.$("#audio-file")).uploadFile(mp3);
+    await page.waitForFunction(()=>document.querySelector("#file-meta")?.textContent
+      .includes("determined-pursuit-normal-use.mp3")&&
+      !document.querySelector("#play-main")?.disabled,{timeout:25000});
+    const meta=await page.$eval("#file-meta",e=>e.textContent);
+    assert.match(meta,/2ch/);
+    assert.equal(await page.$eval("#lab-model",e=>e.value),"pv");
+    const phases=[];
+    async function phase(name,action,settle=600){
+      await page.evaluate(n=>{window.__useAudit.phase=n;},name);
+      const begin=Date.now();
+      let failure=null;
+      try{await action();await sleep(settle);}
+      catch(e){failure=e.message;}
+      const summary=await page.evaluate(()=>{
+        const a=window.__useAudit,p=a.phase;
+        const latest=a.events.filter(e=>e.dir==="rx"&&e.type==="progress").at(-1);
+        const status=document.querySelector("#granular-optin-status")?.dataset;
+        return {phase:p,nodeCount:a.nodeCount,
+          requested:{speed:Number(document.querySelector("#granular-speed-value").value),
+            pitch:Number(document.querySelector("#granular-pitch-value").value),
+            a:Number(document.querySelector("#player-loop-a").value),
+            b:Number(document.querySelector("#player-loop-b").value),
+            loop:document.querySelector("#player-loop-enabled").checked},
+          rendered:latest?{node:latest.node,frame:latest.sourceFrame,speed:latest.speed,
+            pitch:latest.pitchSemitones,loop:latest.loopEnabled,a:latest.loopStartFrame,
+            b:latest.loopEndFrame,running:latest.running,missing:latest.missingFrames}:null,
+          status:{...status}};
+      });
+      const capacities=[];
+      for(const context of contexts.filter(c=>c.contextType==="realtime")){
+        try{
+          const {realtimeData}=await cdp.send("WebAudio.getRealtimeData",{contextId:context.contextId});
+          capacities.push(realtimeData);
+        }catch(e){capacities.push({unavailable:e.message});}
+      }
+      phases.push({...summary,elapsedMs:Date.now()-begin,failure,capacities});
+    }
+    const point=async(selector,fraction,id,y=.67)=>{
+      const b=await page.$eval(selector,el=>{
+        el.scrollIntoView({block:"center"});
+        const r=el.getBoundingClientRect();
+        return {x:r.x,y:r.y,w:r.width,h:r.height};
+      });
+      return {x:Math.round(b.x+b.w*fraction),y:Math.round(b.y+b.h*y),id};
+    };
+    const tap=async(selector,fraction=.5,id=1)=>{
+      const p=await point(selector,fraction,id);
+      await cdp.send("Input.dispatchTouchEvent",{type:"touchStart",touchPoints:[p]});
+      await cdp.send("Input.dispatchTouchEvent",{type:"touchEnd",touchPoints:[]});
+    };
+    const drag=async(selector,from,to,id=2,y=.5)=>{
+      const start=await point(selector,from,id,y),end=await point(selector,to,id,y);
+      await cdp.send("Input.dispatchTouchEvent",{type:"touchStart",touchPoints:[start]});
+      try{
+        for(let i=1;i<=18;i++){
+          await cdp.send("Input.dispatchTouchEvent",{type:"touchMove",touchPoints:[
+            {...start,x:Math.round(start.x+(end.x-start.x)*i/18)}
+          ]});
+          await sleep(18);
+        }
+      }finally{await cdp.send("Input.dispatchTouchEvent",{type:"touchEnd",touchPoints:[]});}
+    };
+    await phase("start",async()=>{
+      await tap("#wave",.19);
+      if(await page.$eval("#player-loop-enabled",e=>e.checked))await page.click("#player-loop-toggle");
+      await page.click("#play-main");
+      await page.waitForFunction(()=>document.querySelector("#granular-optin-status")
+        ?.dataset.renderRunning==="true",{timeout:15000});
+    },1500);
+    assert.equal(await page.$eval("#rt-telemetry",e=>e.dataset.pcmTransport),"pv-phase-locked");
+    await phase("pitch-rail",()=>drag("#granular-pitch",.50,.64),1400);
+    await phase("speed-rail",()=>drag("#granular-speed",.75,.64),1400);
+    await phase("distant-scrub",()=>drag("#wave",.23,.64,3,.43),1400);
+    await phase("mark-a",()=>page.click("#player-loop-a-now"),450);
+    await phase("distant-seek",()=>tap("#wave",.79,4),1000);
+    await phase("mark-b",()=>page.click("#player-loop-b-now"),450);
+    await phase("loop-on",()=>page.click("#player-loop-toggle"),1500);
+    await phase("loop-off",()=>page.click("#player-loop-toggle"),1200);
+    const report=await page.evaluate(()=>{
+      const a=window.__useAudit;clearInterval(a.timer);
+      const byPhase={};
+      const phaseFor=p=>byPhase[p]??={tx:0,rx:0,refills:0,discardedRefillResponses:0,
+        missingDelta:0,errors:[],renderLatencies:[],maxProgressIntervalMs:0,
+        observedPitches:[],observedSpeeds:[],audioSamples:0,nonzeroAudioSamples:0};
+      const tx=new Map(),accepted=new Set(),last=new Map();
+      for(const e of a.events){
+        const p=phaseFor(e.phase),key=e.node+":"+e.requestId;
+        if(e.dir==="tx"){
+          p.tx++;if(e.requestId!=null)tx.set(key,e);
+        }else{
+          p.rx++;
+          if(e.type==="need-window")p.refills++;
+          if(e.type==="window-accepted")accepted.add(key);
+          if(e.type==="render-applied"){
+            const sent=tx.get(key);
+            if(sent)p.renderLatencies.push({op:sent.op??sent.type,
+              ms:e.at-sent.at,missing:e.missingFramesInBlock,
+              pitch:e.pitchSemitones,speed:e.speed});
+          }
+          if(["error","fatal-error","processorerror","underrun"].includes(e.type))
+            p.errors.push({type:e.type,message:e.message,requestId:e.requestId});
+          if(e.type==="progress"){
+            const prev=last.get(e.node);
+            if(prev){
+              p.missingDelta+=Math.max(0,e.missingFrames-prev.missingFrames);
+              p.maxProgressIntervalMs=Math.max(p.maxProgressIntervalMs,e.at-prev.at);
+            }else p.missingDelta+=e.missingFrames;
+            last.set(e.node,e);
+            if(!p.observedPitches.includes(e.pitchSemitones))p.observedPitches.push(e.pitchSemitones);
+            if(!p.observedSpeeds.includes(e.speed))p.observedSpeeds.push(e.speed);
+          }
+        }
+      }
+      // A sent but unacknowledged refill may be stale OR still in flight at
+      // the observation end. Do not claim this count proves decode waste.
+      for(const [key,e] of tx)
+        if(e.type==="window"&&e.refillId!=null&&!accepted.has(key))
+          phaseFor(e.phase).discardedRefillResponses++;
+      for(const sample of a.audio){
+        const p=phaseFor(sample.phase);p.audioSamples++;
+        if(sample.values.some(v=>v.rms>1e-4))p.nonzeroAudioSamples++;
+      }
+      return {byPhase,nodeCount:a.nodeCount,ui:a.ui,
+        audioRoutes:a.paths.map(p=>p.kind),mute:a.audit,
+        // Bounded detailed command/ACK and refill sequence, not audio data.
+        protocol:a.events.filter(e=>e.type!=="progress").map(e=>({
+          at:e.at,phase:e.phase,dir:e.dir,node:e.node,type:e.type,op:e.op,
+          id:e.requestId,refillId:e.refillId,frame:e.frame??e.sourceFrame,
+          pitch:e.semitones??e.pitchSemitones,speed:e.speed,bytes:e.bytes,
+          a:e.a??e.loopStartFrame,b:e.b??e.loopEndFrame,enabled:e.enabled??e.loopEnabled,
+          missing:e.missingFramesInBlock,message:e.message
+        })),
+        lastProgress:[...last.values()]};
+    });
+    console.log("NORMAL_USE_AUDIO_AUDIT "+JSON.stringify({meta,
+      fixture:{sourceSHA:PINNED_SHA,encodedSHA:createHash("sha256").update(encoded).digest("hex"),
+        bytes:encoded.length,codec:"MP3 192kbps"},
+      phases,...report,pageErrors:errors,
+      limits:"Host receipt time and sampled graph capacity are not DAC time; sparse analyser does not prove all PCM continuity."}));
+    assert.ok(report.mute.mutedOutputRoutes>0&&
+      report.mute.audioOutputMuteGains.every(v=>v===0),"audio must stay muted");
+    // Only the validity of the audit is a gate here. Product failures
+    // (missing frames, errors, late/mismatched settings) remain findings.
+    assert.ok(report.byPhase.start?.rx>0&&report.lastProgress.length>0,
+      "real normal-player PV progress must be observed");
+    assert.ok(report.ui.some(e=>e.id==="granular-pitch")&&
+      report.ui.some(e=>e.id==="granular-speed"),"actual controls must receive events");
+  }finally{
+    try{await cleanupTestProcesses(browser,server?[server]:[],"normal-use audio audit server");}
+    finally{await rm(dir,{recursive:true,force:true});}
   }
 });

@@ -91,6 +91,11 @@ jobs:
       - name: Native Chrome recorded piano live PV speed and pitch continuity
         run: |
           node --test web-demo/source-pv-live-edit.browser.test.mjs
+      - name: Install compressed real-song test encoder (CI only)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends ffmpeg
+          ffmpeg -version | head -n 1
       - name: Fetch complete CC0 stereo orchestral music (test-only, not published)
         run: |
           set -euo pipefail
