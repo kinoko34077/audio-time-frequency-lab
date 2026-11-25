@@ -1,6 +1,6 @@
 {
   "repository": "kinoko34077/frequency-warp-vst",
-  "commit": "05e3d1cb2a59426229b1a41db4a6d79f496223f0",
+  "commit": "04329ebf7fab68b86bac978332d96da22b13d69b",
   "files": {
     "digit-wheel-picker.mjs": {
       "source": "web-demo/digit-wheel-picker.mjs",
