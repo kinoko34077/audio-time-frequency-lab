@@ -117,12 +117,13 @@ async function layoutEvidence(page,tag){
       })(),
       rulerCoordinateErrors:(()=>{
         const canvas=document.querySelector("#wave-detail").getBoundingClientRect();
-        return [...document.querySelectorAll(".wave-detail-ruler [data-ruler-tick]")]
-          .map((element,index)=>{
-            const bounds=element.getBoundingClientRect();
-            const expected=canvas.left+canvas.width*index/4;
-            const actual=index===4?bounds.right:index===0?bounds.left:
-              bounds.left+bounds.width/2;
+        const node=document.querySelector("#wave-detail"),ruler=document.querySelector(".wave-detail-ruler").getBoundingClientRect();
+        const center=Number(node.getAttribute("aria-valuenow")),span=Number(node.getAttribute("data-span-frames"));
+        return [...document.querySelectorAll(".wave-detail-ruler [data-ruler-tick]:not([hidden])")]
+          .map(element=>{
+            const frame=Number(element.dataset.sourceFrame);
+            const expected=canvas.left+canvas.width*(.5+(frame-center)/span);
+            const actual=ruler.left+Number.parseFloat(getComputedStyle(element).left);
             return Math.round(Math.abs(actual-expected)*100)/100;
           });
       })(),
@@ -516,6 +517,30 @@ test("R4 usability visual captures: desktop and mobile player and folded researc
     await mobile.waitForFunction(()=>document.documentElement.dataset.fwBoot==="ready",{timeout:20000});
     await waitForFile(mobile);
     const mobileLayout=await layoutEvidence(mobile,"mobile-touch-loaded");
+    // U11: the same source-time tick moves to the left when the source
+    // position advances, while the label and exact frame remain stable.
+    const readTicks=()=>mobile.evaluate(()=>{
+      const c=document.querySelector("#wave-detail");
+      return {center:Number(c.getAttribute("aria-valuenow")),span:Number(c.getAttribute("data-span-frames")),
+        ticks:[...document.querySelectorAll(".wave-detail-ruler [data-source-frame]")]
+          .map(t=>({frame:Number(t.dataset.sourceFrame),label:t.textContent,left:parseFloat(t.style.left)}))};
+    });
+    const tickBefore=await readTicks();
+    await mobile.focus("#wave-detail");
+    await mobile.keyboard.press("ArrowRight");
+    await mobile.waitForFunction(before=>Number(document.querySelector("#wave-detail").getAttribute("aria-valuenow"))>before,
+      {timeout:4000},tickBefore.center);
+    const tickAfter=await readTicks();
+    const sameTicks=tickBefore.ticks.filter(t=>tickAfter.ticks.some(q=>q.frame===t.frame));
+    assert.ok(sameTicks.length>0,"source tick survives a small seek");
+    for(const before of sameTicks){
+      const after=tickAfter.ticks.find(t=>t.frame===before.frame);
+      assert.equal(after.label,before.label);
+      assert.ok(Math.abs(after.left-before.left+100*(tickAfter.center-tickBefore.center)/tickBefore.span)<.01,
+        "fixed source tick follows waveform during seek");
+    }
+    console.log("U11_RULER_TRACK "+JSON.stringify({before:tickBefore,after:tickAfter,matched:sameTicks.length}));
+    await mobile.keyboard.press("Home");
     assert.equal(Math.round(mobileLayout.viewport/mobileLayout.viewportHeight*1000)/1000,.461,
       "mobile browser viewport matches the supplied 591:1280 screenshot ratio");
     assert.deepEqual(mobileLayout.safeAreaPadding,{top:"50px",bottom:"32px"},
