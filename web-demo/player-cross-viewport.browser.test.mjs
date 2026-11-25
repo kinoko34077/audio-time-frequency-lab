@@ -536,6 +536,72 @@ test("real recorded waveform UX across mobile, Android-size, tablet and desktop 
         assert.ok(modelWidth.scroll<=modelWidth.client+2,
           "model settings cannot overflow on "+profile.name);
 
+        // U14: test the live input path at both digit boundaries, including
+        // repeated transitions that previously moved the range under the finger.
+        const inertiaGeometry=await page.evaluate(()=>{
+          const rail=document.querySelector("#scrub-inertia"),root=rail.parentElement;
+          const value=document.querySelector("#scrub-inertia-value");
+          const box=el=>{const r=el.getBoundingClientRect();return [r.x,r.y,r.width,r.height];};
+          const capture=()=>({value:value.textContent,rail:box(rail),
+            minus:box(root.querySelector('[data-range-step="minus"]')),
+            plus:box(root.querySelector('[data-range-step="plus"]')),valueBox:box(value),
+            valueFits:value.scrollWidth<=value.clientWidth+1});
+          const saved=rail.value,samples=[];
+          for(const n of [0,10,90,100,90,100,90,100,300,0]){
+            rail.value=String(n);rail.dispatchEvent(new Event("input",{bubbles:true}));
+            samples.push(capture());
+          }
+          rail.value=saved;rail.dispatchEvent(new Event("input",{bubbles:true}));
+          return samples;
+        });
+        const stableGeometry=(samples,keys)=>samples.every(sample=>keys.every(key=>
+          sample[key].every((v,i)=>Math.abs(v-samples[0][key][i])<=.25)));
+        assert.ok(stableGeometry(inertiaGeometry,["rail","minus","plus","valueBox"])&&
+          inertiaGeometry.every(s=>s.valueFits&&s.rail[2]>0),
+          "digit-count changes must never move either endpoint or either step button: "+
+          profile.name+" "+JSON.stringify(inertiaGeometry));
+        let dragEvidence=null;
+        if(profile.name==="iphone-pwa-393x853"){
+          const rail="#scrub-inertia";
+          const original=await page.$eval(rail,el=>el.value);
+          await page.$eval(rail,el=>{
+            el.value="90";el.dispatchEvent(new Event("input",{bubbles:true}));
+            el.scrollIntoView({block:"center"});
+            window.__u14Drag=[];
+            const record=()=>{
+              const root=el.parentElement;
+              const rect=node=>{const r=node.getBoundingClientRect();return [r.x,r.y,r.width,r.height];};
+              window.__u14Drag.push({value:Number(el.value),rail:rect(el),
+                minus:rect(root.firstElementChild),plus:rect(root.lastElementChild)});
+            };
+            window.__u14Record=record;record();el.addEventListener("input",record);
+          });
+          const rect=await page.$eval(rail,el=>{const r=el.getBoundingClientRect();return {x:r.x,y:r.y,w:r.width,h:r.height};});
+          const touch=await page.createCDPSession();
+          try{
+            const point=fraction=>({x:Math.round(rect.x+rect.w*fraction),y:Math.round(rect.y+rect.h/2),id:1});
+            await touch.send("Input.dispatchTouchEvent",{type:"touchStart",touchPoints:[point(.31)]});
+            for(const fraction of [.26,.36,.29,.40,.25,.42,.30,.39]){
+              await touch.send("Input.dispatchTouchEvent",{type:"touchMove",touchPoints:[point(fraction)]});
+              await new Promise(resolve=>setTimeout(resolve,45));
+            }
+            await touch.send("Input.dispatchTouchEvent",{type:"touchEnd",touchPoints:[]});
+            dragEvidence=await page.evaluate(()=>window.__u14Drag);
+            assert.ok(dragEvidence.some(s=>s.value<100)&&dragEvidence.some(s=>s.value>=100)&&
+              dragEvidence.length>=3&&stableGeometry(dragEvidence,["rail","minus","plus"]),
+              "real touch drag crosses the digit boundary without rail feedback: "+JSON.stringify(dragEvidence));
+          }finally{
+            await touch.detach();
+            await page.$eval(rail,(el,original)=>{
+              el.removeEventListener("input",window.__u14Record);
+              el.value=original;el.dispatchEvent(new Event("input",{bubbles:true}));
+            },original);
+          }
+        }
+        console.log("U14_STABLE_INERTIA "+JSON.stringify({profile:profile.name,
+          first:inertiaGeometry[0],last:inertiaGeometry.at(-1),samples:inertiaGeometry.length,
+          maxDrift:Math.max(...inertiaGeometry.flatMap(sample=>["rail","minus","plus","valueBox"].flatMap(key=>sample[key].map((v,i)=>Math.abs(v-inertiaGeometry[0][key][i]))))),
+          dragValues:dragEvidence?.map(s=>s.value)??null}));
         if(profile.name==="iphone-pwa-393x853"){
           const prior=await page.evaluate(()=>({
             model:document.querySelector("#lab-model").value,
@@ -561,6 +627,19 @@ test("real recorded waveform UX across mobile, Android-size, tablet and desktop 
             for(const [id,value] of [["lab-short","9"],["lab-long","11"]])document.getElementById(id).value=value;
             document.getElementById("lab-short").dispatchEvent(new Event("change",{bubbles:true}));
           });
+          const stableModelRails=async ids=>page.evaluate(ids=>ids.map(id=>{
+            const rail=document.getElementById(id),root=rail.parentElement;
+            const read=()=>[rail,root.firstElementChild,root.lastElementChild].map(el=>{
+              const r=el.getBoundingClientRect();return [r.x,r.y,r.width,r.height];
+            }).flat();
+            const saved=rail.value,values=[rail.min,rail.max,saved,rail.min,rail.max,saved];
+            const samples=values.map(value=>{
+              rail.value=value;rail.dispatchEvent(new Event("input",{bubbles:true}));return read();
+            });
+            return {id,drift:Math.max(...samples.flatMap(row=>row.map((v,i)=>Math.abs(v-samples[0][i]))))};
+          }),ids);
+          const modelGeometry=await stableModelRails(["lab-short","lab-long","lab-windows"]);
+          assert.ok(modelGeometry.every(r=>r.drift<=.25),"advanced rail digit stability: "+JSON.stringify(modelGeometry));
           await tapStep("lab-short","plus");
           assert.equal(await page.$eval("#lab-short-value",el=>el.value),"1024");
           await tapStep("lab-short","plus");
@@ -573,6 +652,9 @@ test("real recorded waveform UX across mobile, Android-size, tablet and desktop 
           await page.$eval("#lab-individual-periods",el=>{el.checked=true;el.dispatchEvent(new Event("change",{bubbles:true}));});
           await page.waitForFunction(()=>!document.querySelector('[data-range-stepper="lab-period-cycles"] button').disabled&&
             !document.querySelector("#lab-period-cycles-field").hidden);
+          const periodGeometry=await stableModelRails(["lab-period-cycles"]);
+          assert.ok(periodGeometry.every(r=>r.drift<=.25),"period rail digit stability: "+JSON.stringify(periodGeometry));
+          console.log("U14_STABLE_MODEL "+JSON.stringify([...modelGeometry,...periodGeometry]));
           const previousPeriod=await page.$eval("#lab-period-cycles",el=>Number(el.value));
           await tapStep("lab-period-cycles",previousPeriod<5?"plus":"minus");
           assert.equal(await page.$eval("#lab-period-cycles-value",el=>Number(el.value)),2**(previousPeriod+(previousPeriod<5?1:-1)));
