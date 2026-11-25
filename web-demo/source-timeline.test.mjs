@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {createSourceTimeline,validatePlaybackSpeed,validateSpeedRailRange,
-        speedOnRail,formatPlaybackSpeed} from "./source-timeline.mjs";
+        speedOnRail,formatPlaybackSpeed,shuttlePlaybackSpeed} from "./source-timeline.mjs";
 
 const make=(o={})=>createSourceTimeline({
   sourceFrames:48000,sourceSampleRate:48000,...o
@@ -225,4 +225,13 @@ test("one atomic scratch updates source frame and signed velocity exactly once",
   assert.throws(()=>t.scrub(100,-9),RangeError);
   assert.equal(t.state.sourceFrame,90250);
   assert.equal(t.state.speed,0);
+});
+
+test("shuttle is relative to the configured speed magnitude, signed by the button and bounded",()=>{
+  for(const [configured,magnitude] of [[0,0],[.001,.004],[.5,2],[-.75,3],[1.237,4.948],[2,8],[-3,8],[8,8]]){
+    assert.equal(shuttlePlaybackSpeed(configured,1),magnitude);
+    assert.equal(shuttlePlaybackSpeed(configured,-1),magnitude===0?0:-magnitude);
+  }
+  assert.throws(()=>shuttlePlaybackSpeed(9,1),RangeError);
+  assert.throws(()=>shuttlePlaybackSpeed(.5,0),RangeError);
 });
