@@ -9,10 +9,36 @@ const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 const DETAIL_READ_FRAMES=32_768;
 const DETAIL_MAX_READS=64;
 const DETAIL_MAX_CACHE_LEVELS=8;
-const timestamp=seconds=>{
-  const value=Math.max(0,seconds);
-  return Math.floor(value/60)+":"+(value%60).toFixed(2).padStart(5,"0");
+const timestamp=(seconds,precision=2)=>{
+  const value=Math.max(0,seconds),unit=10**precision;
+  const rounded=Math.round(value*unit)/unit;
+  const minutes=Math.floor(rounded/60);
+  const remainder=(rounded-minutes*60).toFixed(precision);
+  return minutes+":"+remainder.padStart(precision+3,"0");
 };
+// Source-anchored time grid: choose a stable interval for the current zoom,
+// then move the actual frame positions through the viewport. Never rewrite
+// floating labels at fixed quarter-screen coordinates.
+export function sourceRulerTicks(centerFrame,spanFrames,sourceFrames,rate,capacity=5){
+  if(!(spanFrames>0&&sourceFrames>0&&rate>0&&capacity>=2))return [];
+  const desired=spanFrames/(capacity-1);
+  let step=1;
+  if(desired>1){
+    const seconds=desired/rate;
+    const decade=10**Math.floor(Math.log10(seconds));
+    const nice=[1,2,5,10].find(n=>n*decade>=seconds)||10;
+    step=Math.max(1,Math.ceil(nice*decade*rate));
+  }
+  const start=centerFrame-spanFrames/2,end=start+spanFrames;
+  const first=Math.ceil(Math.max(0,start)/step)*step;
+  const last=Math.min(sourceFrames,end);
+  const precision=Math.max(2,Math.min(8,Math.ceil(-Math.log10(step/rate))));
+  const ticks=[];
+  for(let frame=first;frame<=last&&ticks.length<capacity;frame+=step){
+    ticks.push({frame,fraction:(frame-start)/spanFrames,label:timestamp(frame/rate,precision)});
+  }
+  return ticks;
+}
 function peakHierarchy(channels){
   const n=channels[0].length,block=256,count=Math.ceil(n/block);
   const low=new Float32Array(count),high=new Float32Array(count);
@@ -601,19 +627,25 @@ export function createPlayerWaveEditor({
       }
       context.setLineDash([]);
       context.strokeStyle="#507075";context.lineWidth=ratio;
-      for(let n=0;n<=4;n++){
-        const x=n*width/4,time=(start+n*spanFrames/4)/rate;
-        const tick=rulerTicks[n];
-        if(tick){
-          tick.textContent=time>=0&&time<=frames/rate?timestamp(time):"";
-          tick.style.left=25*n+"%";
-          tick.style.transform=n===0?"none":n===4?"translateX(-100%)":"translateX(-50%)";
-        }
-        if(time>=0&&time<=frames/rate){
-          context.beginPath();context.moveTo(x,20*scale);
-          context.lineTo(x,27*scale);context.stroke();
-        }
+      const capacity=Math.max(2,Math.min(rulerTicks.length||5,Math.floor(w/76)+1));
+      const ticks=sourceRulerTicks(c,spanFrames,frames,rate,capacity);
+      for(const [index,tick] of rulerTicks.entries()){
+        const value=ticks[index];tick.hidden=!value;
+        tick.textContent=value?.label||"";
+        if(!value){tick.removeAttribute("data-source-frame");continue;}
+        tick.dataset.sourceFrame=String(value.frame);
+        tick.style.left=100*value.fraction+"%";
+        // The tick anchor stays exact; only the label's alignment changes
+        // near the edges so the text does not fall outside the waveform.
+        tick.style.transform=value.fraction<.1?"none":
+          value.fraction>.9?"translateX(-100%)":"translateX(-50%)";
       }
+      for(const tick of ticks){
+        const x=boundsToX(tick.frame,c,width);
+        context.beginPath();context.moveTo(x,20*scale);
+        context.lineTo(x,27*scale);context.stroke();
+      }
+      canvas.setAttribute("data-span-frames",String(spanFrames));
       renderedContentRevision=contentRevision;
     }
     const {a,b}=onAB();
