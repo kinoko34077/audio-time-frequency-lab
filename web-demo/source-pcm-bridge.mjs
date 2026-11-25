@@ -206,7 +206,13 @@ export async function createSourcePCMBridge({
         error?.message==="PCM window decode aborted";
       if(preempted){
         if(revision!==refillRevision)return;
-        if(attempt>=1){failProcessor(error);return;}
+        if(attempt>=1){
+          // Repeated scheduler preemption is not a processor failure. Release
+          // only this refill ID; the Worklet will re-evaluate current need.
+          try{node.port.postMessage({type:"refill-cancelled",refillId});}
+          catch(postError){failProcessor(postError);}
+          return;
+        }
         queueMicrotask(()=>{
           if(!closed&&revision===refillRevision)
             requestRefill(frame,refillId,revision,attempt+1);
