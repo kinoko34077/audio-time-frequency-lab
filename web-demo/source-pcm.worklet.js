@@ -187,6 +187,11 @@ class AudioLabSourcePCMProcessor extends AudioWorkletProcessor {
           }
           return;
         }
+        if(m.type==="refill-cancelled"){
+          // A late cancellation must never release a newer pending request.
+          if(m.refillId===this.pendingRequest)this.pendingRequest=null;
+          return;
+        }
         if(m.type==="window"){
           // Ignore late source refills from an obsolete seek, loop or speed.
           if(m.refillId!=null&&m.refillId!==this.pendingRequest)return;

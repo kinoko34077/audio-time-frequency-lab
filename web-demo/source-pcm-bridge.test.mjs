@@ -152,6 +152,59 @@ test("pending A/B preparation and rejected commands preserve the current refill 
   });
 });
 
+test("two real cache preemptions retire only the refill instead of terminating the processor",async()=>{
+  await withFakeWorklet(async nodes=>{
+    const trace=[],events=[],releases=[],operations=[];
+    let releaseOther,bridge;
+    const source=createProgressivePCMCache({sourceFrames:1_048_576,channelCount:1,
+      decodeWindow:(start,frameCount,{priority,signal})=>{
+        trace.push({kind:"start",start,priority});
+        if(start===0)return Promise.resolve([new Float32Array(frameCount).fill(.2)]);
+        return new Promise((resolve,reject)=>{
+          const abort=()=>{
+            trace.push({kind:"abort",start,priority});
+            reject(new DOMException("PCM window decode aborted","AbortError"));
+          };
+          signal.addEventListener("abort",abort,{once:true});
+          const release=()=>{
+            signal.removeEventListener("abort",abort);
+            resolve([new Float32Array(frameCount).fill(.2)]);
+          };
+          releases.push(release);
+          if(start===196_608)releaseOther=release;
+        });
+      }});
+    try{
+      bridge=await createSourcePCMBridge({ctx:context(),source,
+        sourceSampleRate:48_000,startFrame:10_000,onEvent:e=>events.push(e)});
+      const node=nodes[0];
+      node.port.onmessage({data:{type:"need-window",frame:80_000,refillId:17}});
+      await waitFor(()=>trace.some(e=>e.kind==="start"&&e.start===65_536));
+      operations.push(source.read(196_608,65_536,{priority:"playback"}).catch(e=>e));
+      await waitFor(()=>releaseOther);
+      operations.push(bridge.scrub(300_000,1).catch(e=>e));
+      await waitFor(()=>trace.some(e=>e.kind==="abort"&&e.start===65_536));
+      await waitFor(()=>trace.some(e=>e.kind==="start"&&e.priority===3));
+      releaseOther();
+      await waitFor(()=>trace.filter(e=>e.kind==="start"&&e.start===65_536).length===2);
+      operations.push(bridge.scrub(500_000,1).catch(e=>e));
+      await waitFor(()=>trace.filter(e=>e.kind==="abort"&&e.start===65_536).length===2);
+      await waitFor(()=>node.sent.some(m=>m.type==="refill-cancelled"));
+      assert.deepEqual(node.sent.filter(m=>m.type==="refill-cancelled"),
+        [{type:"refill-cancelled",refillId:17}]);
+      assert.equal(events.filter(e=>e.type==="fatal-error").length,0);
+      assert.equal(node.sent.some(m=>m.type==="dispose"),false);
+      assert.equal(node.sent.some(m=>m.type==="scrub"),false,
+        "no transport ACK or scrub submission explains the cancellation");
+    }finally{
+      bridge?.dispose();
+      releases.forEach(release=>release());
+      source.dispose();
+      await Promise.allSettled(operations);
+    }
+  });
+});
+
 test("A/B endpoint reads retry when a scrub preempts a shared PCM decode",async()=>{
   await withFakeWorklet(async nodes=>{
     const sourceReads=[],started=[],aborted=[];
