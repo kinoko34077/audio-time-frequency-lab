@@ -135,7 +135,12 @@ export async function createSourcePCMBridge({
       const timer=setTimeout(()=>failProcessor(
         Error("AudioWorklet command response timed out: "+(data.op||data.type))
       ),commandTimeoutMs);
-      pending.set(id,{resolve,reject,timer});
+      // Only a successful Worklet command clears its pending source refill.
+      // Keep the old request live during asynchronous PCM preparation and
+      // on rejection. ACKs and need-window messages share one ordered port.
+      const invalidatesRefill=["seek-window","scrub","loop-config"].includes(data.type)||
+        data.type==="command"&&["seek","speed","bounds","loop","pitch"].includes(data.op);
+      pending.set(id,{resolve,reject,timer,invalidatesRefill});
       try{node.port.postMessage({...data,requestId:id},transfers);}
       catch(error){
         clearTimeout(timer);pending.delete(id);
@@ -238,7 +243,11 @@ export async function createSourcePCMBridge({
         pending.delete(data.requestId);
         clearTimeout(ticket.timer);
         if(data.type==="error")ticket.reject(Error(data.message));
-        else ticket.resolve(data);
+        else{
+          if(data.type==="command-accepted"&&ticket.invalidatesRefill)
+            refillRevision++;
+          ticket.resolve(data);
+        }
       }
     }else if(data.type==="progress")latest=data;
     onEvent(data);
@@ -323,7 +332,6 @@ export async function createSourcePCMBridge({
   };
   const updateLoop=(a,b,enabled,op)=>{
     if(closed)return Promise.reject(Error("PCM bridge disposed"));
-    refillRevision++;
     const revision=++loopRevision;
     // One active endpoint preparation and one replaceable latest request.
     // An OFF request requires no endpoint PCM, so never queue it behind a
@@ -348,7 +356,6 @@ export async function createSourcePCMBridge({
       if(!Number.isSafeInteger(frame)||frame<0||frame>frames)
         return Promise.reject(RangeError("invalid source-frame seek"));
       if(closed)return Promise.reject(Error("PCM bridge disposed"));
-      refillRevision++;
       const revision=++cursorRevision;
       const {start,channels}=await windowSlice(frame===frames?frames-1:frame,
         currentSpeed,"playback");
@@ -371,7 +378,6 @@ export async function createSourcePCMBridge({
         throw RangeError("invalid scratch sample frame");
       const wantedSpeed=validatePlaybackSpeed(speed);
       if(closed)throw Error("PCM bridge disposed");
-      refillRevision++;
       currentSpeed=wantedSpeed;
       const revision=++cursorRevision;
       // No 64k-frame PCM copy for each pointermove. The first scratch
