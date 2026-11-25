@@ -1268,7 +1268,8 @@ test("shared A/B updates every realtime model and compact numeric controls stay 
         document.querySelector("#granular-pitch").closest(".player-tune-control"),
       inlineSpeed:document.querySelector("#granular-speed-value").closest(".player-tune-control")===
         document.querySelector("#granular-speed").closest(".player-tune-control"),
-      railRangeAlwaysVisible:document.querySelector("#granular-range").closest("details")===null,
+      railRangeContext:!document.querySelector("#granular-range")&&
+        document.querySelector("#granular-speed-label").getAttribute("aria-haspopup")==="menu",
       noDevelopmentQualityNote:document.querySelector(".player-quality-note")===null,
       inlineAB:document.querySelector("#player-loop-fields").hidden&&
         document.querySelectorAll("#player-loop-fields input[type=hidden]").length===2,
