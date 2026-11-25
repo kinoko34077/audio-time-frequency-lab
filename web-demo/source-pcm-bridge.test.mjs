@@ -78,6 +78,80 @@ test("a preempted playback refill retries without failing the audio processor",a
   });
 });
 
+test("pending A/B preparation and rejected commands preserve the current refill until Worklet acceptance",async()=>{
+  await withFakeWorklet(async nodes=>{
+    let prime=true,holdNext=true,abortRefill,releaseEndpoints;
+    const endpointGate=new Promise(resolve=>{releaseEndpoints=resolve;});
+    const reads=[],events=[];
+    const source=pcmSource(async(startFrame,frameCount,{windowFrames})=>{
+      if(prime){prime=false;return range(startFrame,frameCount);}
+      if(windowFrames===8192){
+        reads.push("endpoint");
+        await endpointGate;
+        return range(startFrame,frameCount);
+      }
+      reads.push("refill");
+      if(holdNext){
+        holdNext=false;
+        return new Promise((_,reject)=>{
+          abortRefill=()=>reject(new DOMException("PCM window decode aborted","AbortError"));
+        });
+      }
+      return range(startFrame,frameCount);
+    });
+    let bridge,operation;
+    try{
+      bridge=await createSourcePCMBridge({ctx:context(),source,
+        sourceSampleRate:48_000,startFrame:10_000,onEvent:e=>events.push(e)});
+      const node=nodes[0];
+      const need=id=>node.port.onmessage({data:{type:"need-window",frame:70_000,refillId:id}});
+      const delivered=id=>node.sent.some(m=>m.type==="window"&&m.refillId===id);
+      const count=()=>reads.filter(x=>x==="refill").length;
+      const lastLoop=()=>node.sent.findLast(m=>m.type==="loop-config");
+      const accept=m=>node.port.onmessage({data:{type:"command-accepted",requestId:m.requestId}});
+
+      need(17);
+      assert.equal(count(),1);
+      operation=bridge.setLoopConfiguration(70_000,200_000,true);
+      assert.equal(reads.filter(x=>x==="endpoint").length,2);
+      abortRefill();
+      await waitFor(()=>delivered(17));
+      assert.equal(count(),2);
+      assert.equal(lastLoop(),undefined,"retry must complete before endpoints are released");
+      releaseEndpoints();
+      await waitFor(()=>lastLoop());
+      accept(lastLoop());await operation;
+
+      // Once the Worklet has accepted the new configuration, it has cleared
+      // its old pendingRequest. A late abort from that old generation must
+      // not retry, and the next need-window remains independently serviceable.
+      holdNext=true;need(18);assert.equal(count(),3);
+      operation=bridge.setLoopEnabled(false);
+      accept(lastLoop());await operation;
+      abortRefill();
+      await new Promise(resolve=>setTimeout(resolve,0));
+      assert.equal(count(),3);
+      assert.equal(delivered(18),false);
+      need(19);await waitFor(()=>delivered(19));
+
+      // A rejected command has not cleared pendingRequest.
+      holdNext=true;need(20);const before=count();
+      operation=bridge.setLoopEnabled(false);
+      const rejected=assert.rejects(operation,/test rejection/);
+      node.port.onmessage({data:{type:"error",requestId:lastLoop().requestId,message:"test rejection"}});
+      await rejected;
+      abortRefill();
+      await waitFor(()=>delivered(20));
+      assert.equal(count(),before+1);
+      assert.equal(events.filter(e=>e.type==="fatal-error").length,0);
+    }finally{
+      releaseEndpoints();
+      bridge?.dispose();
+      await operation?.catch(()=>{});
+    }
+  });
+});
+
 test("A/B endpoint reads retry when a scrub preempts a shared PCM decode",async()=>{
   await withFakeWorklet(async nodes=>{
     const sourceReads=[],started=[],aborted=[];
