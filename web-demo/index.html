@@ -9,6 +9,7 @@
 <title>Audio Time–Frequency Lab | 再生・音程・速度</title>
 <link rel="stylesheet" href="./style.css">
 <link rel="stylesheet" href="./vendor/frequency-warp-ui/digit-wheel-picker.css">
+<link rel="stylesheet" href="./vendor/frequency-warp-ui/parameter-context-menu.css">
 </head>
 <body class="model-lab" data-main-tab="player">
 <main class="studio">
@@ -137,12 +138,7 @@
         <section id="granular-optin-controls" class="player-tune" aria-label="速度と音程" hidden>
           <div class="player-tune-grid">
             <div class="player-tune-control">
-              <div class="player-tune-labels">
-                <label for="granular-speed">速度</label>
-                <label class="player-rail-setting">
-                  <select id="granular-range" aria-label="速度レール表示幅"><option value="1">±1倍</option><option value="2" selected>±2倍</option><option value="4">±4倍</option><option value="8">±8倍</option></select>
-                </label>
-              </div>
+              <label id="granular-speed-label" for="granular-speed" tabindex="0" aria-haspopup="menu">速度</label>
               <input id="granular-speed" type="range" min="-2" max="2" step=".01" value="1" aria-label="再生速度">
               <span class="inline-number"><input id="granular-speed-value" type="number" min="-8" max="8" step="any" value="1" inputmode="decimal" aria-label="再生速度の精密入力（倍）"><span class="player-tune-unit" aria-hidden="true">×</span></span>
               <output id="granular-speed-output" for="granular-speed" hidden>1.00×</output>
