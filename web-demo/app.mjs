@@ -7,9 +7,10 @@ import {advanceOverviewBuildToken,overviewBinCount,overviewNeedsResample,readOve
 import {returnToPlaySpeed,scrubSpeed,releaseScrubSpeed,scaleScrubInertia,scrubReturnDuration} from "./scrub-kinetics.mjs";
 import {createPlayerWaveEditor} from "./player-wave-editor.mjs";
 import {createDigitWheelPicker} from "./vendor/frequency-warp-ui/digit-wheel-picker.mjs";
+import {attachParameterContextMenu} from "./vendor/frequency-warp-ui/parameter-context-menu.mjs";
 import {toggleSourceMarker} from "./player-ab-markers.mjs";
 import {primaryModelCapability,isContinuousPCMModel} from "./model-route.mjs";
-import {validatePlaybackSpeed,validateSpeedRailRange,speedOnRail,formatPlaybackSpeed} from "./source-timeline.mjs";
+import {SPEED_RAIL_PRESETS,validatePlaybackSpeed,validateSpeedRailRange,speedOnRail,formatPlaybackSpeed} from "./source-timeline.mjs";
 import {frequencyFromSlider,sliderFromFrequency,holdFromFrequency,drawCrusherPreview} from "./crusher-visual.mjs";
 import {drawFrequencyGraph} from "./graph.mjs";
 import {mountDualThumb} from "./dual-thumb.mjs";
@@ -217,7 +218,10 @@ function refreshGranular(changedKind=null){
       input.value=formatPlaybackSpeed(granular.speed,{editing:true});
     fitInlineNumber(input);
     $("#granular-speed-output").textContent=formatPlaybackSpeed(granular.speed)+"×";
-    $("#granular-range").value=String(granular.railMax);
+    const rangeHint="速度レールの範囲：±"+granular.railMax+"倍。右クリック・長押し・Shift+F10で切替";
+    $("#granular-speed-label").title=rangeHint;
+    $("#granular-speed-label").setAttribute("aria-description",rangeHint);
+    input.setAttribute("aria-description",rangeHint);
     $("#granular-rail-note").textContent=Math.abs(granular.speed)>granular.railMax?
       "指定速度はレール外です。直接入力した数値は保持されています。":"";
   }
@@ -417,10 +421,14 @@ if(PLAYER_GRANULAR_AVAILABLE){
       }
     });
   }
-  $("#granular-range").addEventListener("change",e=>{
-    granular.railMax=validateSpeedRailRange(Number(e.target.value));
-    refreshGranular();
-  });
+  // Only the visible rail changes; the signed canonical speed is not edited.
+  attachParameterContextMenu({doc:document,targets:[$("#granular-speed-label"),$("#granular-speed-value")],
+    suppressClickAfterHold:true,getItems:()=>SPEED_RAIL_PRESETS.map(range=>({
+      label:"±"+range+"倍",role:"menuitemradio",checked:granular.railMax===range,
+      onSelect:()=>{
+        granular.railMax=validateSpeedRailRange(range);refreshGranular("speed");
+      }
+    }))});
   refreshGranular();
 }
 // Playback / model tab navigation owns presentation only. Existing song,

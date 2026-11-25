@@ -62,7 +62,6 @@ test("R3 opt-in real page applies precise signed speed/pitch without replacing t
       };
       set("granular-speed-value","-7.125");
       set("granular-pitch-value","7.1234");
-      set("granular-range","2");
     });
     const before=await page.evaluate(()=>({
       speed:document.querySelector("#granular-speed-value").value,

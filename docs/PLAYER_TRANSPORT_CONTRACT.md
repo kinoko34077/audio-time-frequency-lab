@@ -16,7 +16,7 @@ Implementation candidate until exact-head CI / Review / main and Pages acceptanc
 ## Current playback defaults and hold (2026-11-19)
 
 - **Phase Vocoder is the normal playback default.** Spectral STFT, Granular, Rust/WASM, WSOLA, Dual and AM remain separate selectable models; selecting PV uses the existing peak-locked PV renderer.
-- The speed rail displays **±2× by default**. Its existing ±1/±2/±4/±8 presets remain available, and ±8× remains selectable. The exact numeric speed input and canonical transport retain the full signed −8..+8 range.
+- The speed rail displays **±2× by default**. Its existing ±1/±2/±4/±8 presets remain available, and ±8× remains selectable. The exact numeric speed input and canonical transport retain the full signed −8..+8 range. The U05 UI uses the shared parameter context menu on the speed label or numeric field (right click, touch hold, Shift+F10); the selected rail range is checked in the menu rather than shown in a permanent select. A range selection changes only the displayed slider bounds; a tap on the numeric field remains the U04 digit-wheel operation.
 - After the Phase-Vocoder default-setting slice, further audio DSP, sound-quality and device work remains held until the user explicitly requests it, apart from the separately accepted staged-source-loading follow-up below. Keep the WAV and U3 residual-click holds. Physical iOS/Android behavior remains unverified.
 
 ## Progressive local source reads (2026-11-19; active Owner #36 follow-up)

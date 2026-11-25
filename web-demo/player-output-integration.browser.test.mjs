@@ -66,18 +66,20 @@ test("recorded piano main player: gesture/parameter receipts AND actual output P
     await page.waitForSelector("#play-main:not([disabled])",{timeout:15000});
     assert.equal(await page.$eval("#lab-model",el=>el.value),"pv",
       "public Audio Time must select the actual Phase Vocoder renderer by default");
+    await page.click("#granular-speed-label",{button:"right"});
     const speedRails=await page.evaluate(()=>({
-      railValue:document.querySelector("#granular-range").value,
-      railOptions:[...document.querySelector("#granular-range").options].map(option=>option.value),
+      railValue:document.querySelector('#fw-unit-snap-menu [aria-checked="true"]').textContent,
+      railOptions:[...document.querySelectorAll("#fw-unit-snap-menu button")].map(option=>option.textContent),
       min:document.querySelector("#granular-speed").min,
       max:document.querySelector("#granular-speed").max,
       preciseMin:document.querySelector("#granular-speed-value").min,
       preciseMax:document.querySelector("#granular-speed-value").max
     }));
     assert.deepEqual(speedRails,{
-      railValue:"2",railOptions:["1","2","4","8"],min:"-2",max:"2",
+      railValue:"±2倍",railOptions:["±1倍","±2倍","±4倍","±8倍"],min:"-2",max:"2",
       preciseMin:"-8",preciseMax:"8"
     },"the rail starts at ±2×, retains a selectable ±8×, and precise input keeps ±8×");
+    await page.keyboard.press("Escape");
     const decodedRate=Number((await page.$eval("#file-meta",el=>el.textContent))
       .match(/(\d+)Hz/)?.[1]);
     assert.ok(decodedRate>=8000&&decodedRate<=192000);

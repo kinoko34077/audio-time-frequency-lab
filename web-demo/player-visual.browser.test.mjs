@@ -85,8 +85,9 @@ async function layoutEvidence(page,tag){
           .getBoundingClientRect().bottom-1,
       abToolbarSpan:{left:abControls[0]?.left,right:abControls.at(-1)?.right,
         toolbarLeft:abToolbar.left,toolbarRight:abToolbar.right},
-      railRangeVisible:document.querySelector("#granular-range").getClientRects().length>0&&
-        document.querySelector("#granular-range").closest("details")===null,
+      railRangeCompact:!document.querySelector("#granular-range")&&
+        document.querySelector("#granular-speed-label").getClientRects().length>0&&
+        document.querySelector("#granular-speed-label").getAttribute("aria-haspopup")==="menu",
       rulerAtTop:(()=>{
         const waveform=document.querySelector(".wave-detail-wrap").getBoundingClientRect();
         const ruler=document.querySelector(".wave-detail-ruler").getBoundingClientRect();
@@ -256,7 +257,7 @@ async function layoutEvidence(page,tag){
   assert.ok(value.waveform.top<value.transport.top&&
     value.transport.top<value.speedPitch.top,
     "expected waveform > transport > speed/pitch hierarchy "+tag);
-  assert.equal(value.railRangeVisible,true,"speed rail width is directly available");
+  assert.equal(value.railRangeCompact,true,"speed rail range is available through the compact context target");
   assert.equal(value.rulerAtTop,true,"waveform ruler labels stay inside its top edge");
   assert.ok(value.playheadTopOffset<=1,
     "center playback position starts on the waveform edge: "+value.playheadTopOffset);
