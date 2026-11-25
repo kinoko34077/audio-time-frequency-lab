@@ -117,9 +117,9 @@
             <span class="wave-center-head" aria-hidden="true"></span>
             <span id="wave-a-marker" class="wave-marker wave-marker-a" aria-hidden="true" hidden>A</span>
             <span id="wave-b-marker" class="wave-marker wave-marker-b" aria-hidden="true" hidden>B</span>
-            <div class="transport"><span id="elapsed">0:00.0</span><span id="wave-hint" class="sr-only">波形を押して移動</span><span id="duration">0:00.0</span></div>
+            <div class="transport"><span id="elapsed" aria-label="現在の再生位置">0:00.0</span><span id="wave-hint" class="sr-only">波形を押して移動</span></div>
           </div>
-          <div class="wave-wrap"><canvas id="wave" role="button" tabindex="0" aria-label="全体波形をタップして位置を移動"></canvas><div id="wave-overview-selection" class="wave-overview-selection" aria-hidden="true"></div><div id="playhead" class="playhead"></div></div>
+          <div class="wave-wrap"><canvas id="wave" role="button" tabindex="0" aria-label="全体波形をタップして位置を移動"></canvas><div id="wave-overview-selection" class="wave-overview-selection" aria-hidden="true"></div><div id="playhead" class="playhead"></div><div class="overview-time-bounds"><span id="overview-start" aria-label="音源開始時刻">0:00.0</span><span id="duration" aria-label="音源終了時刻">0:00.0</span></div></div>
         </section>
         <div id="player-actions-slot"><div id="shared-transport">
           <div class="actions">
