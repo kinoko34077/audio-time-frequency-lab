@@ -1419,7 +1419,7 @@ body.model-lab[data-main-tab="player"] #player-loop-controls{
   body.model-lab:not([data-legacy-tools="1"])[data-main-tab="player"]{
     min-height:100dvh
   }
-  body.model-lab[data-main-tab="player"] .studio{
+  body.model-lab:not([data-legacy-tools="1"])[data-main-tab="player"] .studio{
     display:flex;flex-direction:column;height:100vh;height:100dvh;
     min-height:100vh;min-height:100dvh;
     overflow-y:auto;overscroll-behavior-y:contain;
@@ -1428,18 +1428,18 @@ body.model-lab[data-main-tab="player"] #player-loop-controls{
       calc(4px + env(safe-area-inset-bottom,0px))
       calc(7px + env(safe-area-inset-left,0px))
   }
-  body.model-lab[data-main-tab="player"] .main-workspace-tabs{flex:0 0 auto}
-  body.model-lab[data-main-tab="player"] .workspace-grid{
+  body.model-lab:not([data-legacy-tools="1"])[data-main-tab="player"] .main-workspace-tabs{flex:0 0 auto}
+  body.model-lab:not([data-legacy-tools="1"])[data-main-tab="player"] .workspace-grid{
     display:flex!important;flex:1 1 auto;flex-direction:column;min-height:0;width:100%;margin:0 auto
   }
-  body.model-lab[data-main-tab="player"] .workspace-left{
+  body.model-lab:not([data-legacy-tools="1"])[data-main-tab="player"] .workspace-left{
     display:flex;flex:1 1 auto;flex-direction:column;min-height:0
   }
-  body.model-lab[data-main-tab="player"] #main-player-panel{flex:1 1 auto;min-height:0}
-  body.model-lab[data-main-tab="player"] #main-player-panel>.wave-editor{
+  body.model-lab:not([data-legacy-tools="1"])[data-main-tab="player"] #main-player-panel{flex:1 1 auto;min-height:0}
+  body.model-lab:not([data-legacy-tools="1"])[data-main-tab="player"] #main-player-panel>.wave-editor{
     display:flex;flex:1 1 auto;flex-direction:column;min-height:0
   }
-  body.model-lab[data-main-tab="player"] #main-player-panel>.wave-editor .wave-detail-wrap{
+  body.model-lab:not([data-legacy-tools="1"])[data-main-tab="player"] #main-player-panel>.wave-editor .wave-detail-wrap{
     /* Let the detailed waveform absorb reclaimed PWA space; do not leave an
        empty band before transport when the phone viewport is tall. */
     --mobile-wave-available:max(150px,
@@ -1447,17 +1447,17 @@ body.model-lab[data-main-tab="player"] #player-loop-controls{
     flex:1 1 auto;height:auto!important;
     min-height:min(260px,var(--mobile-wave-available))
   }
-  body.model-lab[data-main-tab="player"] #player-loop-controls{width:100%;align-self:stretch}
-  body.model-lab[data-main-tab="player"] .player-loop-toolbar{
+  body.model-lab:not([data-legacy-tools="1"])[data-main-tab="player"] #player-loop-controls{width:100%;align-self:stretch}
+  body.model-lab:not([data-legacy-tools="1"])[data-main-tab="player"] .player-loop-toolbar{
     display:flex;justify-content:center;width:100%;gap:6px
   }
-  body.model-lab[data-main-tab="player"] .player-loop-toolbar>button,
-  body.model-lab[data-main-tab="player"] .player-loop-toggle{
+  body.model-lab:not([data-legacy-tools="1"])[data-main-tab="player"] .player-loop-toolbar>button,
+  body.model-lab:not([data-legacy-tools="1"])[data-main-tab="player"] .player-loop-toggle{
     width:auto;min-width:40px;padding-inline:8px;flex:0 0 auto
   }
-  body.model-lab[data-main-tab="player"] .player-loop-toolbar>button:first-child{min-width:52px}
-  body.model-lab[data-main-tab="player"] .below-workspace{flex:0 0 auto;margin-top:auto}
-  body.model-lab[data-main-tab="player"] footer{
+  body.model-lab:not([data-legacy-tools="1"])[data-main-tab="player"] .player-loop-toolbar>button:first-child{min-width:52px}
+  body.model-lab:not([data-legacy-tools="1"])[data-main-tab="player"] .below-workspace{flex:0 0 auto;margin-top:auto}
+  body.model-lab:not([data-legacy-tools="1"])[data-main-tab="player"] footer{
     justify-content:flex-end;margin-top:0;padding:0 4px;border:0;line-height:16px
   }
 }
