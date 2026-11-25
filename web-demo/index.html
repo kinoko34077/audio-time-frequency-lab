@@ -10,6 +10,7 @@
 <link rel="stylesheet" href="./style.css">
 <link rel="stylesheet" href="./vendor/frequency-warp-ui/digit-wheel-picker.css">
 <link rel="stylesheet" href="./vendor/frequency-warp-ui/parameter-context-menu.css">
+<link rel="stylesheet" href="./range-stepper.css">
 </head>
 <body class="model-lab" data-main-tab="player">
 <main class="studio">
@@ -45,10 +46,10 @@
           <option value="am">AM包絡＋PV</option>
         </select>
       </label>
-      <label class="lab-field lab-inertia-control" for="scrub-inertia">
-        スクラブ慣性 <output id="scrub-inertia-value" for="scrub-inertia">150%</output>
+      <div class="lab-field lab-inertia-control">
+        <label for="scrub-inertia">スクラブ慣性</label> <output id="scrub-inertia-value" for="scrub-inertia">150%</output>
         <input id="scrub-inertia" type="range" min="0" max="300" step="10" value="150" aria-label="スクラブ後の投げ慣性">
-      </label>
+      </div>
     </div>
     <details class="model-info-controls"><summary>モデル情報</summary>
       <p id="lab-model-description" class="lab-note model-summary" aria-live="polite">選択した処理モデルの説明を表示します。</p>
