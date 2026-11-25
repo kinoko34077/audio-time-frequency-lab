@@ -365,7 +365,8 @@ test("real recorded waveform UX across mobile, Android-size, tablet and desktop 
         // Direct keyboard editing remains available for exact values beyond
         // a particular wheel display precision; restore the existing fixture.
         await page.focus("#granular-pitch-value");
-        await page.keyboard.press("Control+A");
+        await page.keyboard.down("Control");
+        try{await page.keyboard.press("a");}finally{await page.keyboard.up("Control");}
         await page.keyboard.type("7.1234");
         await page.keyboard.press("Tab");
         assert.equal(await page.$eval("#granular-pitch-value",el=>el.value),"7.1234");
