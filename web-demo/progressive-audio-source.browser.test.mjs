@@ -311,7 +311,7 @@ test('native browser decodes exact requested WAV PCM, loads the app without eage
     // Real compressed PCM, real Worklet prefetch, controlled abort and held
     // endpoints. A warm decoded tail removes decoder duration from the
     // protocol assertion; this is not a natural cold-decoder latency test.
-    const refillDuringPreparation=await page.evaluate(async encoded=>{
+    const runRefillDuringPreparation=abortCount=>page.evaluate(async({encoded,abortCount})=>{
       const bytes=Uint8Array.from(atob(encoded),ch=>ch.charCodeAt(0));
       const {createProgressiveAudioSource}=await import('./progressive-audio-source.mjs');
       const {createSourcePCMBridge}=await import('./source-pcm-bridge.mjs');
@@ -331,8 +331,8 @@ test('native browser decodes exact requested WAV PCM, loads the app without eage
           }
           if(prime){prime=false;return source.read(start,count,options);}
           refillReads++;
-          if(!firstRefill){
-            firstRefill={start,count};
+          if(!firstRefill)firstRefill={start,count};
+          if(refillReads<=abortCount){
             return new Promise((_,reject)=>{
               abortRefill=()=>reject(new DOMException('PCM window decode aborted','AbortError'));
             });
@@ -364,10 +364,14 @@ test('native browser decodes exact requested WAV PCM, loads the app without eage
         const eventStart=events.length;
         operation=bridge.setLoopConfiguration(0,source.sourceFrames,true);
         await waitFor(()=>heldEndpoints===2,'both endpoint reads held');
-        abortRefill();
+        for(let i=1;i<=abortCount;i++){
+          await waitFor(()=>refillReads>=i&&abortRefill,'controlled refill attempt '+i);
+          abortRefill();abortRefill=null;
+        }
         await waitFor(()=>events.slice(eventStart).some(e=>
           e.type==='window-accepted'&&e.start===firstRefill.start),'old refill accepted before loop');
         const preCommit={refillReads,heldEndpoints,
+          needIds:events.filter(e=>e.type==='need-window').map(e=>e.refillId),
           loopAccepted:events.slice(eventStart).some(e=>e.type==='command-accepted'&&e.loopEnabled===true),
           fatal:events.filter(e=>e.type==='fatal-error').length,
           missingBefore:before?.missingFrames??null,
@@ -385,7 +389,8 @@ test('native browser decodes exact requested WAV PCM, loads the app without eage
         await operation?.catch(()=>{});
         source.dispose();await ctx.close();
       }
-    },mp3);
+    },{encoded:mp3,abortCount});
+    const refillDuringPreparation=await runRefillDuringPreparation(1);
     console.log('COMPRESSED_REFILL_DURING_PREPARATION '+JSON.stringify(refillDuringPreparation));
     assert.ok(refillDuringPreparation.preCommit.refillReads>=2);
     assert.equal(refillDuringPreparation.preCommit.heldEndpoints,2);
@@ -393,6 +398,17 @@ test('native browser decodes exact requested WAV PCM, loads the app without eage
     assert.equal(refillDuringPreparation.preCommit.fatal,0);
     assert.equal(refillDuringPreparation.applied.loopEnabled,true);
     assert.equal(refillDuringPreparation.applied.running,true);
+
+    const repeatPreemption=await runRefillDuringPreparation(2);
+    console.log('COMPRESSED_REPEAT_REFILL_PREEMPTION '+JSON.stringify(repeatPreemption));
+    assert.ok(repeatPreemption.preCommit.refillReads>=3);
+    assert.equal(repeatPreemption.preCommit.heldEndpoints,2);
+    assert.equal(repeatPreemption.preCommit.loopAccepted,false);
+    assert.equal(repeatPreemption.preCommit.fatal,0);
+    assert.ok(new Set(repeatPreemption.preCommit.needIds).size>=2,
+      'real Worklet must release the cancelled ID and issue a new request');
+    assert.equal(repeatPreemption.applied.loopEnabled,true);
+    assert.equal(repeatPreemption.applied.running,true);
 
     // Measure the actual decoder+bridge path without artificial delays.
     const reuse=await page.evaluate(async encoded=>{
