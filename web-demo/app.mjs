@@ -2687,30 +2687,33 @@ window.addEventListener("pagehide",event=>{
 });
 async function load(file){
   if(!file)return;
+  // A declined selection has no effect on the current or pending source.
+  if(file.size>75_000_000&&!window.confirm(
+    `この音源は ${(file.size/1_000_000).toFixed(0)} MB です。\n`+
+    "再生位置を優先して段階読込します。続けますか?"))return;
   const token=++state.loadToken;
   state.loadingSource?.dispose();state.loadingSource=null;
   const previousReady=hasAudioSource();
   let candidate=null;
   try{
-    if(file.size>75_000_000&&!window.confirm(
-      `この音源は ${(file.size/1_000_000).toFixed(0)} MB です。\n`+
-      "再生位置を優先して段階読込します。続けますか?"))return;
     $("#file-meta").hidden=false;
     $("#file-meta").textContent=file.name+" · 読み込み中"+(previousReady?"（現在の音声は保持）":"");
     $("#audio-picker-label").textContent="読み込み中…";
     $("#drop").setAttribute("aria-label",previousReady?"音源を変更":"音源を選ぶ");
     message("音声を開いています…"+(previousReady?" 現在の音声はそのまま使えます。":""));
     candidate=await createProgressiveAudioSource(file);
+    // A slower, superseded metadata read must not replace the newer
+    // candidate's cancellation handle.
+    if(token!==state.loadToken)return;
     state.loadingSource=candidate;
-    if(token!==state.loadToken){candidate.dispose();state.loadingSource=null;return;}
     // Probe the first PCM range before replacing the last playable source.
     await candidate.read(0,Math.min(4096,candidate.sourceFrames),
       {priority:"playback"});
-    if(token!==state.loadToken){candidate.dispose();state.loadingSource=null;return;}
+    if(token!==state.loadToken)return;
 
     // Commit only after format, duration and a real PCM window all validate.
     await stop();
-    if(token!==state.loadToken){candidate.dispose();return;}
+    if(token!==state.loadToken)return;
     if(state.rebuildTimer){clearTimeout(state.rebuildTimer);state.rebuildTimer=null;}
     if(state.offlineWorker){state.offlineWorker.terminate();state.offlineWorker=null;}
     const previousSource=state.source;
@@ -2744,8 +2747,6 @@ async function load(file){
     message("読み込み完了。再生できます。");
     void sampleSourceOverview(state.source);
   }catch(error){
-    candidate?.dispose();
-    if(state.loadingSource===candidate)state.loadingSource=null;
     if(token!==state.loadToken)return;
     $("#file-meta").hidden=false;
     $("#file-meta").textContent=previousReady?state.fileMeta:"読み込み失敗（ファイルを選び直せます）";
@@ -2754,6 +2755,13 @@ async function load(file){
     $("#drop").setAttribute("aria-label",previousReady?"音源を変更":"音源を選び直す");
     message("音声を開けませんでした: "+error.message+
       (previousReady?"。以前の音声は保持しています。":""),"error");
+  }finally{
+    // Only this request's uncommitted source belongs to this cleanup.
+    // A newer selection can already own state.loadingSource.
+    if(candidate){
+      if(state.loadingSource===candidate)state.loadingSource=null;
+      candidate.dispose();
+    }
   }
 }
 
