@@ -1505,11 +1505,13 @@ body.model-lab:not([data-legacy-tools="1"]) #audio-lab .model-essential-grid .la
   display:flex;flex-direction:column;gap:5px
 }
 body.model-lab:not([data-legacy-tools="1"]) #audio-lab .model-essential-grid .lab-inertia-control{
-  display:grid;grid-template-columns:max-content max-content minmax(120px,1fr);
+  display:grid;grid-template-columns:max-content 5ch minmax(0,1fr);
   align-items:center;gap:10px;margin:6px 0 0;color:#b7cfcd;font-size:12px
 }
 body.model-lab:not([data-legacy-tools="1"]) #audio-lab .lab-inertia-control output{
-  color:#80e4c4;font-variant-numeric:tabular-nums
+  color:#80e4c4;font-variant-numeric:tabular-nums;
+  /* U14: reserve the full 0–300% value column independent of digit count. */
+  width:100%;min-width:0;text-align:right;white-space:nowrap
 }
 body.model-lab:not([data-legacy-tools="1"]) #audio-lab .lab-inertia-control input{
   width:100%;min-width:0;accent-color:#65dbba
