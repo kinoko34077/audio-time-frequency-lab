@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {spawn} from "node:child_process";
+import {readFile,mkdtemp,open,rm} from "node:fs/promises";
+import {tmpdir} from "node:os";
 import path from "node:path";
 import puppeteer from "puppeteer-core";
 import {cleanupTestProcesses} from "./test-process-cleanup.mjs";
@@ -1369,5 +1371,139 @@ test("shared A/B updates every realtime model and compact numeric controls stay 
   }finally{
     await cleanupTestProcesses(browser,[server],
       "player-first settings HTTP server");
+  }
+});
+
+test("progressive file selection: stale metadata cannot orphan a newer candidate; cancelling a large selection has no side effect",{
+  timeout:60000
+},async()=>{
+  const port=18779;
+  const dir=await mkdtemp(path.join(tmpdir(),"audio-lab-source-selection-"));
+  const large=path.join(dir,"declined-large.wav");
+  let server,browser,page;
+  try{
+    // Real file above the existing warning threshold, sparse on disk. It
+    // must never be decoded because the native confirmation is dismissed.
+    const fd=await open(large,"w");
+    try{await fd.truncate(75_000_001);}finally{await fd.close();}
+    const encoded=(await readFile(recording)).toString("base64");
+    server=spawn(python,["-m","http.server",String(port),"--bind","127.0.0.1"],{
+      cwd:siteRoot,stdio:"ignore"
+    });
+    browser=await puppeteer.launch({
+      executablePath:process.env.CHROME_BIN||"/usr/bin/google-chrome",
+      headless:true,args:["--no-sandbox","--disable-dev-shm-usage",
+        "--autoplay-policy=no-user-gesture-required","--mute-audio"]
+    });
+    page=await browser.newPage();
+    const errors=[];page.on("pageerror",err=>errors.push(err.message));
+    await page.goto("http://127.0.0.1:"+port+"/",{waitUntil:"domcontentloaded",timeout:20000});
+    await page.waitForFunction(()=>document.documentElement.dataset.fwBoot==="ready",{timeout:20000});
+    await (await page.$("#audio-file")).uploadFile(recording);
+    await page.waitForFunction(()=>document.querySelector("#audio-picker-label")
+      ?.textContent==="meta-piano-a0-cc0-3s-48khz.wav"&&
+      !document.querySelector("#play-main")?.disabled,{timeout:15000});
+    // Instrument ONLY the pinned decoder's metadata/PCM completion timing.
+    // Actual File input, metadata decoder, app load and disposal remain real.
+    // _blob and _track are test-only observations of the pinned 1.66.1 vendor.
+    await page.evaluate(async encoded=>{
+      const media=await import("./vendor/mediabunny-1.66.1.mjs");
+      const bytes=Uint8Array.from(atob(encoded),c=>c.charCodeAt(0));
+      const events=[],gates={};
+      for(const name of ["race-a.wav","race-b.wav","race-d.wav"]){
+        let release;
+        const wait=new Promise(resolve=>{release=resolve;});
+        gates[name]={wait,release};
+      }
+      const inputName=input=>input.source?._blob?.name;
+      const record=(type,name)=>{if(name)events.push({type,name});};
+      const nativeCanRead=media.Input.prototype.canRead;
+      const nativeDispose=media.Input.prototype.dispose;
+      const nativeSamples=media.AudioSampleSink.prototype.samples;
+      media.Input.prototype.canRead=async function(...args){
+        const name=inputName(this);
+        record("metadata",name);
+        if(name==="race-a.wav")await gates[name].wait;
+        return nativeCanRead.apply(this,args);
+      };
+      media.Input.prototype.dispose=function(...args){
+        record("dispose",inputName(this));
+        return nativeDispose.apply(this,args);
+      };
+      media.AudioSampleSink.prototype.samples=function(...args){
+        const name=inputName(this._track.input);
+        const original=nativeSamples.apply(this,args);
+        if(name!=="race-b.wav"&&name!=="race-d.wav")return original;
+        record("pcm",name);
+        return (async function*(){await gates[name].wait;yield* original;})();
+      };
+      window.__sourceRace={events,gates,select(name){
+        const input=document.querySelector("#audio-file");
+        const transfer=new DataTransfer();
+        transfer.items.add(new File([bytes],name,{type:"audio/wav"}));
+        input.files=transfer.files;input.dispatchEvent(new Event("change",{bubbles:true}));
+      }};
+    },encoded);
+    const select=name=>page.evaluate(name=>window.__sourceRace.select(name),name);
+    const waitEvent=(type,name)=>page.waitForFunction(({type,name})=>
+      window.__sourceRace.events.some(e=>e.type===type&&e.name===name),
+      {timeout:10000},{type,name});
+    const release=name=>page.evaluate(name=>window.__sourceRace.gates[name].release(),name);
+    const waitFile=name=>page.waitForFunction(name=>
+      document.querySelector("#audio-picker-label")?.textContent===name&&
+      !document.querySelector("#play-main")?.disabled,{timeout:15000},name);
+    await select("race-a.wav");await waitEvent("metadata","race-a.wav");
+    await select("race-b.wav");await waitEvent("pcm","race-b.wav");
+    await release("race-a.wav");await waitEvent("dispose","race-a.wav");
+    // A finishes stale while B owns an in-flight first PCM read. Selecting C
+    // must dispose B BEFORE beginning C's metadata, not after B eventually
+    // resolves. On the old code A unconditionally erased B's handle.
+    await select("race-c.wav");await waitEvent("metadata","race-c.wav");
+    const beforeRelease=await page.evaluate(()=>window.__sourceRace.events.slice());
+    const disposeB=beforeRelease.findIndex(e=>e.type==="dispose"&&e.name==="race-b.wav");
+    const metadataC=beforeRelease.findIndex(e=>e.type==="metadata"&&e.name==="race-c.wav");
+    await release("race-b.wav");
+    await waitFile("race-c.wav");
+    assert.ok(disposeB>=0&&disposeB<metadataC,
+      "obsolete B must be cancelled before C starts: "+JSON.stringify(beforeRelease));
+    await select("race-d.wav");await waitEvent("pcm","race-d.wav");
+    let dialogs=0,dialogText="";
+    const dismissed=new Promise((resolve,reject)=>{
+      page.once("dialog",async dialog=>{
+        dialogs++;dialogText=dialog.message();
+        try{await dialog.dismiss();resolve();}catch(e){reject(e);}
+      });
+    });
+    await (await page.$("#audio-file")).uploadFile(large);
+    await dismissed;
+    const duringCancel=await page.evaluate(()=>({
+      events:window.__sourceRace.events.slice(),
+      picker:document.querySelector("#audio-picker-label").textContent,
+      meta:document.querySelector("#file-meta").textContent
+    }));
+    assert.equal(dialogs,1);
+    assert.match(dialogText,/75 MB/);
+    assert.ok(!duringCancel.events.some(e=>e.name==="declined-large.wav"),
+      "declined selection must never start metadata");
+    assert.ok(!duringCancel.events.some(e=>e.type==="dispose"&&e.name==="race-d.wav"),
+      "declining another file must not cancel the current pending source");
+    assert.match(duringCancel.meta,/race-d\.wav/);
+    await release("race-d.wav");await waitFile("race-d.wav");
+    const result=await page.evaluate(()=>({events:window.__sourceRace.events.slice(),
+      picker:document.querySelector("#audio-picker-label").textContent,
+      meta:document.querySelector("#file-meta").textContent,
+      a:document.querySelector("#player-loop-a").value,
+      b:document.querySelector("#player-loop-b").value}));
+    assert.equal(result.picker,"race-d.wav");
+    assert.equal(result.a,"0");assert.equal(result.b,"144000");
+    assert.deepEqual(errors,[]);
+    console.log("SOURCE_SELECTION_OWNERSHIP "+JSON.stringify({beforeRelease,duringCancel,
+      result,dialogs}));
+  }finally{
+    try{
+      if(page)await page.evaluate(()=>Object.values(window.__sourceRace?.gates||{})
+        .forEach(g=>g.release())).catch(()=>{});
+      await cleanupTestProcesses(browser,server?[server]:[],"source-selection HTTP server");
+    }finally{await rm(dir,{recursive:true,force:true});}
   }
 });
