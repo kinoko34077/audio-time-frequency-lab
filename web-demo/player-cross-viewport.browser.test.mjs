@@ -409,6 +409,16 @@ test("real recorded waveform UX across mobile, Android-size, tablet and desktop 
         assert.equal(await page.$eval("#granular-speed",el=>el.value),"-1");
         assert.equal(await page.$eval("#granular-speed-value",el=>el.value),"-1.237");
         if(profile.touch){
+          await page.evaluate(()=>{
+            window.__u07MenuTrace=[];
+            for(const type of ["pointerdown","pointerup","pointercancel","contextmenu","click"])
+              document.addEventListener(type,event=>{
+                if(window.__u07MenuTrace.length<32)window.__u07MenuTrace.push({
+                  type,target:event.target?.id||event.target?.textContent?.slice(0,30),
+                  pointerType:event.pointerType,detail:event.detail,x:event.clientX,y:event.clientY
+                });
+              },{capture:true});
+          });
           await page.$eval("#granular-speed-value",el=>el.scrollIntoView({block:"center"}));
           const point=await page.$eval("#granular-speed-value",el=>{
             const r=el.getBoundingClientRect();return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)};
@@ -424,7 +434,10 @@ test("real recorded waveform UX across mobile, Android-size, tablet and desktop 
           await page.focus("#granular-speed-value");
           await page.keyboard.down("Shift");await page.keyboard.press("F10");await page.keyboard.up("Shift");
         }
-        assert.equal(await page.$eval("#fw-unit-snap-menu",el=>el.hidden),false);
+        assert.equal(await page.$eval("#fw-unit-snap-menu",el=>el.hidden),false,
+          "hold release must leave menu open: "+JSON.stringify(await page.evaluate(()=>({
+            trace:window.__u07MenuTrace,range:document.querySelector("#granular-speed").max
+          }))));
         assert.equal(await page.$eval("#vr-wheel-overlay",el=>el.hidden),true,"long hold must not open the tap wheel");
         assert.equal(await page.$eval('#fw-unit-snap-menu [aria-checked="true"]',el=>el.textContent),"±1倍");
         await page.click("#fw-unit-snap-menu button:nth-child(4)");
