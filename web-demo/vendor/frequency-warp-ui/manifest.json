@@ -1,6 +1,6 @@
 {
   "repository": "kinoko34077/frequency-warp-vst",
-  "commit": "8a7052660161f70cccd4977a4bbb044e3a49f9fc",
+  "commit": "9e88b9ffd5ebd5f773d5959d1f15208a43c9a950",
   "files": {
     "digit-wheel-picker.mjs": {
       "source": "web-demo/digit-wheel-picker.mjs",
@@ -12,7 +12,7 @@
     },
     "parameter-context-menu.mjs": {
       "source": "web-demo/parameter-context-menu.mjs",
-      "gitBlob": "53250f4ae73e8e8099343cf03efaec62e6446134"
+      "gitBlob": "157be2a58ed07c394f59d932729b103ceb14f0f6"
     },
     "parameter-context-menu.css": {
       "source": "web-demo/parameter-context-menu.css",

@@ -169,6 +169,64 @@ test("tuning rails stay fixed while compact fields change and held zoom redraws 
         JSON.stringify(samples.filter(sample=>sample.visible&&
           sample.signal/sample.visible<.8).slice(0,8)));
 
+    // U09: real continuous zoom-out, with no per-frame pixel readback in
+    // the timing probe. Count scaled copies into the signal raster itself.
+    // The old recursive preview could remain visible yet progressively blur.
+    await page.$eval("#wave-zoom-in",el=>{el.click();el.click();});
+    await page.waitForFunction(()=>document.querySelector("#wave-detail").getAttribute("aria-busy")==="false",{timeout:5000});
+    const measureIdle=await page.evaluate(()=>new Promise(resolve=>{
+      const times=[];const frame=time=>{
+        times.push(time);
+        if(times.length>=16)resolve(times.slice(1).map((t,i)=>t-times[i]));
+        else requestAnimationFrame(frame);
+      };requestAnimationFrame(frame);
+    }));
+    const outClient=await page.createCDPSession();
+    const outBounds=await (await page.$("#wave-zoom-out")).boundingBox();
+    await page.evaluate(()=>{
+      const original=CanvasRenderingContext2D.prototype.drawImage;
+      window.__u09OriginalDraw=original;window.__u09ScaledCopies=0;
+      CanvasRenderingContext2D.prototype.drawImage=function(...args){
+        if(this.canvas.id==="wave-detail-buffer"&&args.length===9&&
+          (Math.abs(args[3]-args[7])>.001||Math.abs(args[4]-args[8])>.001))
+          window.__u09ScaledCopies++;
+        return original.apply(this,args);
+      };
+      window.__u09Frames=[];window.__u09Running=true;
+      const frame=time=>{
+        if(!window.__u09Running)return;
+        window.__u09Frames.push({time,span:document.querySelector("#wave-zoom-label").textContent});
+        requestAnimationFrame(frame);
+      };requestAnimationFrame(frame);
+    });
+    let timing;
+    try{
+      await outClient.send("Input.dispatchTouchEvent",{type:"touchStart",
+        touchPoints:[{x:outBounds.x+outBounds.width/2,y:outBounds.y+outBounds.height/2}]});
+      await new Promise(resolve=>setTimeout(resolve,850));
+      await outClient.send("Input.dispatchTouchEvent",{type:"touchEnd",touchPoints:[]});
+    }finally{
+      timing=await page.evaluate(()=>{
+        window.__u09Running=false;
+        CanvasRenderingContext2D.prototype.drawImage=window.__u09OriginalDraw;
+        return {frames:window.__u09Frames,scaledCopies:window.__u09ScaledCopies};
+      });
+      await outClient.detach();
+    }
+    const p95=values=>{const sorted=[...values].sort((a,b)=>a-b);return sorted[Math.ceil(sorted.length*.95)-1];};
+    const firstMove=timing.frames.findIndex((v,i)=>i>0&&v.span!==timing.frames[i-1].span);
+    assert.ok(firstMove>=0,"continuous zoom-out must actually change span");
+    const active=timing.frames.slice(firstMove);
+    const intervals=active.slice(1).map((v,i)=>v.time-active[i].time);
+    const evidence={idleP95:p95(measureIdle),activeP95:p95(intervals),
+      maxInterval:Math.max(...intervals),frames:active.length,
+      distinctSpans:new Set(active.map(v=>v.span)).size,scaledCopies:timing.scaledCopies};
+    console.log("U09_ZOOM_OUT "+JSON.stringify(evidence));
+    assert.equal(evidence.scaledCopies,0,"zoom-out must not scale its previous signal raster");
+    assert.ok(evidence.frames>=8&&evidence.distinctSpans>=4&&
+      evidence.activeP95<=Math.max(50,evidence.idleP95*2.5)&&evidence.maxInterval<250,
+      "held zoom-out should update continuously without long frame stalls: "+JSON.stringify(evidence));
+
     const adjacentWrites=await page.evaluate(()=>{
       const pitch=document.querySelector("#granular-pitch");
       const pitchValue=document.querySelector("#granular-pitch-value");

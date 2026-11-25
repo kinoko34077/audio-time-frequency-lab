@@ -136,6 +136,34 @@ test("R4 default page: play recorded song, set precise A/B and speed/pitch, open
     await holdTransport("#seek-backward",-4);
     assert.equal(await page.$eval("#granular-speed-value",node=>node.value),"1",
       "held 4x reverse transport does not overwrite the configured speed");
+    // U10: the actual Worklet must use 4x the configured magnitude, not
+    // the old fixed +/-4. The forward/back buttons retain source direction.
+    const setConfiguredSpeed=value=>page.$eval("#granular-speed-value",(el,value)=>{
+      el.value=String(value);el.dispatchEvent(new Event("change",{bubbles:true}));
+    },value);
+    const centerSource=async()=>{
+      await page.$eval("#wave",el=>el.scrollIntoView({block:"center"}));
+      const r=await page.$eval("#wave",el=>{
+        const b=el.getBoundingClientRect();return {x:b.x+b.width/2,y:b.y+b.height/2};
+      });
+      await page.mouse.click(r.x,r.y);
+      await page.waitForFunction(()=>{
+        const c=document.querySelector("#wave-detail");
+        const p=Number(c.getAttribute("aria-valuenow")),n=Number(c.getAttribute("aria-valuemax"));
+        return p>n*.3&&p<n*.7;
+      },{timeout:5000});
+    };
+    for(const [configured,magnitude] of [[.5,2],[-.75,3],[3,8]]){
+      await setConfiguredSpeed(configured);
+      for(const [selector,direction] of [["#seek-forward",1],["#seek-backward",-1]]){
+        await centerSource();
+        await holdTransport(selector,direction*magnitude);
+        assert.equal(await page.$eval("#granular-speed-value",el=>el.value),String(configured));
+      }
+    }
+    await setConfiguredSpeed(1);
+    console.log("U10_RELATIVE_SHUTTLE actualWorklet=+/-2,+/-3,+/-8 canonicalRestored=true");
+
     await page.click("#player-loop-toggle");
     await page.waitForFunction(()=>document.querySelector("#player-loop-toggle")
       ?.getAttribute("aria-pressed")==="false",{timeout:2000});

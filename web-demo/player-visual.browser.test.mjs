@@ -543,7 +543,7 @@ test("R4 usability visual captures: desktop and mobile player and folded researc
     await mobile.keyboard.press("Home");
     assert.equal(Math.round(mobileLayout.viewport/mobileLayout.viewportHeight*1000)/1000,.461,
       "mobile browser viewport matches the supplied 591:1280 screenshot ratio");
-    assert.deepEqual(mobileLayout.safeAreaPadding,{top:"50px",bottom:"32px"},
+    assert.deepEqual(mobileLayout.safeAreaPadding,{top:"50px",bottom:"28px"},
       "the page honors the modeled PWA status and home-indicator safe areas");
     assert.equal(mobileLayout.viewportFitCover,true,
       "mobile viewport leaves safe-area handling available to the PWA shell");
@@ -620,6 +620,70 @@ test("R4 usability visual captures: desktop and mobile player and folded researc
     assert.ok(tallMobileLayout.waveform.height>=mobileLayout.waveform.height+60,
       "a taller phone viewport gives its extra height to the main waveform: "+
         JSON.stringify({normal:mobileLayout.waveform,tall:tallMobileLayout.waveform}));
+    // U07: check actual viewport/safe area geometry before and after rotation.
+    assert.ok(mobileLayout.footer.height<=16&&tallMobileLayout.footer.height<=16,
+      "the source link occupies one compact line, not a padded footer");
+    assert.equal(mobileLayout.footer.bottom,mobileLayout.viewportHeight-28);
+    assert.equal(tallMobileLayout.footer.bottom,tallMobileLayout.viewportHeight-28);
+    const layoutBeforeRotation=await mobile.evaluate(()=>({
+      speed:document.querySelector("#granular-speed-value").value,
+      pitch:document.querySelector("#granular-pitch-value").value,
+      source:document.querySelector("#file-meta").textContent
+    }));
+    await mobile.setViewport({width:853,height:393,deviceScaleFactor:1.5,isMobile:true,hasTouch:true,isLandscape:true});
+    await mobileMetrics.send("Emulation.setSafeAreaInsetsOverride",{insets:{
+      top:0,bottom:21,left:44,right:44,topMax:0,bottomMax:21,leftMax:44,rightMax:44
+    }});
+    await mobile.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+    const landscape=await mobile.evaluate(()=>{
+      const studio=document.querySelector(".studio"),style=getComputedStyle(studio);
+      const box=selector=>{const r=document.querySelector(selector).getBoundingClientRect();
+        return {left:r.left,right:r.right,top:r.top+scrollY,bottom:r.bottom+scrollY,height:r.height};};
+      return {width:innerWidth,height:innerHeight,scrollWidth:document.documentElement.scrollWidth,
+        scrollHeight:document.documentElement.scrollHeight,studio:box(".studio"),
+        padding:[style.paddingTop,style.paddingRight,style.paddingBottom,style.paddingLeft],
+        overflow:style.overflowY,header:box(".header"),wave:box(".wave-detail-wrap"),
+        play:box("#play-main"),tune:box("#granular-optin-controls"),
+        loop:box("#player-loop-controls"),footer:box("footer"),
+        sourceHref:document.querySelector("footer a").getAttribute("href")};
+    });
+    console.log("U07_LANDSCAPE "+JSON.stringify(landscape));
+    assert.deepEqual(landscape.padding,["6px","51px","25px","51px"]);
+    assert.ok(landscape.scrollWidth<=landscape.width+1&&landscape.header.left>=51&&
+      landscape.header.right<=landscape.width-51&&landscape.wave.left>=51&&
+      landscape.wave.right<=landscape.width-51,"landscape respects both cutout sides");
+    assert.ok(landscape.wave.height>=150&&landscape.wave.bottom<=landscape.play.top&&
+      landscape.play.bottom<=landscape.tune.top&&landscape.tune.bottom<=landscape.loop.top&&
+      landscape.loop.bottom<=landscape.footer.top,"all controls remain ordered, non-overlapping");
+    assert.equal(landscape.overflow,"visible","short landscape uses document scrolling");
+    assert.ok(landscape.footer.height<=16&&
+      Math.abs(landscape.studio.bottom-landscape.footer.bottom-25)<=1&&
+      Math.abs(landscape.scrollHeight-landscape.studio.bottom)<=1,
+      "footer ends at safe area with no second empty scroll region");
+    assert.match(landscape.sourceHref,/github\.com\/kinoko34077\/audio-time-frequency-lab$/);
+    await mobile.$eval("footer a",el=>el.scrollIntoView({block:"end"}));
+    const reachable=await mobile.$eval("footer a",el=>{
+      const r=el.getBoundingClientRect();
+      return r.top>=0&&r.bottom<=innerHeight-20&&
+        document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)===el;
+    });
+    assert.ok(reachable,"source link stays reachable above home indicator");
+    await mobile.setViewport({width:393,height:853,deviceScaleFactor:1.5,isMobile:true,hasTouch:true,isLandscape:false});
+    await mobileMetrics.send("Emulation.setSafeAreaInsetsOverride",{insets:{
+      top:44,bottom:24,left:0,right:0,topMax:44,bottomMax:24,leftMax:0,rightMax:0
+    }});
+    await mobile.evaluate(()=>{window.scrollTo(0,0);document.querySelector(".studio").scrollTop=0;});
+    await mobile.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+    const returned=await layoutEvidence(mobile,"mobile-rotated-back");
+    assert.equal(returned.footer.bottom,returned.viewportHeight-28);
+    assert.ok(returned.footer.height<=16);
+    assert.deepEqual(await mobile.evaluate(()=>({
+      speed:document.querySelector("#granular-speed-value").value,
+      pitch:document.querySelector("#granular-pitch-value").value,
+      source:document.querySelector("#file-meta").textContent
+    })),layoutBeforeRotation,"rotation preserves source and configured parameters");
+    console.log("U07_FOOTER "+JSON.stringify({portrait:mobileLayout.footer.height,tall:tallMobileLayout.footer.height,
+      landscape:landscape.footer.height,returned:returned.footer.height,sourceReachable:reachable}));
     await mobile.click("#settings-open");
     await mobile.waitForFunction(()=>document.querySelector("#settings-dialog")?.open);
     assert.equal(await mobile.$eval("#runtime-hud",e=>e.getClientRects().length),0);

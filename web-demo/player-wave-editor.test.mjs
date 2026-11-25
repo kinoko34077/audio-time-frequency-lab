@@ -216,7 +216,7 @@ test("short-source detail waveform reads fixed-size PCM chunks and sharpens on z
   assert.ok(reads.every(read=>read.frameCount<sourceFrames),reads);
 });
 
-test("zooming out within cached one-frame peaks repaints both exposed strips",async()=>{
+test("zooming out within cached one-frame peaks repaints the entire current-resolution signal",async()=>{
   const sourceFrames=48_000*12,reads=[];let activeReads=0;
   const source={sourceFrames,maxReadFrames:262_144,overviewPeaks:[],
     async read(startFrame,frameCount){
@@ -264,6 +264,10 @@ test("zooming out within cached one-frame peaks repaints both exposed strips",as
       "cached PCM repaints the newly exposed left strip");
     assert.ok(segments.some(segment=>segment.x>=240),
       "cached PCM repaints the newly exposed right strip");
+    assert.ok(segments.some(segment=>segment.x>=140&&segment.x<180),
+      "the overlap must also be rasterized from source-coordinate peaks, not a resized prior raster");
+    assert.equal(new Set(segments.map(segment=>segment.x)).size,320,
+      "all in-source output columns use the current span without a recursive raster preview");
   }finally{
     editor?.setSource(null,48_000);
     await waitForReadQuiet(source,reads);
