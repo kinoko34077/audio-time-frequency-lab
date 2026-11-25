@@ -120,7 +120,7 @@ export async function createProgressiveAudioSource(file,{media,
     if(!Number.isFinite(sampleRate)||sampleRate<=0||
        !Number.isInteger(channelCount)||channelCount<1||
        !Number.isFinite(duration)||duration<=0||
-       !Number.isSafeInteger(sourceFrames)||sourceFrames<4096)
+       !Number.isSafeInteger(sourceFrames)||sourceFrames<1)
       throw new Error('音声の長さ・チャンネル情報を読み取れません');
 
     const sink=new api.AudioSampleSink(track);
