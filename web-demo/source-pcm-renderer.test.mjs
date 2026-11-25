@@ -1156,3 +1156,46 @@ test("native Granular, Spectral and Rust share accounting, EOF and source-clock 
     assert.equal(p.statistics.missingFrames,3,name);
   }
 });
+
+test("small loop endpoints never truncate a resident moving window at the same start",()=>{
+  for(const speed of [1,-1]){
+    const p=createSourcePCMRenderer({sourceFrames:262144,
+      sourceSampleRate:48000,outputSampleRate:48000,startFrame:10000,speed});
+    const w=(start,n)=>({start,channels:[new Float32Array(n).fill(.25)]});
+    p.installWindow(0,w(0,65536).channels);
+    assert.equal(block(p).missing,0);
+    const before=p.timeline.state.sourceFrame;
+    p.applyLoopConfiguration(0,240000,true,[w(0,8192),w(237568,8192)]);
+    assert.equal(p.timeline.state.sourceFrame,before);
+    assert.equal(p.hasFrame(before),true);
+    const after=block(p);
+    assert.equal(after.missing,0);
+    assert.ok(after.output[0].every(x=>x===.25));
+    // Moving A away from its formerly shared playback window retires
+    // the old pin without discarding the PCM under the current cursor.
+    const beforeEdit=p.timeline.state.sourceFrame;
+    p.applyLoopConfiguration(9000,240000,true,[w(8192,8192),w(237568,8192)]);
+    assert.equal(p.timeline.state.sourceFrame,beforeEdit);
+    assert.equal(p.hasFrame(50000),true);
+    assert.equal(block(p).missing,0);
+    p.applyLoopConfiguration(0,240000,false,[]);
+    assert.equal(block(p).missing,0);
+    assert.ok(p.statistics.windowCount<=SOURCE_WINDOW_SLOTS);
+  }
+});
+
+test("atomic loop pinning preserves the current moving window in a full cache",()=>{
+  const p=createSourcePCMRenderer({sourceFrames:262144,
+    sourceSampleRate:48000,outputSampleRate:48000,startFrame:100000,
+    loopStartFrame:0,loopEndFrame:240000,loopEnabled:true});
+  const w=(start,n)=>({start,channels:[new Float32Array(n).fill(.25)]});
+  p.installWindow(0,w(0,8192).channels,"A");
+  p.installWindow(237568,w(237568,8192).channels,"B");
+  p.installWindow(65536,w(65536,65536).channels);
+  p.installWindow(131072,w(131072,65536).channels);
+  assert.equal(p.statistics.windowCount,4);
+  p.applyLoopConfiguration(32768,230000,true,[w(32768,8192),w(229376,8192)]);
+  assert.equal(p.timeline.state.sourceFrame,100000);
+  assert.equal(block(p).missing,0);
+  assert.ok(p.statistics.windowCount<=4);
+});

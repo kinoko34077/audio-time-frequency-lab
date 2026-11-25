@@ -263,10 +263,27 @@ export function createSourcePCMRenderer({
             throw RangeError("invalid loop endpoint PCM window");
         }
       }
+      // Resolve both replacements against the old cache before touching either
+      // pin. A small same-start endpoint must not truncate a larger decoded
+      // playback window, including when the old A and B windows swap roles.
+      const prepared=enabled?endpoints.map(endpoint=>{
+        const end=endpoint.start+endpoint.channels[0].length;
+        return windows.find(w=>w.start===endpoint.start&&w.end>=end)??endpoint;
+      }):[];
       timeline.setLoopConfiguration(a,b,enabled);
       if(enabled){
-        api.installWindow(endpoints[0].start,endpoints[0].channels,"A","seek");
-        api.installWindow(endpoints[1].start,endpoints[1].channels,"B","seek");
+        const cursor=timeline.sampleIndexAt(0);
+        // Retire the old endpoint role, not the active PCM. If an endpoint
+        // moves elsewhere, its previous window may still cover the cursor.
+        for(const w of windows){
+          if(w.pin!==null&&cursor!==null&&cursor>=w.start&&cursor<w.end&&
+             !prepared.some(next=>next.start===w.start))w.pin=null;
+        }
+        // The timeline already points at the reconciled destination. Normal
+        // cursor-aware eviction retains its moving window while pinning the
+        // new endpoints, instead of seek's unconditional moving eviction.
+        api.installWindow(prepared[0].start,prepared[0].channels,"A");
+        api.installWindow(prepared[1].start,prepared[1].channels,"B");
       }else{
         // Once looping is off, endpoint windows must not monopolize cache.
         for(const w of windows)w.pin=null;

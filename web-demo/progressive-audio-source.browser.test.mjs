@@ -440,6 +440,70 @@ test('native browser decodes exact requested WAV PCM, loads the app without eage
       'short forward/reverse moves must be covered by fine guard data');
 
 
+    // At this position the initial 65,536-frame playback window starts at 0.
+    // An A=0 endpoint uses a much smaller window with that same start. Keep
+    // subsequent moving refills held so a quick refill cannot mask truncation.
+    const preserved=await page.evaluate(async encoded=>{
+      const bytes=Uint8Array.from(atob(encoded),ch=>ch.charCodeAt(0));
+      const {createProgressiveAudioSource}=await import('./progressive-audio-source.mjs');
+      const {createSourcePCMBridge}=await import('./source-pcm-bridge.mjs');
+      const results=[];
+      for(const processingMode of ['raw','pv']){
+        const source=await createProgressiveAudioSource(new File([bytes],
+          'progressive-probe.mp3',{type:'audio/mpeg'}));
+        const ctx=new AudioContext({sampleRate:source.sampleRate});
+        let bridge,hold=false,release;
+        const gate=new Promise(resolve=>{release=resolve;});
+        const events=[];
+        const reader={sourceFrames:source.sourceFrames,channelCount:source.channelCount,
+          async read(start,count,options){
+            if(hold&&options?.windowFrames===65536)await gate;
+            return source.read(start,count,options);
+          }};
+        const waitFor=async predicate=>{
+          const deadline=performance.now()+3000;
+          while(!predicate()){
+            if(performance.now()>deadline)throw Error('preserved window render timeout');
+            await new Promise(resolve=>setTimeout(resolve,1));
+          }
+        };
+        try{
+          bridge=await createSourcePCMBridge({ctx,source:reader,
+            sourceSampleRate:source.sampleRate,startFrame:10000,
+            speed:processingMode==='pv'?0:1,processingMode,
+            onEvent:e=>events.push(e)});
+          const analyser=ctx.createAnalyser();analyser.fftSize=1024;
+          bridge.connect(analyser);analyser.connect(ctx.destination);
+          hold=true;
+          await bridge.play();
+          await waitFor(()=>bridge.latest?.renderedFrames>=4096);
+          const initial=bridge.latest;
+          const ack=await bridge.setLoopConfiguration(0,source.sourceFrames,true);
+          await waitFor(()=>events.some(e=>e.type==='render-applied'&&e.requestId===ack.requestId));
+          const applied=events.find(e=>e.type==='render-applied'&&e.requestId===ack.requestId);
+          await waitFor(()=>bridge.latest?.renderedFrames>initial.renderedFrames+2048);
+          const later=bridge.latest;
+          const pcm=new Float32Array(analyser.fftSize);
+          analyser.getFloatTimeDomainData(pcm);
+          results.push({processingMode,initial,applied,later,
+            rms:Math.sqrt(pcm.reduce((sum,x)=>sum+x*x,0)/pcm.length)});
+        }finally{
+          release();
+          bridge?.dispose();source.dispose();await ctx.close();
+        }
+      }
+      return results;
+    },mp3);
+    console.log('COMPRESSED_PLAYBACK_WINDOW_PRESERVED '+JSON.stringify(preserved));
+    for(const result of preserved){
+      assert.ok(result.applied.sourceFrame>=8192&&result.applied.sourceFrame<60000);
+      assert.equal(result.applied.loopEnabled,true);
+      assert.equal(result.applied.running,true);
+      assert.equal(result.applied.missingFramesInBlock,0);
+      assert.equal(result.later.missingFrames,result.initial.missingFrames);
+      assert.ok(result.rms>.001,result.processingMode+' output must remain audible PCM');
+    }
+
     assert.deepEqual(errors,[]);
   }finally{
     await cleanupTestProcesses(browser,[server],'progressive source test server');
