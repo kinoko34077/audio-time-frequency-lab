@@ -1542,7 +1542,7 @@ body.model-lab:not([data-legacy-tools="1"]) .player-tune-control{
   grid-template-columns:32px minmax(0,1fr) var(--player-tune-value-width);
   column-gap:6px
 }
-body.model-lab .player-tune-control>:is(input[type=range],.range-stepper){
+body.model-lab .player-tune-control>input[type=range]{
   display:block;margin:0;box-sizing:border-box;width:100%;min-width:0;max-width:100%
 }
 body.model-lab:not([data-legacy-tools="1"]) .player-tune-control>.inline-number{
