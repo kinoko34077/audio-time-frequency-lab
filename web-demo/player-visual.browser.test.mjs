@@ -137,10 +137,19 @@ async function layoutEvidence(page,tag){
       clockAtBottom:(()=>{
         const waveform=document.querySelector(".wave-detail-wrap").getBoundingClientRect();
         const clock=document.querySelector(".wave-detail-wrap .transport").getBoundingClientRect();
-        return ["#elapsed","#duration"].every(selector=>
-          document.querySelector(selector).parentElement.classList.contains("transport")&&
-          document.querySelector(selector).parentElement.parentElement.classList.contains("wave-detail-wrap"))&&
+        return document.querySelector("#elapsed").closest(".wave-detail-wrap")&&
+          !document.querySelector("#duration").closest(".wave-detail-wrap")&&
           clock.top>=waveform.top+waveform.height*.72&&clock.bottom<=waveform.bottom;
+      })(),
+      overviewClock:(()=>{
+        const wrap=document.querySelector(".wave-wrap").getBoundingClientRect();
+        const bounds=document.querySelector(".overview-time-bounds");
+        const a=document.querySelector("#overview-start"),b=document.querySelector("#duration");
+        const r=bounds.getBoundingClientRect(),left=a.getBoundingClientRect(),right=b.getBoundingClientRect();
+        return {inside:a.parentElement===bounds&&b.parentElement===bounds&&
+          r.top>=wrap.top&&r.bottom<=wrap.bottom&&left.left>=wrap.left&&right.right<=wrap.right,
+          transparent:getComputedStyle(bounds).pointerEvents==="none",
+          start:a.textContent,end:b.textContent,disjoint:left.right<=right.left};
       })(),
       sliderAlignment:(()=>{
         const speed=document.querySelector("#granular-speed").getBoundingClientRect();
@@ -269,7 +278,10 @@ async function layoutEvidence(page,tag){
       JSON.stringify(value.rulerCoordinateErrors));
   assert.equal(value.markerBelowRuler.fits,true,
     "A/B markers begin just below the compact ruler: "+JSON.stringify(value.markerBelowRuler));
-  assert.equal(value.clockAtBottom,true,"elapsed and total time sit inside the waveform bottom edge");
+  assert.equal(value.clockAtBottom,true,"only current position belongs to the detailed waveform clock");
+  assert.ok(value.overviewClock.inside&&value.overviewClock.transparent&&value.overviewClock.disjoint&&
+    value.overviewClock.start==="0:00.0",
+    "full-source start/end stay inside the overview without intercepting seeks: "+JSON.stringify(value.overviewClock));
   assert.equal(value.sliderAlignment,true,"speed and pitch sliders share the same left and right edges");
   assert.ok(value.compactControlSizing.speedValue<=54&&value.compactControlSizing.pitchValue<=54,
     "numeric values use widths sized for their visible precision: "+JSON.stringify(value.compactControlSizing));
@@ -516,6 +528,27 @@ test("R4 usability visual captures: desktop and mobile player and folded researc
     await mobile.waitForFunction(()=>document.documentElement.dataset.fwBoot==="ready",{timeout:20000});
     await waitForFile(mobile);
     const mobileLayout=await layoutEvidence(mobile,"mobile-touch-loaded");
+    const sourceBounds=await mobile.evaluate(()=>({
+      start:document.querySelector("#overview-start").textContent,
+      end:document.querySelector("#duration").textContent,
+      elapsed:document.querySelector("#elapsed").textContent
+    }));
+    assert.equal(sourceBounds.start,"0:00.0");
+    assert.notEqual(sourceBounds.end,sourceBounds.start);
+    await mobile.focus("#wave-detail");
+    await mobile.keyboard.press("End");
+    await mobile.waitForFunction(before=>document.querySelector("#elapsed").textContent!==before,{timeout:4000},sourceBounds.elapsed);
+    await mobile.keyboard.press("-");
+    const afterSeekZoom=await mobile.evaluate(()=>({
+      start:document.querySelector("#overview-start").textContent,
+      end:document.querySelector("#duration").textContent,
+      elapsed:document.querySelector("#elapsed").textContent
+    }));
+    assert.equal(afterSeekZoom.start,sourceBounds.start);
+    assert.equal(afterSeekZoom.end,sourceBounds.end);
+    assert.notEqual(afterSeekZoom.elapsed,sourceBounds.elapsed);
+    await mobile.keyboard.press("Home");
+    console.log("U12_OVERVIEW_BOUNDS "+JSON.stringify({before:sourceBounds,after:afterSeekZoom}));
     assert.equal(Math.round(mobileLayout.viewport/mobileLayout.viewportHeight*1000)/1000,.461,
       "mobile browser viewport matches the supplied 591:1280 screenshot ratio");
     assert.deepEqual(mobileLayout.safeAreaPadding,{top:"50px",bottom:"32px"},
