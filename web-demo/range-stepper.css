@@ -1,0 +1,13 @@
+/* Shared compact fine-step pair. Width is reserved inside the rail cell,
+   not the numeric editor; existing row height remains the touch target. */
+.range-stepper{display:grid;grid-template-columns:18px minmax(0,1fr) 18px;gap:2px;
+  align-items:center;width:100%;min-width:0;max-width:100%;box-sizing:border-box}
+.range-stepper>input[type=range]{display:block;width:100%;min-width:0;max-width:100%;
+  margin:0;box-sizing:border-box}
+.range-stepper>.range-step{width:18px;min-width:0;min-height:32px;padding:0;
+  border:0;border-radius:4px;background:#18373b;color:#c5ebe2;
+  font-size:14px;line-height:1;touch-action:none;user-select:none;
+  -webkit-user-select:none;-webkit-touch-callout:none;box-sizing:border-box}
+.range-stepper>.range-step:active:not(:disabled){background:#315f56;color:#fff}
+.range-stepper>.range-step:focus-visible{outline:2px solid #8edec7;outline-offset:-2px}
+.range-stepper>.range-step:disabled{opacity:.4;cursor:default}

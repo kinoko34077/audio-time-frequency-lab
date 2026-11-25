@@ -1,5 +1,10 @@
 # Audio Lab — Source-time transport contract (#36)
 
+## 2026-11-25 scrub inertia baseline amendment (#124 U13)
+
+Implementation candidate until exact-head CI / Review / main and Pages acceptance. The slider retains 0–300%, its stored percentage and the existing signed ±8× transport bound. Moving release uses the existing scaled signed throw speed and cubic convergence to the configured playback speed, with return duration `1000 * (1 + strength)` ms (strength = percentage / 100). At 100%, 150%, 300% this is 2s, 2.5s, 4s respectively. A stationary release or 0% retains the previous 1s return, without a throw. Dragging again, shuttle, pause, or cancel interrupts the temporary override; canonical speed/pitch remain unchanged. Historical fixed 480ms/1s throw evidence is not today's duration contract. The numerical baseline is a proposed tuning value responding to the stronger-inertia request, not physical-device subjective acceptance.
+
+
 ## Current scope amendment — 2026-11-23 (user decision)
 
 - **Individual-period / 個別波長 processing is not a required feature or an acceptance condition for the normal Audio Lab player.** Completing parity for this optional research route (0×, reverse, ±8×, instant scrub, etc.) is not a blocker for the product or for refactoring acceptance. Historical investigation of that route remains documented below.
@@ -11,7 +16,10 @@
 ## Current playback defaults and hold (2026-11-19)
 
 - **Phase Vocoder is the normal playback default.** Spectral STFT, Granular, Rust/WASM, WSOLA, Dual and AM remain separate selectable models; selecting PV uses the existing peak-locked PV renderer.
-- The speed rail displays **±2× by default**. Its existing ±1/±2/±4/±8 presets remain available, and ±8× remains selectable. The exact numeric speed input and canonical transport retain the full signed −8..+8 range.
+- The speed rail displays **±2× by default**. Its existing ±1/±2/±4/±8 presets remain available, and ±8× remains selectable. The exact numeric speed input and canonical transport retain the full signed −8..+8 range. The U05 UI uses the shared parameter context menu on the speed label or numeric field (right click, touch hold, Shift+F10); the selected rail range is checked in the menu rather than shown in a permanent select. A range selection changes only the displayed slider bounds; a tap on the numeric field remains the U04 digit-wheel operation.
+- U06: the standard speed, pitch, inertia and four model-range controls have compact −/+ endpoints. Tap changes one existing slider step; holding repeats the same step. Fine speed/pitch adjusts the precise accepted canonical value by 0.01×/0.1 semitone even when outside the visible rail, clamping only to the full parameter limit. Model controls retain their native discrete choices, enabled/disabled rules and window consistency; input/change follow the existing update path. The same shared press lifecycle powers waveform zoom with its existing continuous curve. Release, pointer cancellation, lost capture, window blur and hidden document stop repeat.
+- U14: numeric readouts may change their text or internal input width, but not the position or length of the associated rail or its endpoint buttons in a stable viewport. Reserve the inertia percentage column for its entire existing 0–300% domain independently of the number of digits; keep tabular figures and existing step/storage. This is a layout contract, not a change to parameter precision.
+- U07: the normal player's source link is a compact single-line footer; no stacked footer margins or padded secondary panel. On a phone or standalone window, include safe-area insets on all four edges and use the dynamic viewport. A tall viewport allocates spare height to the waveform; a short landscape viewport uses natural document scroll instead of clipping or overlapping controls. Rotation preserves loaded source and parameter state. Legacy compatibility tools retain their separate layout.
 - After the Phase-Vocoder default-setting slice, further audio DSP, sound-quality and device work remains held until the user explicitly requests it, apart from the separately accepted staged-source-loading follow-up below. Keep the WAV and U3 residual-click holds. Physical iOS/Android behavior remains unverified.
 
 ## Progressive local source reads (2026-11-19; active Owner #36 follow-up)

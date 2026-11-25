@@ -8,6 +8,9 @@
 <meta name="color-scheme" content="dark">
 <title>Audio Time–Frequency Lab | 再生・音程・速度</title>
 <link rel="stylesheet" href="./style.css">
+<link rel="stylesheet" href="./vendor/frequency-warp-ui/digit-wheel-picker.css">
+<link rel="stylesheet" href="./vendor/frequency-warp-ui/parameter-context-menu.css">
+<link rel="stylesheet" href="./range-stepper.css">
 </head>
 <body class="model-lab" data-main-tab="player">
 <main class="studio">
@@ -43,10 +46,10 @@
           <option value="am">AM包絡＋PV</option>
         </select>
       </label>
-      <label class="lab-field lab-inertia-control" for="scrub-inertia">
-        スクラブ慣性 <output id="scrub-inertia-value" for="scrub-inertia">150%</output>
+      <div class="lab-field lab-inertia-control">
+        <label for="scrub-inertia">スクラブ慣性</label> <output id="scrub-inertia-value" for="scrub-inertia">150%</output>
         <input id="scrub-inertia" type="range" min="0" max="300" step="10" value="150" aria-label="スクラブ後の投げ慣性">
-      </label>
+      </div>
     </div>
     <details class="model-info-controls"><summary>モデル情報</summary>
       <p id="lab-model-description" class="lab-note model-summary" aria-live="polite">選択した処理モデルの説明を表示します。</p>
@@ -114,15 +117,15 @@
             <span class="wave-center-head" aria-hidden="true"></span>
             <span id="wave-a-marker" class="wave-marker wave-marker-a" aria-hidden="true" hidden>A</span>
             <span id="wave-b-marker" class="wave-marker wave-marker-b" aria-hidden="true" hidden>B</span>
-            <div class="transport"><span id="elapsed">0:00.0</span><span id="wave-hint" class="sr-only">波形を押して移動</span><span id="duration">0:00.0</span></div>
+            <div class="transport"><span id="elapsed" aria-label="現在の再生位置">0:00.0</span><span id="wave-hint" class="sr-only">波形を押して移動</span></div>
           </div>
-          <div class="wave-wrap"><canvas id="wave" role="button" tabindex="0" aria-label="全体波形をタップして位置を移動"></canvas><div id="wave-overview-selection" class="wave-overview-selection" aria-hidden="true"></div><div id="playhead" class="playhead"></div></div>
+          <div class="wave-wrap"><canvas id="wave" role="button" tabindex="0" aria-label="全体波形をタップして位置を移動"></canvas><div id="wave-overview-selection" class="wave-overview-selection" aria-hidden="true"></div><div id="playhead" class="playhead"></div><div class="overview-time-bounds"><span id="overview-start" aria-label="音源開始時刻">0:00.0</span><span id="duration" aria-label="音源終了時刻">0:00.0</span></div></div>
         </section>
         <div id="player-actions-slot"><div id="shared-transport">
           <div class="actions">
-            <button type="button" id="seek-backward" class="transport-skip" aria-label="4倍速で巻き戻す（長押し）" title="押している間4倍速で巻き戻す" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5v14L2 12l9-7Zm11 0v14l-9-7 9-7Z"/></svg></button>
+            <button type="button" id="seek-backward" class="transport-skip" aria-label="指定速度の4倍で巻き戻す（長押し、上限8倍）" title="押している間、指定速度の4倍で巻き戻す（上限8倍）" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5v14L2 12l9-7Zm11 0v14l-9-7 9-7Z"/></svg></button>
             <button type="button" id="play-main" class="primary" aria-label="再生" title="再生" disabled><svg data-transport-icon viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3.8v16.4L20 12 6 3.8Z"/></svg></button>
-            <button type="button" id="seek-forward" class="transport-skip" aria-label="4倍速で早送りする（長押し）" title="押している間4倍速で早送りする" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 5v14l9-7-9-7ZM2 5v14l9-7-9-7Z"/></svg></button>
+            <button type="button" id="seek-forward" class="transport-skip" aria-label="指定速度の4倍で早送りする（長押し、上限8倍）" title="押している間、指定速度の4倍で早送りする（上限8倍）" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 5v14l9-7-9-7ZM2 5v14l9-7-9-7Z"/></svg></button>
             <button id="stop" hidden disabled>停止</button>
             <button id="play-dry" hidden disabled>原音を聴く</button>
             <button id="play-wet" hidden disabled>モデルで再生</button>
@@ -136,12 +139,7 @@
         <section id="granular-optin-controls" class="player-tune" aria-label="速度と音程" hidden>
           <div class="player-tune-grid">
             <div class="player-tune-control">
-              <div class="player-tune-labels">
-                <label for="granular-speed">速度</label>
-                <label class="player-rail-setting">
-                  <select id="granular-range" aria-label="速度レール表示幅"><option value="1">±1倍</option><option value="2" selected>±2倍</option><option value="4">±4倍</option><option value="8">±8倍</option></select>
-                </label>
-              </div>
+              <label id="granular-speed-label" for="granular-speed" tabindex="0" aria-haspopup="menu">速度</label>
               <input id="granular-speed" type="range" min="-2" max="2" step=".01" value="1" aria-label="再生速度">
               <span class="inline-number"><input id="granular-speed-value" type="number" min="-8" max="8" step="any" value="1" inputmode="decimal" aria-label="再生速度の精密入力（倍）"><span class="player-tune-unit" aria-hidden="true">×</span></span>
               <output id="granular-speed-output" for="granular-speed" hidden>1.00×</output>

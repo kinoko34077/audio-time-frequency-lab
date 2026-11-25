@@ -153,6 +153,45 @@ test('native browser decodes exact requested WAV PCM, loads the app without eage
       'source duration is shown once in the waveform instead of repeated in file metadata');
     assert.equal(loading.duration,'0:08.0');
 
+    // The whole-track overview has source-coordinate bins independent of
+    // canvas pixels. Rotate while the first scan is still in progress.
+    await page.waitForFunction(()=>{
+      const d=document.querySelector('#wave')?.dataset;
+      return Number(d?.overviewReadyBins)>0&&Number(d?.overviewReadyBins)<Number(d?.overviewBins);
+    },{timeout:10000});
+    const overviewSnapshot=()=>page.$eval('#wave',canvas=>{
+      const {overviewGeneration,overviewBins,overviewReads,overviewReadyBins}=canvas.dataset;
+      const pixels=canvas.getContext('2d').getImageData(0,0,canvas.width,canvas.height).data;
+      let signal=0;
+      for(let i=0;i<pixels.length;i+=4)
+        if(pixels[i+1]>130&&pixels[i+1]>pixels[i]+35&&pixels[i+3]>0)signal++;
+      return {generation:Number(overviewGeneration),bins:Number(overviewBins),
+        reads:Number(overviewReads),ready:Number(overviewReadyBins),width:canvas.width,signal};
+    });
+    const building=await overviewSnapshot();
+    await page.setViewport({width:390,height:844,deviceScaleFactor:1});
+    await page.setViewport({width:844,height:390,deviceScaleFactor:1});
+    await page.waitForFunction(()=>{
+      const d=document.querySelector('#wave')?.dataset;
+      return Number(d?.overviewBins)>0&&d.overviewReadyBins===d.overviewBins;
+    },{timeout:10000});
+    const completed=await overviewSnapshot();
+    assert.equal(completed.generation,building.generation,
+      'rotation must not restart the source-coordinate scan');
+    assert.equal(completed.bins,2048);
+    assert.equal(completed.reads,64,'8-second source scanned once in 32-bin batches');
+    assert.ok(completed.signal>0);
+    await page.setViewport({width:390,height:844,deviceScaleFactor:1});
+    await new Promise(resolve=>setTimeout(resolve,250));
+    const rotated=await overviewSnapshot();
+    assert.notEqual(rotated.width,completed.width);
+    assert.equal(rotated.generation,completed.generation);
+    assert.equal(rotated.reads,completed.reads);
+    assert.equal(rotated.ready,completed.ready);
+    assert.ok(rotated.signal>0,'redrawn overview must retain waveform pixels');
+    await page.setViewport({width:800,height:600,deviceScaleFactor:1});
+    console.log('U02_OVERVIEW_RESIZE '+JSON.stringify({building,completed,rotated}));
+
     await page.evaluate(()=>{
       const input=document.querySelector('#audio-file'),transfer=new DataTransfer();
       transfer.items.add(new File(['not audio'],'broken.wav',{type:'audio/wav'}));
@@ -166,6 +205,14 @@ test('native browser decodes exact requested WAV PCM, loads the app without eage
     await page.click('#play-dry');
     await page.waitForFunction(()=>document.querySelector('#rt-telemetry')
       ?.dataset.pcmTransport==='raw-experimental',{timeout:20000});
+    await page.setViewport({width:390,height:844,deviceScaleFactor:1});
+    await new Promise(resolve=>setTimeout(resolve,250));
+    const playingResize=await overviewSnapshot();
+    assert.equal(playingResize.generation,completed.generation);
+    assert.equal(playingResize.reads,completed.reads);
+    assert.equal(playingResize.ready,completed.ready);
+    assert.equal(await page.$eval('#rt-telemetry',el=>el.dataset.pcmTransport),'raw-experimental');
+    await page.setViewport({width:800,height:600,deviceScaleFactor:1});
     await page.click('#stop');
     await page.evaluate(()=>window.dispatchEvent(
       new PageTransitionEvent('pagehide',{persisted:true})));
@@ -321,6 +368,77 @@ test('native browser decodes exact requested WAV PCM, loads the app without eage
       assert.equal(result.missing,0);
     }
     assert.equal(reuse.reenabled.a,18001);
+
+    // Real browser canvas: force the decoder to wait while zooming, then
+    // inspect actual edge pixels during forward and reverse high-zoom pans.
+    const edgeAudit=await page.evaluate(async()=>{
+      const {createPlayerWaveEditor}=await import('./player-wave-editor.mjs');
+      const root=document.createElement('div');
+      root.style.cssText='position:fixed;left:-10000px;top:0;width:320px';
+      document.body.append(root);
+      const node=tag=>{const el=document.createElement(tag);root.append(el);return el;};
+      const canvas=node('canvas');
+      canvas.style.cssText='display:block;width:320px;height:120px';
+      const zoomIn=node('button'),zoomOut=node('button');
+      let position=30,release,readCount=0;
+      const held=new Promise(resolve=>{release=resolve;});
+      const source={sourceFrames:48000*120,maxReadFrames:32768,
+        overviewPeaks:Array.from({length:96},()=>[-.95,.95]),
+        async read(startFrame,frameCount){
+          readCount++;
+          await held;
+          return {startFrame,channels:[new Float32Array(frameCount).fill(.2)]};
+        }};
+      const editor=createPlayerWaveEditor({canvas,wrap:root,
+        overviewSelection:node('div'),markerA:node('button'),markerB:node('button'),
+        zoomIn,zoomOut,zoomLabel:node('span'),
+        getPosition:()=>position,onPosition:value=>{position=value;},
+        onStart:()=>{},onAB:()=>({a:0,b:source.sourceFrames,enabled:false}),
+        onScrubState:()=>{}});
+      const edgePixels=()=>{
+        const ctx=canvas.getContext('2d'),width=canvas.width,height=canvas.height;
+        return [2,width-3].map(x=>{
+          const data=ctx.getImageData(x,0,1,height).data;
+          let count=0;
+          for(let i=0;i<data.length;i+=4)
+            if(data[i+1]>130&&data[i+2]>120&&data[i+1]>data[i]+35)count++;
+          return count;
+        });
+      };
+      try{
+        editor.setSource(source,48000);
+        for(let i=0;i<10;i++)zoomIn.click();
+        const pending={busy:canvas.getAttribute('aria-busy'),pixels:edgePixels()};
+        release();
+        const until=performance.now()+5000;
+        while(canvas.getAttribute('aria-busy')!=='false'){
+          if(performance.now()>until)throw Error('fine edge read timeout');
+          await new Promise(resolve=>setTimeout(resolve,10));
+        }
+        // Allow the bounded guard read to settle before moving.
+        await new Promise(resolve=>setTimeout(resolve,100));
+        const span=editor.spanFrames,ready=edgePixels();
+        const scrub=[];
+        for(const direction of [1,-1]){
+          position=30+direction*span/4/48000;
+          editor.refresh(true);
+          scrub.push({direction,pixels:edgePixels(),busy:canvas.getAttribute('aria-busy')});
+        }
+        return {pending,ready,scrub,span,readCount};
+      }finally{
+        release();editor.setSource(null,48000);root.remove();
+      }
+    });
+    console.log('U01_REAL_CANVAS_EDGE '+JSON.stringify(edgeAudit));
+    assert.equal(edgeAudit.pending.busy,'true');
+    assert.deepEqual(edgeAudit.pending.pixels,[0,0],
+      'unread high-zoom edges must not draw coarse overview blocks');
+    for(const pixels of [edgeAudit.ready,...edgeAudit.scrub.map(s=>s.pixels)])
+      assert.ok(pixels.every(count=>count>0&&count<10),
+        'fine edge pixels must remain narrow and visible: '+JSON.stringify(pixels));
+    assert.ok(edgeAudit.scrub.every(s=>s.busy==='false'),
+      'short forward/reverse moves must be covered by fine guard data');
+
 
     // At this position the initial 65,536-frame playback window starts at 0.
     // An A=0 endpoint uses a much smaller window with that same start. Keep

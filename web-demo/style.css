@@ -558,19 +558,6 @@ dialog[open]{display:flex;flex-direction:column;height:min(92dvh,850px);max-heig
 .bounds-heading .unit-value-tools .inline-value{width:104px!important;max-width:104px;min-width:80px}
 .unit-value-tools select{min-width:65px;max-width:110px;background:#102b2e;
  border:1px solid #35635d;border-radius:6px;color:#d8f2e6;font-size:11px;padding:4px 2px}
-/* Compact, transient long-press / right-click snap menu. The controls
-   themselves have no permanent snap button or keyboard-focus obstruction. */
-#fw-unit-snap-menu{position:fixed;z-index:2147483645;min-width:180px;
- max-width:calc(100vw - 16px);padding:5px;border:1px solid #477e75;
- border-radius:9px;background:#132b2f;box-shadow:0 12px 32px #000a;
- color:#e6f8f2;font:13px/1.3 system-ui,sans-serif}
-#fw-unit-snap-menu[hidden]{display:none!important}
-#fw-unit-snap-menu button{display:block;width:100%;border:0;border-radius:6px;
- padding:11px 14px;text-align:left;background:transparent;color:inherit;font:inherit;
- cursor:pointer;white-space:nowrap}
-#fw-unit-snap-menu button:hover,#fw-unit-snap-menu button:focus-visible{
- background:#315f56;outline:2px solid #8edec7;outline-offset:-2px}
-
 @media(max-width:450px){
  .bounds-heading .unit-value-tools .inline-value{width:86px!important;min-width:72px}
  .unit-value-tools select{min-width:58px;font-size:10px}
@@ -710,7 +697,7 @@ dialog[open]{display:flex;flex-direction:column;height:min(92dvh,850px);max-heig
   align-items:center;gap:8px
 }
 .lab-inline-control>label{grid-column:1;grid-row:1;white-space:nowrap}
-.lab-inline-control>input[type=range]{grid-column:2;grid-row:1;min-width:0}
+.lab-inline-control>:is(input[type=range],.range-stepper){grid-column:2;grid-row:1;min-width:0}
 .lab-inline-control>.inline-number{grid-column:3;grid-row:1;white-space:nowrap}
 .lab-inline-control>.inline-number input[type=number]{width:72px;min-height:38px}
 .lab-inline-control>output[hidden]{display:none!important}
@@ -914,7 +901,22 @@ body.model-lab[data-main-tab="player"] .header{margin-bottom:7px}
 body.model-lab[data-main-tab="player"] .header .brand p{display:none}
 body.model-lab[data-main-tab="player"] .header h1{font-size:clamp(15px,3.5vw,22px)}
 body.model-lab[data-main-tab="player"] .workspace-grid{max-width:910px}
-body.model-lab[data-main-tab="player"] .below-workspace footer{justify-content:flex-end}
+/* U07: the source link is not a second panel. Keep it available without
+   allocating a large footer or multiple stacked margins. */
+body.model-lab:not([data-legacy-tools="1"])[data-main-tab="player"] .below-workspace{
+  margin:0 auto;width:100%;max-width:910px
+}
+body.model-lab:not([data-legacy-tools="1"])[data-main-tab="player"] footer{
+  justify-content:flex-end;margin:0;padding:0 4px;
+  border:0;font-size:11px;line-height:16px
+}
+body.model-lab:not([data-legacy-tools="1"])[data-main-tab="player"] footer>a{
+  display:inline-block;line-height:16px;
+  scroll-margin-bottom:calc(4px + env(safe-area-inset-bottom,0px))
+}
+body.model-lab:not([data-legacy-tools="1"])[data-main-tab="player"] .studio{
+  padding-bottom:calc(4px + env(safe-area-inset-bottom,0px))
+}
 body.model-lab[data-main-tab="player"] #main-player-panel{
   display:flex;flex-direction:column;gap:7px;
   padding:clamp(10px,2.4vw,20px);
@@ -962,21 +964,17 @@ body.model-lab[data-main-tab="player"] #play-main{
   display:grid;grid-template-columns:minmax(0,1fr);gap:4px
 }
 .player-tune-control{
-  min-width:0;display:grid;grid-template-columns:minmax(88px,max-content) minmax(0,1fr) auto;
+  min-width:0;display:grid;grid-template-columns:32px minmax(0,1fr) auto;
   align-items:center;column-gap:8px
 }
-.player-tune-control>label,.player-tune-labels{grid-column:1;grid-row:1}
+.player-tune-control>label{grid-column:1;grid-row:1}
 .player-tune-control>label{font-size:13px;font-weight:650;color:#e8f4ef;white-space:nowrap}
-.player-tune-labels{display:flex;align-items:center;justify-content:space-between;gap:7px;min-width:0}
-.player-tune-labels>label:first-child{font-size:13px;font-weight:650;color:#e8f4ef;white-space:nowrap}
-.player-tune-control>input[type=range]{
+.player-tune-control>:is(input[type=range],.range-stepper){
   grid-column:2;grid-row:1;width:100%;min-width:0;touch-action:pan-y;accent-color:#70e6bb;min-height:40px
 }
 .player-tune-control>.inline-number{grid-column:3;grid-row:1}
 .player-tune-control output[hidden]{display:none!important}
 .player-tune-control .inline-number input[type=number]{min-height:38px;height:38px;width:9ch}
-.player-rail-setting{display:flex;align-items:center;gap:4px;margin:0;font-size:11px;white-space:nowrap;color:#bdd8d2}
-.player-rail-setting select{min-height:34px;padding:3px 5px;border:1px solid #456b68;color:#e2f7f1;background:#0e2830;border-radius:6px}
 .player-tune #granular-rail-note:empty{display:none}
 body.model-lab[data-main-tab="player"] #player-loop-controls{
   gap:3px;margin:1px 0 0;padding:9px 12px;border:1px solid #305158;
@@ -1343,7 +1341,6 @@ body.model-lab .model-extra-controls>summary{padding:3px 0}
   body.model-lab .lab-inline-control input[type=range]{min-height:44px}
   body.model-lab .player-tune-control .inline-number input[type=number]{height:38px;min-height:38px}
   body.model-lab .lab-inline-control .inline-number input[type=number]{height:44px;min-height:44px}
-  body.model-lab .player-rail-setting select{min-height:40px}
 }
 
 /* #36 follow-up: put the time ruler and transport clock on the waveform,
@@ -1364,15 +1361,12 @@ body.model-lab .model-extra-controls>summary{padding:3px 0}
 .wave-center-head{z-index:4}
 .wave-marker{top:50px}
 .wave-detail-wrap>.transport{
-  position:absolute;z-index:6;left:0;right:0;bottom:0;display:flex;justify-content:space-between;
+  position:absolute;z-index:6;left:0;right:0;bottom:0;display:flex;justify-content:center;
   gap:8px;margin:0;padding:3px 8px 4px;color:#d0e6e2;
   background:linear-gradient(0deg,#071820df 0%,#071820a8 68%,transparent 100%);
   font:11px/1.3 ui-monospace,monospace;font-variant-numeric:tabular-nums;pointer-events:none
 }
-.player-tune-control{grid-template-columns:minmax(88px,max-content) minmax(0,1fr) 82px;column-gap:8px}
-.player-tune-labels{justify-content:space-between;gap:4px}
-.player-rail-setting{gap:0}
-.player-rail-setting select{width:58px;min-width:58px;padding:3px 2px;text-align:center}
+.player-tune-control{grid-template-columns:32px minmax(0,1fr) 82px;column-gap:8px}
 body.model-lab[data-main-tab="player"] .player-tune-control>.inline-number{
   display:inline-flex;justify-self:end;justify-content:flex-end;gap:3px;
   align-items:center;width:max-content;min-width:0
@@ -1401,13 +1395,9 @@ body.model-lab[data-main-tab="player"] #player-loop-controls{
     grid-template-columns:minmax(0,1fr);gap:4px
   }
   body.model-lab[data-main-tab="player"] .player-tune-control{
-    grid-template-columns:minmax(76px,max-content) minmax(0,1fr) max-content;column-gap:6px
+    grid-template-columns:32px minmax(0,1fr) max-content;column-gap:6px
   }
-  body.model-lab[data-main-tab="player"] .player-tune-control>label,
-  body.model-lab[data-main-tab="player"] .player-tune-labels>label:first-child{font-size:12px}
-  body.model-lab[data-main-tab="player"] .player-rail-setting select{
-    width:46px;min-width:46px;min-height:36px;font-size:10px
-  }
+  body.model-lab[data-main-tab="player"] .player-tune-control>label{font-size:12px}
   body.model-lab[data-main-tab="player"] .player-tune-control .inline-number input[type=number]{
     width:3ch;min-width:2.2ch;max-width:12ch;height:34px;min-height:34px
   }
@@ -1423,28 +1413,33 @@ body.model-lab[data-main-tab="player"] #player-loop-controls{
   body.model-lab[data-main-tab="player"] .player-loop-toggle input{width:16px;height:16px}
 }
 
-/* Mobile PWA: use the available viewport for the waveform instead of leaving
-   unused space below the footer. Keep the phone safe areas inside the page. */
-@media(max-width:600px){
-  body.model-lab[data-main-tab="player"] .studio{
+/* Mobile/PWA: use the available viewport for the waveform, including a
+   rotated phone whose width exceeds the portrait breakpoint. */
+@media(max-width:600px), (display-mode:standalone), (orientation:landscape) and (max-height:600px) and (any-pointer:coarse){
+  body.model-lab:not([data-legacy-tools="1"])[data-main-tab="player"]{
+    min-height:100dvh
+  }
+  body.model-lab:not([data-legacy-tools="1"])[data-main-tab="player"] .studio{
     display:flex;flex-direction:column;height:100vh;height:100dvh;
     min-height:100vh;min-height:100dvh;
     overflow-y:auto;overscroll-behavior-y:contain;
-    margin:0 auto;padding:calc(6px + env(safe-area-inset-top,0px)) 7px
-      calc(8px + env(safe-area-inset-bottom,0px))
+    margin:0 auto;padding:calc(6px + env(safe-area-inset-top,0px))
+      calc(7px + env(safe-area-inset-right,0px))
+      calc(4px + env(safe-area-inset-bottom,0px))
+      calc(7px + env(safe-area-inset-left,0px))
   }
-  body.model-lab[data-main-tab="player"] .main-workspace-tabs{flex:0 0 auto}
-  body.model-lab[data-main-tab="player"] .workspace-grid{
+  body.model-lab:not([data-legacy-tools="1"])[data-main-tab="player"] .main-workspace-tabs{flex:0 0 auto}
+  body.model-lab:not([data-legacy-tools="1"])[data-main-tab="player"] .workspace-grid{
     display:flex!important;flex:1 1 auto;flex-direction:column;min-height:0;width:100%;margin:0 auto
   }
-  body.model-lab[data-main-tab="player"] .workspace-left{
+  body.model-lab:not([data-legacy-tools="1"])[data-main-tab="player"] .workspace-left{
     display:flex;flex:1 1 auto;flex-direction:column;min-height:0
   }
-  body.model-lab[data-main-tab="player"] #main-player-panel{flex:1 1 auto;min-height:0}
-  body.model-lab[data-main-tab="player"] #main-player-panel>.wave-editor{
+  body.model-lab:not([data-legacy-tools="1"])[data-main-tab="player"] #main-player-panel{flex:1 1 auto;min-height:0}
+  body.model-lab:not([data-legacy-tools="1"])[data-main-tab="player"] #main-player-panel>.wave-editor{
     display:flex;flex:1 1 auto;flex-direction:column;min-height:0
   }
-  body.model-lab[data-main-tab="player"] #main-player-panel>.wave-editor .wave-detail-wrap{
+  body.model-lab:not([data-legacy-tools="1"])[data-main-tab="player"] #main-player-panel>.wave-editor .wave-detail-wrap{
     /* Let the detailed waveform absorb reclaimed PWA space; do not leave an
        empty band before transport when the phone viewport is tall. */
     --mobile-wave-available:max(150px,
@@ -1452,18 +1447,35 @@ body.model-lab[data-main-tab="player"] #player-loop-controls{
     flex:1 1 auto;height:auto!important;
     min-height:min(260px,var(--mobile-wave-available))
   }
-  body.model-lab[data-main-tab="player"] #player-loop-controls{width:100%;align-self:stretch}
-  body.model-lab[data-main-tab="player"] .player-loop-toolbar{
+  body.model-lab:not([data-legacy-tools="1"])[data-main-tab="player"] #player-loop-controls{width:100%;align-self:stretch}
+  body.model-lab:not([data-legacy-tools="1"])[data-main-tab="player"] .player-loop-toolbar{
     display:flex;justify-content:center;width:100%;gap:6px
   }
-  body.model-lab[data-main-tab="player"] .player-loop-toolbar>button,
-  body.model-lab[data-main-tab="player"] .player-loop-toggle{
+  body.model-lab:not([data-legacy-tools="1"])[data-main-tab="player"] .player-loop-toolbar>button,
+  body.model-lab:not([data-legacy-tools="1"])[data-main-tab="player"] .player-loop-toggle{
     width:auto;min-width:40px;padding-inline:8px;flex:0 0 auto
   }
-  body.model-lab[data-main-tab="player"] .player-loop-toolbar>button:first-child{min-width:52px}
-  body.model-lab[data-main-tab="player"] .below-workspace{flex:0 0 auto;margin-top:auto}
-  body.model-lab[data-main-tab="player"] footer{
-    justify-content:flex-end;margin-top:0;padding:6px 4px 2px;border-top-color:#2c4245
+  body.model-lab:not([data-legacy-tools="1"])[data-main-tab="player"] .player-loop-toolbar>button:first-child{min-width:52px}
+  body.model-lab:not([data-legacy-tools="1"])[data-main-tab="player"] .below-workspace{flex:0 0 auto;margin-top:auto}
+  body.model-lab:not([data-legacy-tools="1"])[data-main-tab="player"] footer{
+    justify-content:flex-end;margin-top:0;padding:0 4px;border:0;line-height:16px
+  }
+}
+/* A short landscape screen may not contain all controls. Let the document
+   scroll naturally rather than shrinking flex children into each other or
+   reserving a second fixed-height scrolling region. */
+@media(orientation:landscape) and (max-height:600px) and (any-pointer:coarse),
+       (display-mode:standalone) and (orientation:landscape) and (max-height:600px){
+  body.model-lab:not([data-legacy-tools="1"])[data-main-tab="player"] .studio{
+    height:auto;min-height:100vh;min-height:100dvh;overflow:visible;
+    overscroll-behavior-y:auto
+  }
+  body.model-lab:not([data-legacy-tools="1"])[data-main-tab="player"] :is(.workspace-grid,.workspace-left,#main-player-panel,#main-player-panel>.wave-editor){
+    flex:1 0 auto
+  }
+  body.model-lab:not([data-legacy-tools="1"])[data-main-tab="player"] #main-player-panel>.wave-editor .wave-detail-wrap{
+    flex:1 0 auto;height:clamp(150px,36dvh,260px)!important;
+    min-height:150px
   }
 }
 
@@ -1530,11 +1542,13 @@ body.model-lab:not([data-legacy-tools="1"]) #audio-lab .model-essential-grid .la
   display:flex;flex-direction:column;gap:5px
 }
 body.model-lab:not([data-legacy-tools="1"]) #audio-lab .model-essential-grid .lab-inertia-control{
-  display:grid;grid-template-columns:max-content max-content minmax(120px,1fr);
+  display:grid;grid-template-columns:max-content 5ch minmax(0,1fr);
   align-items:center;gap:10px;margin:6px 0 0;color:#b7cfcd;font-size:12px
 }
 body.model-lab:not([data-legacy-tools="1"]) #audio-lab .lab-inertia-control output{
-  color:#80e4c4;font-variant-numeric:tabular-nums
+  color:#80e4c4;font-variant-numeric:tabular-nums;
+  /* U14: reserve the full 0–300% value column independent of digit count. */
+  width:100%;min-width:0;text-align:right;white-space:nowrap
 }
 body.model-lab:not([data-legacy-tools="1"]) #audio-lab .lab-inertia-control input{
   width:100%;min-width:0;accent-color:#65dbba
@@ -1558,19 +1572,28 @@ body.model-lab:not([data-legacy-tools="1"]) #main-player-panel #play-main{
   .gear{width:40px;height:40px;min-width:40px}
   .wave-detail-wrap>.wave-zoom-actions{top:20px;right:4px}
 }
+/* Reserve the complete inline field, not only its shortest value. The
+   numeric input can grow within its cell without encroaching on the rail. */
 body.model-lab:not([data-legacy-tools="1"]) .player-tune-control{
-  grid-template-columns:80px minmax(0,1fr) var(--player-tune-value-width,52px);
+  --player-tune-input-max:62px;
+  --player-tune-unit-width:30px;
+  --player-tune-value-width:calc(var(--player-tune-input-max) + var(--player-tune-unit-width) + 3px);
+  grid-template-columns:32px minmax(0,1fr) var(--player-tune-value-width);
   column-gap:6px
 }
+body.model-lab .player-tune-control>input[type=range]{
+  display:block;margin:0;box-sizing:border-box;width:100%;min-width:0;max-width:100%
+}
 body.model-lab:not([data-legacy-tools="1"]) .player-tune-control>.inline-number{
-  display:grid;grid-template-columns:max-content 30px;gap:3px;align-items:center;
-  justify-self:end;width:max-content;min-width:0
+  display:grid;grid-template-columns:minmax(0,1fr) var(--player-tune-unit-width);
+  gap:3px;align-items:center;justify-self:stretch;width:100%;min-width:0
 }
 body.model-lab:not([data-legacy-tools="1"]) .player-tune-control .player-tune-unit{
-  width:30px;min-width:30px
+  width:var(--player-tune-unit-width);min-width:0
 }
 body.model-lab:not([data-legacy-tools="1"]) .player-tune-control .inline-number input[type=number]{
-  height:32px;min-height:32px
+  height:32px;min-height:32px;min-width:0;max-width:100%;
+  box-sizing:border-box;justify-self:end
 }
 @media(max-width:650px){
   body.model-lab:not([data-legacy-tools="1"]) #audio-lab .model-extra-grid{
@@ -1628,4 +1651,21 @@ body.model-lab:not([data-legacy-tools="1"]) :is(#main-player-panel,#model-transp
   body.model-lab:not([data-legacy-tools="1"]) :is(#main-player-panel,#model-transport-host) #shared-transport>.actions{
     gap:clamp(18px,9vw,36px);margin:6px auto 2px
   }
+}
+
+/* U05: the shared menu lives on the speed label/value, not a permanent select. */
+#granular-speed-label{display:flex;align-items:center;min-height:32px;cursor:context-menu;user-select:none;-webkit-touch-callout:none;touch-action:manipulation}
+#granular-speed-value{-webkit-touch-callout:none}
+
+/* U06: grid cell belongs to the whole stepper; only the actual range receives rail touch behavior. */
+.player-tune-control .range-stepper>input[type=range]{touch-action:pan-y;accent-color:#70e6bb;min-height:40px}
+
+/* U12: source bounds belong to the whole-track overview, not the current
+   zoomed viewport. Overlay labels do not consume height or intercept seeks. */
+.wave-wrap>.overview-time-bounds{
+  position:absolute;z-index:3;left:0;right:0;bottom:0;
+  display:flex;justify-content:space-between;gap:4px;padding:1px 5px 2px;
+  background:linear-gradient(0deg,#071820e8,transparent);color:#d0e6e2;
+  font:10px/1.2 ui-monospace,monospace;font-variant-numeric:tabular-nums;
+  pointer-events:none;white-space:nowrap
 }

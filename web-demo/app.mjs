@@ -3,12 +3,15 @@ import {fullBandPartialOptions} from "./lab-contract.mjs";
 import {createModelStream} from "./lab-stream.mjs";
 import {createSourcePCMBridge} from "./source-pcm-bridge.mjs";
 import {createProgressiveAudioSource} from "./progressive-audio-source.mjs";
-import {advanceOverviewBuildToken,overviewBinCount,overviewNeedsResample,readOverviewPeak} from "./waveform-range-peaks.mjs";
-import {returnToPlaySpeed,scrubSpeed,releaseScrubSpeed,scaleScrubInertia} from "./scrub-kinetics.mjs";
+import {advanceOverviewBuildToken,overviewBinCount,overviewNeedsResample,readOverviewPeaks} from "./waveform-range-peaks.mjs";
+import {returnToPlaySpeed,scrubSpeed,releaseScrubSpeed,scaleScrubInertia,scrubReturnDuration} from "./scrub-kinetics.mjs";
 import {createPlayerWaveEditor} from "./player-wave-editor.mjs";
+import {createDigitWheelPicker} from "./vendor/frequency-warp-ui/digit-wheel-picker.mjs";
+import {attachParameterContextMenu} from "./vendor/frequency-warp-ui/parameter-context-menu.mjs";
+import {mountRangeStepButtons,incrementCanonical} from "./range-stepper.mjs";
 import {toggleSourceMarker} from "./player-ab-markers.mjs";
 import {primaryModelCapability,isContinuousPCMModel} from "./model-route.mjs";
-import {validatePlaybackSpeed,validateSpeedRailRange,speedOnRail,formatPlaybackSpeed} from "./source-timeline.mjs";
+import {SPEED_RAIL_PRESETS,validatePlaybackSpeed,validateSpeedRailRange,speedOnRail,formatPlaybackSpeed,shuttlePlaybackSpeed} from "./source-timeline.mjs";
 import {frequencyFromSlider,sliderFromFrequency,holdFromFrequency,drawCrusherPreview} from "./crusher-visual.mjs";
 import {drawFrequencyGraph} from "./graph.mjs";
 import {mountDualThumb} from "./dual-thumb.mjs";
@@ -216,7 +219,10 @@ function refreshGranular(changedKind=null){
       input.value=formatPlaybackSpeed(granular.speed,{editing:true});
     fitInlineNumber(input);
     $("#granular-speed-output").textContent=formatPlaybackSpeed(granular.speed)+"×";
-    $("#granular-range").value=String(granular.railMax);
+    const rangeHint="速度レールの範囲：±"+granular.railMax+"倍。右クリック・長押し・Shift+F10で切替";
+    $("#granular-speed-label").title=rangeHint;
+    $("#granular-speed-label").setAttribute("aria-description",rangeHint);
+    input.setAttribute("aria-description",rangeHint);
     $("#granular-rail-note").textContent=Math.abs(granular.speed)>granular.railMax?
       "指定速度はレール外です。直接入力した数値は保持されています。":"";
   }
@@ -304,7 +310,7 @@ function waveformScrubMotion(speed,phase,sourceFrame=null){
   if(scrubMotionFrame)cancelAnimationFrame(scrubMotionFrame);
   const token=scrubMotionToken,started=performance.now();
   const from=validatePlaybackSpeed(scaleScrubInertia(speed,scrubInertia/100));
-  const duration=1000;
+  const duration=scrubReturnDuration(from,scrubInertia/100);
   // A held finger eases out from 0x; a quick throw continues in its signed
   // direction and smoothly converges to the user's configured playback speed.
   const frame=()=>{
@@ -373,16 +379,66 @@ if(PLAYER_GRANULAR_AVAILABLE){
     controls.dry.textContent="▶ 粒状音程（実験）";
     controls.dry.title="以前の実験ルートと同一の独立音程再生。";
   }
+  // The Frequency Warp wheel owns the entire digit/scroll/cancel lifecycle.
+  // This adapter only supplies Audio Lab's existing parameter meaning.
+  const wheel=createDigitWheelPicker({onValue:(kind,value)=>{
+    if(!Number.isFinite(value)||Math.abs(value)>(kind==="speed"?8:12))return false;
+    editGranular(kind,String(value));return true;
+  }});
+  const wheelPlaces=(kind,value)=>{
+    const [mantissa,exponent="0"]=String(Math.abs(value)).split("e");
+    const decimalPlaces=(mantissa.split(".")[1]?.length??0)-Number(exponent);
+    const precision=Math.min(12,Math.max(4,decimalPlaces));
+    return [...(kind==="pitch"?[1,0]:[0]),
+      ...Array.from({length:precision},(_,i)=>-i-1)];
+  };
   for(const k of ["speed","pitch"]){
     const slider=$("#granular-"+k),input=$("#granular-"+k+"-value");
     slider.addEventListener("input",()=>editGranular(k,slider.value));
+    mountRangeStepButtons(slider,{onStep:direction=>{
+      // Fine steps operate on the accepted precise value, not the clamped
+      // rail proxy. The visible range is presentation-only (U05).
+      if(document.activeElement===input)input.blur();
+      const before=granular[k],limit=k==="speed"?8:12;
+      const next=incrementCanonical(before,Number(slider.step),direction,-limit,limit);
+      if(Object.is(before,next))return false;
+      editGranular(k,String(next));return true;
+    }});
     input.addEventListener("input",()=>{input.setCustomValidity("");fitInlineNumber(input);});
     input.addEventListener("change",()=>editGranular(k,input.value));
+    if(document.body.dataset.legacyTools==="1")continue;
+    input.setAttribute("aria-haspopup","dialog");
+    input.setAttribute("aria-controls","vr-wheel-overlay");
+    input.setAttribute("aria-expanded","false");
+    input.title="タップ・クリックで桁ロール。Tabで数値入力、Alt+↓で桁ロール";
+    const openWheel=()=>{
+      if(input.disabled||wheel.isOpen())return;
+      wheel.open({key:k,label:k==="speed"?"速度":"音程",
+        value:granular[k],places:wheelPlaces(k,granular[k]),
+        signed:true,trigger:input});
+    };
+    // Pointer input opens the wheel, not the native on-screen keyboard.
+    // Keyboard focus/typing remains an exact-value route (no rounding).
+    input.addEventListener("pointerdown",event=>{
+      if(event.button===0&&!event.shiftKey)event.preventDefault();
+    });
+    input.addEventListener("click",event=>{
+      if(!event.shiftKey){event.preventDefault();openWheel();}
+    });
+    input.addEventListener("keydown",event=>{
+      if(event.altKey&&event.key==="ArrowDown"){
+        event.preventDefault();openWheel();
+      }
+    });
   }
-  $("#granular-range").addEventListener("change",e=>{
-    granular.railMax=validateSpeedRailRange(Number(e.target.value));
-    refreshGranular();
-  });
+  // Only the visible rail changes; the signed canonical speed is not edited.
+  attachParameterContextMenu({doc:document,targets:[$("#granular-speed-label"),$("#granular-speed-value")],
+    suppressClickAfterHold:true,getItems:()=>SPEED_RAIL_PRESETS.map(range=>({
+      label:"±"+range+"倍",role:"menuitemradio",checked:granular.railMax===range,
+      onSelect:()=>{
+        granular.railMax=validateSpeedRailRange(range);refreshGranular("speed");
+      }
+    }))});
   refreshGranular();
 }
 // Playback / model tab navigation owns presentation only. Existing song,
@@ -1027,8 +1083,15 @@ function updateEngineInfo(){
 
 function drawAudio(){
   const canvas=$("#wave"),ratio=Math.min(devicePixelRatio||1,2);
-  canvas.width=Math.max(240,Math.round(canvas.getBoundingClientRect().width*ratio));
-  canvas.height=120*ratio;
+  const width=Math.max(240,Math.round(canvas.getBoundingClientRect().width*ratio));
+  const height=Math.round(120*ratio);
+  if(canvas.width!==width)canvas.width=width;
+  if(canvas.height!==height)canvas.height=height;
+  const source=state.source;
+  canvas.dataset.overviewGeneration=String(source?.overviewBuildToken??0);
+  canvas.dataset.overviewBins=String(source?.overviewBinCount??0);
+  canvas.dataset.overviewReads=String(source?.overviewReadCount??0);
+  canvas.dataset.overviewReadyBins=String(source?.overviewPeaks?.filter(Boolean).length??0);
   const ctx=canvas.getContext("2d");
   ctx.clearRect(0,0,canvas.width,canvas.height);
   const summary=state.overviewPeaks;
@@ -1052,44 +1115,49 @@ function drawAudio(){
   ctx.stroke();
 }
 async function sampleSourceOverview(source){
-  const bins=overviewBinCount($("#wave").width);
-  if(source.overviewBinCount===bins&&source.overviewPeaks?.length===bins&&
-     source.overviewPeaks.every(peak=>Array.isArray(peak)&&peak.length===2))return;
+  if(state.source!==source||!overviewNeedsResample(source))return;
+  const frames=source.sourceFrames,bins=overviewBinCount(frames);
+  // Preserve completed bins on retries; geometry is owned by the source,
+  // never by the current canvas. A resize cannot invalidate this grid.
+  if(source.overviewBinCount!==bins||source.overviewPeaks?.length!==bins){
+    source.overviewBinCount=bins;
+    source.overviewPeaks=Array.from({length:bins},()=>null);
+    source.overviewReadCount=0;
+  }
+  const peaks=source.overviewPeaks;
+  state.overviewPeaks=peaks;
   const buildToken=advanceOverviewBuildToken(source);
-  source.overviewBinCount=bins;
   source.overviewBuildComplete=false;
-  const isCurrent=()=>state.source===source&&
-    source.overviewBuildToken===buildToken;
-  const peaks=Array.from({length:bins},()=>null);
-  source.overviewPeaks=peaks;
-  if(state.source===source)state.overviewPeaks=peaks;
-  for(let bin=0;bin<bins;bin++){
+  const isCurrent=()=>state.source===source&&source.overviewBuildToken===buildToken;
+  const batchBins=Math.max(1,Math.min(32,Math.floor(
+    (source.windowFrames??65_536)*bins/frames)));
+  for(let bin=0;bin<bins;){
     if(!isCurrent())return;
-    let peak=null;
-    for(let attempt=0;attempt<4&&!peak;attempt++){
+    if(peaks[bin]){bin++;continue;}
+    let after=bin+1;
+    while(after<bins&&after-bin<batchBins&&!peaks[after])after++;
+    let result=null;
+    for(let attempt=0;attempt<4&&!result;attempt++){
       if(!isCurrent())return;
-      try{peak=await readOverviewPeak(source,bin,bins,{
-        shouldContinue:isCurrent
+      try{result=await readOverviewPeaks(source,bin,after,bins,{
+        shouldContinue:isCurrent,
+        onRead:()=>{source.overviewReadCount++;}
       });}
       catch{
         if(attempt<3)await new Promise(resolve=>setTimeout(resolve,120));
       }
     }
-    if(peak===null){
-      if(!isCurrent())return;
-      continue;
+    if(!isCurrent())return;
+    if(result){
+      for(let i=bin;i<after;i++)peaks[i]=result[i-bin];
+      drawAudio();
+      detailWaveEditor?.refreshOverview(
+        Math.floor(bin*frames/bins),Math.floor(after*frames/bins),bin);
     }
-    peaks[bin]=peak;
-    if(bin%4===3||bin===bins-1){
-      if(isCurrent()){
-        drawAudio();
-        detailWaveEditor?.refreshOverview(
-          Math.floor(bin*frames/bins),Math.floor((bin+1)*frames/bins),bin);
-      }
-      await new Promise(resolve=>setTimeout(resolve,0));
-    }
+    bin=after;
+    await new Promise(resolve=>setTimeout(resolve,0));
   }
-  if(isCurrent())source.overviewBuildComplete=true;
+  if(isCurrent()){source.overviewBuildComplete=true;drawAudio();}
 }
 let activeWavePointer=null;
 function playPosition(){
@@ -2503,10 +2571,11 @@ controls.main.addEventListener("click",()=>{
   void toggleMainPlayer();
 });
 let heldTransport=null,heldTransportToken=0;
-function beginTransportHold(speed,event){
+function beginTransportHold(direction,event){
   if(!hasAudioSource()||heldTransport||
      !isPCMModel(lab.mode)||lab.individual)return;
   event.preventDefault();
+  const speed=shuttlePlaybackSpeed(granular.speed,direction);
   // A queued inertia frame must not overwrite the held shuttle speed.
   cancelTemporaryScrub(false);
   const existing=state.player;
@@ -2524,7 +2593,7 @@ function beginTransportHold(speed,event){
     hold.starting=play("player",playPosition());
   }else{
     heldTransport=null;cancelTemporaryScrub(false);
-    message("4倍速送りは連続再生中のPV/STFT/WSOLA/Dual/Rustで使えます。","warning");
+    message("早送り・巻き戻しは連続再生中のPV/STFT/WSOLA/Dual/Rustで使えます。","warning");
     return;
   }
   if(event.pointerId!==undefined){
@@ -2550,16 +2619,16 @@ function endTransportHold(event){
       event.currentTarget.releasePointerCapture(event.pointerId);
   }catch{}
 }
-for(const [id,speed] of [["seek-backward",-4],["seek-forward",4]]){
+for(const [id,direction] of [["seek-backward",-1],["seek-forward",1]]){
   const button=$("#"+id);
-  button.addEventListener("pointerdown",event=>beginTransportHold(speed,event));
+  button.addEventListener("pointerdown",event=>beginTransportHold(direction,event));
   for(const type of ["pointerup","pointercancel","lostpointercapture"])
     button.addEventListener(type,endTransportHold);
   button.addEventListener("contextmenu",event=>event.preventDefault());
   button.addEventListener("click",event=>event.preventDefault());
   button.addEventListener("keydown",event=>{
     if(event.repeat||![" ","Enter"].includes(event.key))return;
-    beginTransportHold(speed,event);
+    beginTransportHold(direction,event);
   });
   button.addEventListener("keyup",event=>{
     if([" ","Enter"].includes(event.key))endTransportHold(event);
@@ -2578,6 +2647,7 @@ function updateScrubInertia(raw=scrubInertiaInput.value){
 scrubInertiaInput.value=String(scrubInertia);
 updateScrubInertia(scrubInertia);
 scrubInertiaInput.addEventListener("input",()=>updateScrubInertia());
+mountRangeStepButtons(scrubInertiaInput);
 controls.dry.addEventListener("click",()=>{
   state.processingRecovery=null;
   void play("dry");
@@ -2593,11 +2663,9 @@ controls.stop.addEventListener("click",()=>{
 window.addEventListener("resize",()=>{
   drawCurve();drawAudio();detailWaveEditor?.refresh(true);
   const source=state.source;
-  if(source&&overviewNeedsResample(source,$("#wave").width)){
-    if(source.overviewBinCount!==null)advanceOverviewBuildToken(source);
-    source.overviewBinCount=null;
-  }
-  const shouldResample=Boolean(source)&&source.overviewBinCount===null;
+  // Resize only redraws the existing source grid. A completed partial
+  // build may retry missing bins, without discarding any successful peak.
+  const shouldResample=overviewNeedsResample(source);
   if(state.overviewResizeTimer){clearTimeout(state.overviewResizeTimer);state.overviewResizeTimer=null;}
   if(!shouldResample)return;
   state.overviewResizeTimer=setTimeout(()=>{
@@ -2651,7 +2719,7 @@ async function load(file){
     previousSource?.dispose();
     state.offline=null;state.decoded={sampleRate:state.source.sampleRate};
     lab.job++;lab.worker?.terminate();lab.worker=null;lab.processed=null;
-    state.dry=null;state.overviewPeaks=Array.from({length:96},()=>null);
+    state.dry=null;state.overviewPeaks=null;
     state.seek=0;
     ab.a=0;ab.b=state.source.sourceFrames;ab.enabled=true;
     loopMarkers=[];
@@ -3039,7 +3107,7 @@ function labRefresh(){
 }
 function labInvalidate(){lab.job++;lab.worker?.terminate();lab.worker=null;lab.processed=null;}
 let modelSelectionEpoch=0;
-async function labSettingsChanged(){
+async function labSettingsChanged(changedControl=null){
   const ticket=++modelSelectionEpoch;
   const previous=lab.mode,previousIndividual=lab.individual;
   const previousSpeed=lab.speed,previousSemi=lab.semitones;
@@ -3055,7 +3123,7 @@ async function labSettingsChanged(){
   let nextShort=2**Number(labShort.value),nextLong=2**Number(labLong.value);
   const nextWindows=Number(labWindows.value),nextCycles=selectedPeriodCycles();
   if(nextMode==="dual"&&nextShort>=nextLong){
-    if(document.activeElement===labShort||document.activeElement===labShortValue)nextLong=Math.min(8192,nextShort*2);
+    if(changedControl===labShort||document.activeElement===labShort||document.activeElement===labShortValue)nextLong=Math.min(8192,nextShort*2);
     else nextShort=Math.max(256,nextLong/2);
     labShort.value=String(Math.log2(nextShort));
     labLong.value=String(Math.log2(nextLong));
@@ -3164,7 +3232,7 @@ async function labSettingsChanged(){
   if(hasAudioSource()&&lab.mode==="live"&&!state.player)updateParams("lab");
 }
 [labModel,labShort,labLong,labWindows,labIndividual,labPeriod]
-  .forEach(node=>node.addEventListener("change",()=>void labSettingsChanged()));
+  .forEach(node=>node.addEventListener("change",()=>void labSettingsChanged(node)));
 function liveSliderValue(){
   const short=2**Number(labShort.value),long=2**Number(labLong.value),
     windows=Number(labWindows.value),period=selectedPeriodCycles();
@@ -3177,6 +3245,7 @@ function liveSliderValue(){
     if(document.activeElement!==field)field.value=String(value);
 }
 [labShort,labLong,labWindows,labPeriod].forEach(node=>node.addEventListener("input",liveSliderValue));
+[labShort,labLong,labWindows,labPeriod].forEach(node=>mountRangeStepButtons(node));
 for(const [input,slider,allowed,toSlider] of [
   [labShortValue,labShort,[256,512,1024,2048],value=>Math.log2(value)],
   [labLongValue,labLong,[1024,2048,4096,8192],value=>Math.log2(value)],
@@ -3193,7 +3262,7 @@ for(const [input,slider,allowed,toSlider] of [
     input.setCustomValidity("");
     slider.value=String(toSlider(value));
     liveSliderValue();
-    void labSettingsChanged();
+    void labSettingsChanged(slider);
   });
   input.addEventListener("input",()=>input.setCustomValidity(""));
 }

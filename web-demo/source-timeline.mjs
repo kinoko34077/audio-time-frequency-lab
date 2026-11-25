@@ -24,6 +24,13 @@ export function validatePlaybackSpeed(s){
     throw RangeError("speed must be finite and within -8..8");
   return Object.is(s,-0)?0:s;
 }
+/** Temporary directional shuttle is four times the configured magnitude,
+ * bounded by the existing renderer limit; the saved speed is unchanged. */
+export function shuttlePlaybackSpeed(configuredSpeed,direction){
+  const speed=validatePlaybackSpeed(configuredSpeed);
+  if(direction!==-1&&direction!==1)throw RangeError("invalid shuttle direction");
+  return validatePlaybackSpeed(direction*Math.min(SPEED_LIMIT,4*Math.abs(speed)));
+}
 export function validateSpeedRailRange(range){
   // Presets are suggestions, not limits on a user-specified visible range.
   if(!finite(range)||range<=0||range>SPEED_LIMIT)

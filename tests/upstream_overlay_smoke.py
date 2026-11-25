@@ -88,8 +88,11 @@ try:
       assert page.locator("#granular-speed").get_attribute("max")=="2"
       assert page.locator("#granular-speed-value").get_attribute("min")=="-8"
       assert page.locator("#granular-speed-value").get_attribute("max")=="8"
-      assert page.locator("#granular-range").input_value()=="2"
-      assert page.locator("#granular-range option[value='8']").count()==1
+      assert page.locator("#granular-range").count()==0
+      page.locator("#granular-speed-label").click(button="right")
+      assert page.locator("#fw-unit-snap-menu [aria-checked='true']").inner_text()=="±2倍"
+      assert page.locator("#fw-unit-snap-menu button").all_text_contents()==["±1倍","±2倍","±4倍","±8倍"]
+      page.keyboard.press("Escape")
       # The Playwright browser can suppress AudioWorklet addModule; native
       # actual Chrome worklet proof is separately covered by lab-live-smoke.test.mjs.
       # Here the real native file picker is the acceptance target, not injection.

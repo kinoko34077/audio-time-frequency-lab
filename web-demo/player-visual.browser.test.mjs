@@ -85,8 +85,9 @@ async function layoutEvidence(page,tag){
           .getBoundingClientRect().bottom-1,
       abToolbarSpan:{left:abControls[0]?.left,right:abControls.at(-1)?.right,
         toolbarLeft:abToolbar.left,toolbarRight:abToolbar.right},
-      railRangeVisible:document.querySelector("#granular-range").getClientRects().length>0&&
-        document.querySelector("#granular-range").closest("details")===null,
+      railRangeCompact:!document.querySelector("#granular-range")&&
+        document.querySelector("#granular-speed-label").getClientRects().length>0&&
+        document.querySelector("#granular-speed-label").getAttribute("aria-haspopup")==="menu",
       rulerAtTop:(()=>{
         const waveform=document.querySelector(".wave-detail-wrap").getBoundingClientRect();
         const ruler=document.querySelector(".wave-detail-ruler").getBoundingClientRect();
@@ -116,12 +117,13 @@ async function layoutEvidence(page,tag){
       })(),
       rulerCoordinateErrors:(()=>{
         const canvas=document.querySelector("#wave-detail").getBoundingClientRect();
-        return [...document.querySelectorAll(".wave-detail-ruler [data-ruler-tick]")]
-          .map((element,index)=>{
-            const bounds=element.getBoundingClientRect();
-            const expected=canvas.left+canvas.width*index/4;
-            const actual=index===4?bounds.right:index===0?bounds.left:
-              bounds.left+bounds.width/2;
+        const node=document.querySelector("#wave-detail"),ruler=document.querySelector(".wave-detail-ruler").getBoundingClientRect();
+        const center=Number(node.getAttribute("aria-valuenow")),span=Number(node.getAttribute("data-span-frames"));
+        return [...document.querySelectorAll(".wave-detail-ruler [data-ruler-tick]:not([hidden])")]
+          .map(element=>{
+            const frame=Number(element.dataset.sourceFrame);
+            const expected=canvas.left+canvas.width*(.5+(frame-center)/span);
+            const actual=ruler.left+Number.parseFloat(getComputedStyle(element).left);
             return Math.round(Math.abs(actual-expected)*100)/100;
           });
       })(),
@@ -136,10 +138,19 @@ async function layoutEvidence(page,tag){
       clockAtBottom:(()=>{
         const waveform=document.querySelector(".wave-detail-wrap").getBoundingClientRect();
         const clock=document.querySelector(".wave-detail-wrap .transport").getBoundingClientRect();
-        return ["#elapsed","#duration"].every(selector=>
-          document.querySelector(selector).parentElement.classList.contains("transport")&&
-          document.querySelector(selector).parentElement.parentElement.classList.contains("wave-detail-wrap"))&&
+        return document.querySelector("#elapsed").closest(".wave-detail-wrap")&&
+          !document.querySelector("#duration").closest(".wave-detail-wrap")&&
           clock.top>=waveform.top+waveform.height*.72&&clock.bottom<=waveform.bottom;
+      })(),
+      overviewClock:(()=>{
+        const wrap=document.querySelector(".wave-wrap").getBoundingClientRect();
+        const bounds=document.querySelector(".overview-time-bounds");
+        const a=document.querySelector("#overview-start"),b=document.querySelector("#duration");
+        const r=bounds.getBoundingClientRect(),left=a.getBoundingClientRect(),right=b.getBoundingClientRect();
+        return {inside:a.parentElement===bounds&&b.parentElement===bounds&&
+          r.top>=wrap.top&&r.bottom<=wrap.bottom&&left.left>=wrap.left&&right.right<=wrap.right,
+          transparent:getComputedStyle(bounds).pointerEvents==="none",
+          start:a.textContent,end:b.textContent,disjoint:left.right<=right.left};
       })(),
       sliderAlignment:(()=>{
         const speed=document.querySelector("#granular-speed").getBoundingClientRect();
@@ -256,7 +267,7 @@ async function layoutEvidence(page,tag){
   assert.ok(value.waveform.top<value.transport.top&&
     value.transport.top<value.speedPitch.top,
     "expected waveform > transport > speed/pitch hierarchy "+tag);
-  assert.equal(value.railRangeVisible,true,"speed rail width is directly available");
+  assert.equal(value.railRangeCompact,true,"speed rail range is available through the compact context target");
   assert.equal(value.rulerAtTop,true,"waveform ruler labels stay inside its top edge");
   assert.ok(value.playheadTopOffset<=1,
     "center playback position starts on the waveform edge: "+value.playheadTopOffset);
@@ -268,7 +279,10 @@ async function layoutEvidence(page,tag){
       JSON.stringify(value.rulerCoordinateErrors));
   assert.equal(value.markerBelowRuler.fits,true,
     "A/B markers begin just below the compact ruler: "+JSON.stringify(value.markerBelowRuler));
-  assert.equal(value.clockAtBottom,true,"elapsed and total time sit inside the waveform bottom edge");
+  assert.equal(value.clockAtBottom,true,"only current position belongs to the detailed waveform clock");
+  assert.ok(value.overviewClock.inside&&value.overviewClock.transparent&&value.overviewClock.disjoint&&
+    value.overviewClock.start==="0:00.0",
+    "full-source start/end stay inside the overview without intercepting seeks: "+JSON.stringify(value.overviewClock));
   assert.equal(value.sliderAlignment,true,"speed and pitch sliders share the same left and right edges");
   assert.ok(value.compactControlSizing.speedValue<=54&&value.compactControlSizing.pitchValue<=54,
     "numeric values use widths sized for their visible precision: "+JSON.stringify(value.compactControlSizing));
@@ -434,7 +448,7 @@ test("R4 usability visual captures: desktop and mobile player and folded researc
       return {columns:getComputedStyle(grid).gridTemplateColumns.trim().split(/\s+/).length,
         controls:controls.map(control=>{
           const label=control.querySelector(":scope > label").getBoundingClientRect();
-          const slider=control.querySelector(":scope > input[type=range]").getBoundingClientRect();
+          const slider=control.querySelector(":scope > .range-stepper").getBoundingClientRect();
           const value=control.querySelector(":scope > .inline-number").getBoundingClientRect();
           return {sliderWidth:slider.width,labelBeforeSlider:label.right<=slider.left,
             sliderBeforeValue:slider.right<=value.left};
@@ -515,9 +529,59 @@ test("R4 usability visual captures: desktop and mobile player and folded researc
     await mobile.waitForFunction(()=>document.documentElement.dataset.fwBoot==="ready",{timeout:20000});
     await waitForFile(mobile);
     const mobileLayout=await layoutEvidence(mobile,"mobile-touch-loaded");
+    // U11: the same source-time tick moves to the left when the source
+    // position advances, while the label and exact frame remain stable.
+    const readTicks=()=>mobile.evaluate(()=>{
+      const c=document.querySelector("#wave-detail");
+      return {center:Number(c.getAttribute("aria-valuenow")),span:Number(c.getAttribute("data-span-frames")),
+        ticks:[...document.querySelectorAll(".wave-detail-ruler [data-source-frame]")]
+          .map(t=>({frame:Number(t.dataset.sourceFrame),label:t.textContent,left:parseFloat(t.style.left)}))};
+    });
+    const tickBefore=await readTicks();
+    await mobile.focus("#wave-detail");
+    await mobile.keyboard.press("ArrowRight");
+    await mobile.waitForFunction(before=>Number(document.querySelector("#wave-detail").getAttribute("aria-valuenow"))>before,
+      {timeout:4000},tickBefore.center);
+    const tickAfter=await readTicks();
+    const sameTicks=tickBefore.ticks.filter(t=>tickAfter.ticks.some(q=>q.frame===t.frame));
+    assert.ok(sameTicks.length>0,"source tick survives a small seek");
+    for(const before of sameTicks){
+      const after=tickAfter.ticks.find(t=>t.frame===before.frame);
+      assert.equal(after.label,before.label);
+      assert.ok(Math.abs(after.left-before.left+100*(tickAfter.center-tickBefore.center)/tickBefore.span)<.01,
+        "fixed source tick follows waveform during seek");
+    }
+    console.log("U11_RULER_TRACK "+JSON.stringify({before:tickBefore,after:tickAfter,matched:sameTicks.length}));
+    await mobile.keyboard.press("Home");
+    await mobile.waitForFunction(()=>Number(document.querySelector("#wave-detail").getAttribute("aria-valuenow"))===0,{timeout:4000});
+    const sourceBounds=await mobile.evaluate(()=>({
+      start:document.querySelector("#overview-start").textContent,
+      end:document.querySelector("#duration").textContent,
+      elapsed:document.querySelector("#elapsed").textContent
+    }));
+    assert.equal(sourceBounds.start,"0:00.0");
+    assert.notEqual(sourceBounds.end,sourceBounds.start);
+    await mobile.focus("#wave-detail");
+    await mobile.keyboard.press("End");
+    await mobile.waitForFunction(before=>{
+      const wave=document.querySelector("#wave-detail");
+      return Number(wave.getAttribute("aria-valuenow"))===Number(wave.getAttribute("aria-valuemax"))&&
+        document.querySelector("#elapsed").textContent!==before;
+    },{timeout:4000},sourceBounds.elapsed);
+    await mobile.keyboard.press("-");
+    const afterSeekZoom=await mobile.evaluate(()=>({
+      start:document.querySelector("#overview-start").textContent,
+      end:document.querySelector("#duration").textContent,
+      elapsed:document.querySelector("#elapsed").textContent
+    }));
+    assert.equal(afterSeekZoom.start,sourceBounds.start);
+    assert.equal(afterSeekZoom.end,sourceBounds.end);
+    assert.notEqual(afterSeekZoom.elapsed,sourceBounds.elapsed);
+    await mobile.keyboard.press("Home");
+    console.log("U12_OVERVIEW_BOUNDS "+JSON.stringify({before:sourceBounds,after:afterSeekZoom}));
     assert.equal(Math.round(mobileLayout.viewport/mobileLayout.viewportHeight*1000)/1000,.461,
       "mobile browser viewport matches the supplied 591:1280 screenshot ratio");
-    assert.deepEqual(mobileLayout.safeAreaPadding,{top:"50px",bottom:"32px"},
+    assert.deepEqual(mobileLayout.safeAreaPadding,{top:"50px",bottom:"28px"},
       "the page honors the modeled PWA status and home-indicator safe areas");
     assert.equal(mobileLayout.viewportFitCover,true,
       "mobile viewport leaves safe-area handling available to the PWA shell");
@@ -594,6 +658,70 @@ test("R4 usability visual captures: desktop and mobile player and folded researc
     assert.ok(tallMobileLayout.waveform.height>=mobileLayout.waveform.height+60,
       "a taller phone viewport gives its extra height to the main waveform: "+
         JSON.stringify({normal:mobileLayout.waveform,tall:tallMobileLayout.waveform}));
+    // U07: check actual viewport/safe area geometry before and after rotation.
+    assert.ok(mobileLayout.footer.height<=16&&tallMobileLayout.footer.height<=16,
+      "the source link occupies one compact line, not a padded footer");
+    assert.equal(mobileLayout.footer.bottom,mobileLayout.viewportHeight-28);
+    assert.equal(tallMobileLayout.footer.bottom,tallMobileLayout.viewportHeight-28);
+    const layoutBeforeRotation=await mobile.evaluate(()=>({
+      speed:document.querySelector("#granular-speed-value").value,
+      pitch:document.querySelector("#granular-pitch-value").value,
+      source:document.querySelector("#file-meta").textContent
+    }));
+    await mobile.setViewport({width:853,height:393,deviceScaleFactor:1.5,isMobile:true,hasTouch:true,isLandscape:true});
+    await mobileMetrics.send("Emulation.setSafeAreaInsetsOverride",{insets:{
+      top:0,bottom:21,left:44,right:44,topMax:0,bottomMax:21,leftMax:44,rightMax:44
+    }});
+    await mobile.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+    const landscape=await mobile.evaluate(()=>{
+      const studio=document.querySelector(".studio"),style=getComputedStyle(studio);
+      const box=selector=>{const r=document.querySelector(selector).getBoundingClientRect();
+        return {left:r.left,right:r.right,top:r.top+scrollY,bottom:r.bottom+scrollY,height:r.height};};
+      return {width:innerWidth,height:innerHeight,scrollWidth:document.documentElement.scrollWidth,
+        scrollHeight:document.documentElement.scrollHeight,studio:box(".studio"),
+        padding:[style.paddingTop,style.paddingRight,style.paddingBottom,style.paddingLeft],
+        overflow:style.overflowY,header:box(".header"),wave:box(".wave-detail-wrap"),
+        play:box("#play-main"),tune:box("#granular-optin-controls"),
+        loop:box("#player-loop-controls"),footer:box("footer"),
+        sourceHref:document.querySelector("footer a").getAttribute("href")};
+    });
+    console.log("U07_LANDSCAPE "+JSON.stringify(landscape));
+    assert.deepEqual(landscape.padding,["6px","51px","25px","51px"]);
+    assert.ok(landscape.scrollWidth<=landscape.width+1&&landscape.header.left>=51&&
+      landscape.header.right<=landscape.width-51&&landscape.wave.left>=51&&
+      landscape.wave.right<=landscape.width-51,"landscape respects both cutout sides");
+    assert.ok(landscape.wave.height>=150&&landscape.wave.bottom<=landscape.play.top&&
+      landscape.play.bottom<=landscape.tune.top&&landscape.tune.bottom<=landscape.loop.top&&
+      landscape.loop.bottom<=landscape.footer.top,"all controls remain ordered, non-overlapping");
+    assert.equal(landscape.overflow,"visible","short landscape uses document scrolling");
+    assert.ok(landscape.footer.height<=16&&
+      Math.abs(landscape.studio.bottom-landscape.footer.bottom-25)<=1&&
+      Math.abs(landscape.scrollHeight-landscape.studio.bottom)<=1,
+      "footer ends at safe area with no second empty scroll region");
+    assert.match(landscape.sourceHref,/github\.com\/kinoko34077\/audio-time-frequency-lab$/);
+    await mobile.$eval("footer a",el=>el.scrollIntoView({block:"end"}));
+    const reachable=await mobile.$eval("footer a",el=>{
+      const r=el.getBoundingClientRect();
+      return r.top>=0&&r.bottom<=innerHeight-20&&
+        document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)===el;
+    });
+    assert.ok(reachable,"source link stays reachable above home indicator");
+    await mobile.setViewport({width:393,height:853,deviceScaleFactor:1.5,isMobile:true,hasTouch:true,isLandscape:false});
+    await mobileMetrics.send("Emulation.setSafeAreaInsetsOverride",{insets:{
+      top:44,bottom:24,left:0,right:0,topMax:44,bottomMax:24,leftMax:0,rightMax:0
+    }});
+    await mobile.evaluate(()=>{window.scrollTo(0,0);document.querySelector(".studio").scrollTop=0;});
+    await mobile.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+    const returned=await layoutEvidence(mobile,"mobile-rotated-back");
+    assert.equal(returned.footer.bottom,returned.viewportHeight-28);
+    assert.ok(returned.footer.height<=16);
+    assert.deepEqual(await mobile.evaluate(()=>({
+      speed:document.querySelector("#granular-speed-value").value,
+      pitch:document.querySelector("#granular-pitch-value").value,
+      source:document.querySelector("#file-meta").textContent
+    })),layoutBeforeRotation,"rotation preserves source and configured parameters");
+    console.log("U07_FOOTER "+JSON.stringify({portrait:mobileLayout.footer.height,tall:tallMobileLayout.footer.height,
+      landscape:landscape.footer.height,returned:returned.footer.height,sourceReachable:reachable}));
     await mobile.click("#settings-open");
     await mobile.waitForFunction(()=>document.querySelector("#settings-dialog")?.open);
     assert.equal(await mobile.$eval("#runtime-hud",e=>e.getClientRects().length),0);

@@ -66,18 +66,20 @@ test("recorded piano main player: gesture/parameter receipts AND actual output P
     await page.waitForSelector("#play-main:not([disabled])",{timeout:15000});
     assert.equal(await page.$eval("#lab-model",el=>el.value),"pv",
       "public Audio Time must select the actual Phase Vocoder renderer by default");
+    await page.click("#granular-speed-label",{button:"right"});
     const speedRails=await page.evaluate(()=>({
-      railValue:document.querySelector("#granular-range").value,
-      railOptions:[...document.querySelector("#granular-range").options].map(option=>option.value),
+      railValue:document.querySelector('#fw-unit-snap-menu [aria-checked="true"]').textContent,
+      railOptions:[...document.querySelectorAll("#fw-unit-snap-menu button")].map(option=>option.textContent),
       min:document.querySelector("#granular-speed").min,
       max:document.querySelector("#granular-speed").max,
       preciseMin:document.querySelector("#granular-speed-value").min,
       preciseMax:document.querySelector("#granular-speed-value").max
     }));
     assert.deepEqual(speedRails,{
-      railValue:"2",railOptions:["1","2","4","8"],min:"-2",max:"2",
+      railValue:"±2倍",railOptions:["±1倍","±2倍","±4倍","±8倍"],min:"-2",max:"2",
       preciseMin:"-8",preciseMax:"8"
     },"the rail starts at ±2×, retains a selectable ±8×, and precise input keeps ±8×");
+    await page.keyboard.press("Escape");
     const decodedRate=Number((await page.$eval("#file-meta",el=>el.textContent))
       .match(/(\d+)Hz/)?.[1]);
     assert.ok(decodedRate>=8000&&decodedRate<=192000);
@@ -497,7 +499,11 @@ test(`native Chrome actual ${profile.model} output follows 0×, reverse and sign
     // playing BACKWARD after release before returning toward +1.
     await set("granular-speed-value",1);
     await page.click("#main-tab-player");
-    await page.evaluate(()=>{window.__pvScratch=[];});
+    await page.evaluate(strength=>{
+      const input=document.querySelector("#scrub-inertia");
+      input.value=String(strength);input.dispatchEvent(new Event("input",{bubbles:true}));
+      window.__pvScratch=[];
+    },profile.model==="pv"?300:100);
     const bounds=await page.$eval("#wave-detail",e=>{
       e.scrollIntoView({block:"center"});
       const r=e.getBoundingClientRect();
@@ -532,10 +538,20 @@ test(`native Chrome actual ${profile.model} output follows 0×, reverse and sign
       }));
       throw Error(profile.model+" signed drag not observed: "+JSON.stringify({panStart,...actual})+" / "+error.message);
     }
-    // The release transition is fixed at one second; the user setting scales
-    // throw strength rather than changing this convergence duration.
+    // At 100% the new return lasts 2s; at 300% it lasts 4s.
+    // Observe actual outgoing Worklet commands beyond the old 1s limit.
     await sleep(1120);
+    const beyondOld=await page.evaluate(()=>window.__pvScratch
+      .filter(x=>x.kind==="command"&&Number.isFinite(x.speed)).at(-1)?.speed);
+    assert.ok(Number.isFinite(beyondOld)&&Math.abs(beyondOld-1)>.025,
+      "a moving throw must still differ from saved speed after the old 1s return: "+beyondOld);
+    await page.waitForFunction(()=>window.__pvScratch
+      .filter(x=>x.kind==="command"&&Number.isFinite(x.speed)).at(-1)?.speed===1,
+      {timeout:6500});
     const scratch=await page.evaluate(()=>window.__pvScratch.slice());
+    console.log("U13_SCRUB_RETURN "+JSON.stringify({model:profile.model,
+      strength:profile.model==="pv"?300:100,beyondOld,final:scratch.filter(
+        x=>x.kind==="command"&&Number.isFinite(x.speed)).at(-1)?.speed}));
     const thrown=scratch.filter(x=>x.kind==="scrub"&&x.speed<0);
     const inertia=scratch.filter(x=>x.kind==="command"&&
       Number.isFinite(x.speed));
