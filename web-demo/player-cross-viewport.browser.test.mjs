@@ -439,6 +439,67 @@ test("real recorded waveform UX across mobile, Android-size, tablet and desktop 
         console.log("U05_SPEED_RANGE "+JSON.stringify({profile:profile.name,railWidth:geometry.speedSlider.width,
           labelWidth:geometry.speedLabel.width,canonicalSpeed:"-1.237",rangeRestored:2,
           hold:profile.touch,keyboard:!profile.touch,singleton:true}));
+        // U06: full stepper fits the former rail cell. The visible buttons
+        // have real hit targets and never overlap the native rail or editor.
+        const steps=await page.evaluate(()=>["speed","pitch"].map(kind=>{
+          const rail=document.querySelector("#granular-"+kind),root=rail.parentElement;
+          const minus=root.querySelector('[data-range-step="minus"]');
+          const plus=root.querySelector('[data-range-step="plus"]');
+          const m=minus.getBoundingClientRect(),p=plus.getBoundingClientRect();
+          const r=rail.getBoundingClientRect(),group=root.parentElement.querySelector(".inline-number").getBoundingClientRect();
+          const hit=el=>{const b=el.getBoundingClientRect();return document.elementFromPoint(b.x+b.width/2,b.y+b.height/2)===el;};
+          return {kind,rail:r.width,minus:m.width,plus:p.width,height:Math.min(m.height,p.height),
+            disjoint:m.right<=r.left+.25&&r.right<=p.left+.25&&p.right<group.left,
+            hit:hit(minus)&&hit(plus)};
+        }));
+        assert.ok(steps.every(g=>g.minus<=20&&g.plus<=20&&g.height>=28&&g.rail>=64&&g.disjoint&&g.hit),
+          "compact endpoint buttons have their own hit targets: "+profile.name+" "+JSON.stringify(steps));
+        const stepSelector=(id,side)=>'[data-range-stepper="'+id+'"] [data-range-step="'+side+'"]';
+        const tapStep=async(id,side)=>{
+          const selector=stepSelector(id,side);
+          await (profile.touch?page.tap(selector):page.click(selector));
+        };
+        const readSpeed=()=>page.$eval("#granular-speed-value",el=>el.value);
+        const readPitch=()=>page.$eval("#granular-pitch-value",el=>el.value);
+        await tapStep("granular-speed","plus");assert.equal(await readSpeed(),"-1.227");
+        await tapStep("granular-speed","minus");assert.equal(await readSpeed(),"-1.237");
+        await tapStep("granular-pitch","plus");assert.equal(await readPitch(),"7.2234");
+        await tapStep("granular-pitch","minus");assert.equal(await readPitch(),"7.1234");
+        await page.focus(stepSelector("granular-speed","plus"));
+        await page.keyboard.press("Enter");assert.equal(await readSpeed(),"-1.227");
+        await tapStep("granular-speed","minus");assert.equal(await readSpeed(),"-1.237");
+        const setSpeed=value=>page.$eval("#granular-speed-value",(el,value)=>{
+          el.value=value;el.dispatchEvent(new Event("change",{bubbles:true}));
+        },value);
+        await setSpeed("-7.125");
+        await tapStep("granular-speed","plus");
+        assert.equal(await readSpeed(),"-7.115");
+        assert.equal(await page.$eval("#granular-speed",el=>el.value),"-2");
+        await setSpeed("-1.237");
+        if(profile.name==="iphone-pwa-393x853"||!profile.touch){
+          const selector=stepSelector("granular-speed","plus");
+          await page.$eval(selector,el=>el.scrollIntoView({block:"center"}));
+          const point=await page.$eval(selector,el=>{const r=el.getBoundingClientRect();return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)};});
+          for(const cancel of [false,true]){
+            const touch=profile.touch?await page.createCDPSession():null;
+            try{
+              if(touch)await touch.send("Input.dispatchTouchEvent",{type:"touchStart",touchPoints:[{...point,id:1}]});
+              else{await page.mouse.move(point.x,point.y);await page.mouse.down();}
+              await page.waitForFunction(()=>Number(document.querySelector("#granular-speed-value").value)>=-1.207,
+                {timeout:2500});
+              if(touch)await touch.send("Input.dispatchTouchEvent",{type:cancel?"touchCancel":"touchEnd",touchPoints:[]});
+              else if(cancel){await page.evaluate(()=>window.dispatchEvent(new Event("blur")));await page.mouse.up();}
+              else await page.mouse.up();
+              const after=await readSpeed();
+              await new Promise(resolve=>setTimeout(resolve,220));
+              assert.equal(await readSpeed(),after,"release/cancel must stop repeat without an extra step");
+              await setSpeed("-1.237");
+            }finally{if(touch)await touch.detach();}
+          }
+        }
+        console.log("U06_FINE_STEP "+JSON.stringify({profile:profile.name,geometry:steps,
+          exactStep:true,outsideRail:true,keyboard:true,repeatChecked:profile.name==="iphone-pwa-393x853"||!profile.touch}));
+
 
         await page.evaluate(()=>{
           document.querySelector(".studio")?.scrollTo(0,0);
@@ -474,6 +535,56 @@ test("real recorded waveform UX across mobile, Android-size, tablet and desktop 
         }));
         assert.ok(modelWidth.scroll<=modelWidth.client+2,
           "model settings cannot overflow on "+profile.name);
+
+        if(profile.name==="iphone-pwa-393x853"){
+          const prior=await page.evaluate(()=>({
+            model:document.querySelector("#lab-model").value,
+            individual:document.querySelector("#lab-individual-periods").checked,
+            sliders:Object.fromEntries(["scrub-inertia","lab-short","lab-long","lab-windows","lab-period-cycles"].map(id=>[id,document.getElementById(id).value]))
+          }));
+          assert.equal(await page.evaluate(()=>document.querySelectorAll(".range-stepper").length),7);
+          const inertiaBefore=Number(prior.sliders["scrub-inertia"]);
+          const inertiaSide=inertiaBefore<300?"plus":"minus";
+          await tapStep("scrub-inertia",inertiaSide);
+          const inertiaAfter=inertiaBefore+(inertiaSide==="plus"?10:-10);
+          assert.equal(await page.$eval("#scrub-inertia",el=>Number(el.value)),inertiaAfter);
+          assert.equal(await page.$eval("#scrub-inertia-value",el=>el.textContent),inertiaAfter+"%");
+          await tapStep("scrub-inertia",inertiaSide==="plus"?"minus":"plus");
+          await page.click(".model-extra-controls>summary");
+          await page.waitForFunction(()=>document.querySelector(".model-extra-controls").open);
+          await page.waitForFunction(()=>document.querySelector('[data-range-stepper="lab-short"] button').disabled);
+          await page.select("#lab-model","dual");
+          await page.waitForFunction(()=>!document.querySelector('[data-range-stepper="lab-short"] button').disabled);
+          // Start from a known adjacent pair so the second short-window step
+          // must grow the long window, rather than losing the intended edit.
+          await page.evaluate(()=>{
+            for(const [id,value] of [["lab-short","9"],["lab-long","11"]])document.getElementById(id).value=value;
+            document.getElementById("lab-short").dispatchEvent(new Event("change",{bubbles:true}));
+          });
+          await tapStep("lab-short","plus");
+          assert.equal(await page.$eval("#lab-short-value",el=>el.value),"1024");
+          await tapStep("lab-short","plus");
+          assert.equal(await page.$eval("#lab-short-value",el=>el.value),"2048");
+          assert.equal(await page.$eval("#lab-long-value",el=>el.value),"4096");
+          await tapStep("lab-long","plus");
+          assert.equal(await page.$eval("#lab-long-value",el=>el.value),"8192");
+          assert.equal(await page.$eval('[data-range-stepper="lab-windows"] button',el=>el.disabled),true);
+          await page.select("#lab-model","pv");
+          await page.$eval("#lab-individual-periods",el=>{el.checked=true;el.dispatchEvent(new Event("change",{bubbles:true}));});
+          await page.waitForFunction(()=>!document.querySelector('[data-range-stepper="lab-period-cycles"] button').disabled&&
+            !document.querySelector("#lab-period-cycles-field").hidden);
+          const previousPeriod=await page.$eval("#lab-period-cycles",el=>Number(el.value));
+          await tapStep("lab-period-cycles",previousPeriod<5?"plus":"minus");
+          assert.equal(await page.$eval("#lab-period-cycles-value",el=>Number(el.value)),2**(previousPeriod+(previousPeriod<5?1:-1)));
+          await page.evaluate(prior=>{
+            document.getElementById("lab-model").value=prior.model;
+            document.getElementById("lab-individual-periods").checked=prior.individual;
+            for(const [id,value] of Object.entries(prior.sliders))document.getElementById(id).value=value;
+            document.getElementById("lab-model").dispatchEvent(new Event("change",{bubbles:true}));
+            document.querySelector(".model-extra-controls").open=false;
+          },prior);
+          console.log("U06_MODEL_STEP inertia=true short=true long=true period=true disabledWindows=true");
+        }
         await page.screenshot({path:path.join(imageDir,
           "responsive-"+profile.name+"-settings.png"),fullPage:true});
         await tab("#settings-close");
