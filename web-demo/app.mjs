@@ -11,7 +11,7 @@ import {attachParameterContextMenu} from "./vendor/frequency-warp-ui/parameter-c
 import {mountRangeStepButtons,incrementCanonical} from "./range-stepper.mjs";
 import {toggleSourceMarker} from "./player-ab-markers.mjs";
 import {primaryModelCapability,isContinuousPCMModel} from "./model-route.mjs";
-import {SPEED_RAIL_PRESETS,validatePlaybackSpeed,validateSpeedRailRange,speedOnRail,formatPlaybackSpeed} from "./source-timeline.mjs";
+import {SPEED_RAIL_PRESETS,validatePlaybackSpeed,validateSpeedRailRange,speedOnRail,formatPlaybackSpeed,shuttlePlaybackSpeed} from "./source-timeline.mjs";
 import {frequencyFromSlider,sliderFromFrequency,holdFromFrequency,drawCrusherPreview} from "./crusher-visual.mjs";
 import {drawFrequencyGraph} from "./graph.mjs";
 import {mountDualThumb} from "./dual-thumb.mjs";
@@ -2571,10 +2571,11 @@ controls.main.addEventListener("click",()=>{
   void toggleMainPlayer();
 });
 let heldTransport=null,heldTransportToken=0;
-function beginTransportHold(speed,event){
+function beginTransportHold(direction,event){
   if(!hasAudioSource()||heldTransport||
      !isPCMModel(lab.mode)||lab.individual)return;
   event.preventDefault();
+  const speed=shuttlePlaybackSpeed(granular.speed,direction);
   // A queued inertia frame must not overwrite the held shuttle speed.
   cancelTemporaryScrub(false);
   const existing=state.player;
@@ -2592,7 +2593,7 @@ function beginTransportHold(speed,event){
     hold.starting=play("player",playPosition());
   }else{
     heldTransport=null;cancelTemporaryScrub(false);
-    message("4倍速送りは連続再生中のPV/STFT/WSOLA/Dual/Rustで使えます。","warning");
+    message("早送り・巻き戻しは連続再生中のPV/STFT/WSOLA/Dual/Rustで使えます。","warning");
     return;
   }
   if(event.pointerId!==undefined){
@@ -2618,16 +2619,16 @@ function endTransportHold(event){
       event.currentTarget.releasePointerCapture(event.pointerId);
   }catch{}
 }
-for(const [id,speed] of [["seek-backward",-4],["seek-forward",4]]){
+for(const [id,direction] of [["seek-backward",-1],["seek-forward",1]]){
   const button=$("#"+id);
-  button.addEventListener("pointerdown",event=>beginTransportHold(speed,event));
+  button.addEventListener("pointerdown",event=>beginTransportHold(direction,event));
   for(const type of ["pointerup","pointercancel","lostpointercapture"])
     button.addEventListener(type,endTransportHold);
   button.addEventListener("contextmenu",event=>event.preventDefault());
   button.addEventListener("click",event=>event.preventDefault());
   button.addEventListener("keydown",event=>{
     if(event.repeat||![" ","Enter"].includes(event.key))return;
-    beginTransportHold(speed,event);
+    beginTransportHold(direction,event);
   });
   button.addEventListener("keyup",event=>{
     if([" ","Enter"].includes(event.key))endTransportHold(event);
