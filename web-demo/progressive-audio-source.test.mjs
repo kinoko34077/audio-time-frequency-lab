@@ -18,6 +18,7 @@ function mockMedia({supported=true,channels=2,frames=8192,rate=48000,
     }
     async getFirstTimestamp(){return firstTimestamp;}
     async getDurationFromMetadata(){return frames/rate;}
+    async computeDuration(){return frames/rate;}
     dispose(){this.disposed=true;disposed=true;}
   }
   class BlobSource{constructor(file){this.file=file;}}
@@ -143,4 +144,35 @@ test('closes AudioSamples beyond the point where a PCM range is filled',()=>{
     sourceStartTime:0,sampleRate:48_000,startFrame:0,
     channels:[new Float32Array(512)]});
   assert.equal(closeCount,2);
+});
+
+test('positive short sources keep the exact original frame count and PCM',async()=>{
+  for(const frames of [1,2,64,4095,4096]){
+    const harness=mockMedia({frames});
+    const source=await createProgressiveAudioSource({name:'short.wav'},
+      {media:harness.media});
+    try{
+      assert.equal(source.sourceFrames,frames);
+      assert.equal(source.duration,frames/48000);
+      assert.equal(source.stats().residentFrames,0);
+      const range=await source.read(0,frames,{priority:'playback'});
+      assert.equal(range.startFrame,0);
+      assert.equal(range.channels.length,2);
+      assert.equal(range.channels[0].length,frames);
+      for(let i=0;i<frames;i++){
+        assert.equal(range.channels[0][i],Math.fround(i/frames));
+        assert.equal(range.channels[1][i],Math.fround(i/frames+2));
+      }
+      assert.equal(source.stats().residentFrames,frames);
+      await assert.rejects(source.read(0,frames+1),/frame range/);
+    }finally{source.dispose();}
+    assert.equal(harness.isDisposed(),true);
+  }
+});
+
+test('empty source is still rejected and disposed',async()=>{
+  const harness=mockMedia({frames:0});
+  await assert.rejects(createProgressiveAudioSource({name:'empty.wav'},
+    {media:harness.media}),/音声の長さ・チャンネル情報/);
+  assert.equal(harness.isDisposed(),true);
 });
