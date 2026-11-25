@@ -290,7 +290,7 @@ test("real recorded waveform UX across mobile, Android-size, tablet and desktop 
           const group=input.closest(".inline-number");
           const r=rail.getBoundingClientRect(),i=input.getBoundingClientRect();
           const g=group.getBoundingClientRect(),u=group.querySelector(".player-tune-unit").getBoundingClientRect();
-          const row=rail.parentElement.getBoundingClientRect();
+          const row=rail.closest(".player-tune-control").getBoundingClientRect();
           const x=r.right-2,y=r.top+r.height/2,hit=document.elementFromPoint(x,y);
           return {kind,left:r.left,right:r.right,width:r.width,inputLeft:i.left,
             inputRight:i.right,groupLeft:g.left,groupRight:g.right,unitLeft:u.left,
