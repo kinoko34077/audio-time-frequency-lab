@@ -12,7 +12,8 @@ const wrapPhase=x=>x-TAU*Math.round(x/TAU);
 const finite=x=>typeof x==="number"&&Number.isFinite(x);
 export function createSpectralTimePitch({
   sourceSampleRate,outputSampleRate,channelCount=1,
-  fftFrames=2048,hopFrames=256,pitchSemitones=0,phaseLock=false
+  fftFrames=2048,hopFrames=256,pitchSemitones=0,phaseLock=false,
+  mapAnalysisCenter=null
 }={}){
   if(!finite(sourceSampleRate)||sourceSampleRate<=0||
     !finite(outputSampleRate)||outputSampleRate<=0||
@@ -20,7 +21,8 @@ export function createSpectralTimePitch({
     ![1024,2048,4096,8192].includes(fftFrames)||
     !Number.isInteger(hopFrames)||hopFrames<1||
     fftFrames%hopFrames!==0||hopFrames>fftFrames/4||
-    typeof phaseLock!=="boolean")
+    typeof phaseLock!=="boolean"||
+    mapAnalysisCenter!==null&&typeof mapAnalysisCenter!=="function")
     throw RangeError("invalid spectral source/time configuration");
   const N=fftFrames,H=hopFrames,half=N/2,srcRatio=sourceSampleRate/outputSampleRate;
   const win=new Float64Array(N);
@@ -240,7 +242,16 @@ export function createSpectralTimePitch({
         throw RangeError("invalid spectral PCM render");
       const missing={first:null,total:0};
       const base=state.sourceFrame,sourceStep=state.speed*srcRatio;
-      const centerAt=position=>loopSourcePosition(position,state);
+      // Optional coordinate-only mapping after the canonical transport wrap.
+      // The PCM read and frequency probe remain in the original source domain.
+      // In particular a reflected transport does not reflect the analysis window.
+      const centerAt=position=>{
+        const p=loopSourcePosition(position,state);
+        if(mapAnalysisCenter===null)return p;
+        const center=mapAnalysisCenter(p);
+        if(!finite(center))throw RangeError("invalid mapped analysis center");
+        return center;
+      };
       for(let i=0;i<output[0].length;i++){
         const t=outputFrames+i;
         while(nextStart<=t){
