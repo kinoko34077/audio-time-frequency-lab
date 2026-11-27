@@ -1,0 +1,3 @@
+# スペクトル分析中心写像 (#149)
+既存createSpectralTimePitchの任意引数mapAnalysisCenter（関数またはnull）。既定nullでは従来のloopSourcePositionをそのまま使用する。写像はcanonical transportで循環させた仮想座標を元PCMの連続座標へ変換する。非有限の戻り値は拒否する。read(ch,index)とsourceFramesは元PCMの契約のまま。局所分析窓・周波数推定probe・carrier phaseは元の文脈/出力時刻に属し、写像しない。
+往復の利用者は#147のcreateReflectedPCMSourceのsourceFramesを既存clockに、toSourceFrameをmapAnalysisCenterへ渡す。仮想reader.readはこの方式では使わない。1サンプル往復は元PCM中心固定と等価。通常の音声再生UI/Workletへの展開はこの受入に含めない。

@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {performance} from "node:perf_hooks";
 import {createSpectralTimePitch} from "./source-spectral.mjs";
+import {createSourceTimeline} from "./source-timeline.mjs";
+import {createReflectedPCMSource} from "./reflected-pcm-source.mjs";
 import {createSourcePCMRenderer} from "./source-pcm-renderer.mjs";
 import {createAmTimePitch} from "./source-am.mjs";
 
@@ -516,4 +518,44 @@ test("AM 0x source RMS does not alias a 3 kHz 16-sample waveform period",()=>{
     "equal source energy must not produce phase-dependent AM gain"+
     JSON.stringify(observed));
   console.log("AM_3KHZ_FREEZE_PHASE_RMS "+JSON.stringify(observed));
+});
+
+// A reflected *center*, not a reflected PCM analysis window.
+test("mapped spectral center retains original context for one-sample and signed reflected intervals",()=>{
+  const sr=48000,n=16000,center=8000;
+  const l=Float32Array.from({length:n},(_,i)=>.2*Math.sin(2*Math.PI*440*i/sr));
+  const channels=[l,l.map(v=>-v)];
+  function run({a,b,start=0,speed=0,mapped=true}){
+    const reflected=createReflectedPCMSource({channels,startFrame:a,endFrame:b});
+    const clock=createSourceTimeline({sourceFrames:mapped?reflected.sourceFrames:n,
+      sourceSampleRate:sr,startFrame:mapped?start:a,speed,loopEnabled:mapped});
+    const centers=[],reads=[];
+    const synth=createSpectralTimePitch({sourceSampleRate:sr,outputSampleRate:sr,channelCount:2,phaseLock:true,
+      mapAnalysisCenter:mapped?p=>{const x=reflected.toSourceFrame(p);centers.push(x);return x;}:null});
+    const output=[new Float32Array(8192),new Float32Array(8192)];
+    let lo=Infinity,hi=-Infinity;
+    const read=(ch,i)=>{lo=Math.min(lo,i);hi=Math.max(hi,i);return channels[ch][i];};
+    for(let p=0;p<8192;p+=128){
+      const result=synth.render(output.map(c=>c.subarray(p,p+128)),clock.state,read,n);
+      assert.equal(result.missingFrames,0);clock.advance(128);
+    }
+    return {output,centers,lo,hi};
+  }
+  const hold=run({a:center,b:center+1,speed:0,mapped:false});
+  const one=run({a:center,b:center+1,speed:8});
+  assert.deepEqual(one.output,hold.output);
+  assert.ok(one.lo<center-500&&one.hi>center+500);
+  for(const speed of [-1,1,.5]){
+    const a=center-200,b=center+201,x=run({a,b,speed,start:100});
+    assert.ok(x.centers.every(v=>v>=a&&v<=b-1));
+    assert.ok(x.centers.some((v,i)=>i&&v<x.centers[i-1])&&x.centers.some((v,i)=>i&&v>x.centers[i-1]));
+    assert.ok(x.lo<a&&x.hi>b);
+    const left=x.output[0],right=x.output[1];
+    assert.ok(rms(left.subarray(2048))>.04);
+    assert.ok(binEnergy(left,440)>3*Math.max(binEnergy(left,220),binEnergy(left,880)));
+    assert.ok(left.every((v,i)=>Math.abs(v+right[i])<1e-5));
+  }
+  assert.throws(()=>createSpectralTimePitch({sourceSampleRate:sr,outputSampleRate:sr,mapAnalysisCenter:1}),/configuration/);
+  const bad=createSpectralTimePitch({sourceSampleRate:sr,outputSampleRate:sr,mapAnalysisCenter:()=>NaN});
+  assert.throws(()=>bad.render([new Float32Array(128)],{sourceFrame:0,speed:0},()=>0,n),/mapped analysis center/);
 });
